@@ -104,3 +104,37 @@ def test_config_manager_encryption():
         assert store.is_unlocked
         assert manager.get("SUPABASE_KEY") == "super_secret_supabase_key"
 
+
+def test_sentinel_in_store_does_not_shadow_real_env_value():
+    """Regression: a leaked 'encrypted_in_secret_store' sentinel in the store must
+    not mask the real value resolved from .env (the bug behind 'Database not
+    configured' even though the store unlocked)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env_file = Path(tmpdir) / ".env"
+        store_file = Path(tmpdir) / "secrets.enc"
+        env_file.write_text(
+            "SUPABASE_URL=https://real.example.co\nSUPABASE_KEY=real_key_123\n",
+            encoding="utf-8",
+        )
+
+        manager = ConfigManager(env_path=env_file, store_path=store_file)
+        store = manager._store
+        store.lock()
+        try:
+            Path(store._path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        store._secrets = None
+        store._master_key = None
+        store._envelope = None
+        store.initialize(b"A" * 32)
+
+        # Poison the store with the sentinel, as the original setup bug did.
+        store.set("SUPABASE_URL", "encrypted_in_secret_store")
+        store.set("SUPABASE_KEY", "encrypted_in_secret_store")
+
+        # Re-run load() so the overlay logic applies, then resolve.
+        manager.load()
+        assert manager.get("SUPABASE_URL") == "https://real.example.co"
+        assert manager.get("SUPABASE_KEY") == "real_key_123"
+

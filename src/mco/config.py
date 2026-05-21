@@ -68,7 +68,10 @@ class ConfigManager:
             if self._store.is_unlocked:
                 for key in self._store.list_keys():
                     secret_val = self._store.get(key)
-                    if secret_val:
+                    # The "encrypted_in_secret_store" sentinel belongs only in .env as a
+                    # pointer; if it ever leaked into the store, it must NOT shadow the
+                    # real value resolved from .env/system env.
+                    if secret_val and secret_val != "encrypted_in_secret_store":
                         config[key] = secret_val
 
         self._cached_config = config
@@ -78,7 +81,8 @@ class ConfigManager:
         # Check if the secret store is unlocked and has the key
         if key in SENSITIVE_KEYS and self._store.is_unlocked:
             secret_val = self._store.get(key)
-            if secret_val is not None:
+            # Skip the sentinel so a poisoned store can't mask the real .env value.
+            if secret_val is not None and secret_val != "encrypted_in_secret_store":
                 return secret_val
 
         return self._cached_config.get(key, default)

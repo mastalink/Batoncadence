@@ -160,9 +160,12 @@ def setup_wizard():
         # Securely migrate values to secret store
         store_unlocked = store.is_unlocked
         if store_unlocked:
-            # Set each populated sensitive value
+            # Encrypt the freshly-collected values directly. Do NOT read these back via
+            # config.get(key): for sensitive keys it resolves store-first and would echo
+            # a stale/sentinel value instead of what the user just entered.
+            collected = {"SUPABASE_URL": supabase_url, "SUPABASE_KEY": supabase_key}
             for key in SENSITIVE_KEYS:
-                val = config.get(key)
+                val = collected.get(key) or config.get(key)
                 if val and val != "encrypted_in_secret_store":
                     config.set(key, val, encrypt=True)
 
