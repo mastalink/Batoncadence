@@ -106,8 +106,31 @@ def setup_wizard():
                 iterations = env_dict.get("iterations", 600000)
                 cur_key = store.derive_key(pw, salt, iterations)
                 if not store.unlock(cur_key):
-                    console.print("[red][ERROR] Incorrect password. Aborting encryption setup.[/red]")
-                    return
+                    console.print("[yellow][WARNING] Incorrect password.[/yellow]")
+                    overwrite = Confirm.ask("Would you like to delete the existing secret store and start fresh?", default=False)
+                    if overwrite:
+                        try:
+                            Path(store._path).unlink(missing_ok=True)
+                            store._secrets = None
+                            store._master_key = None
+                            
+                            # Fresh Master Password configuration
+                            use_pw = Confirm.ask("Would you like to set a master password to protect your secrets?", default=True)
+                            master_key = None
+                            if use_pw:
+                                master_pw = Prompt.ask("Enter a strong master password", password=True)
+                                salt = os.urandom(32)
+                                master_key = store.derive_key(master_pw, salt)
+                            else:
+                                master_key = secrets.token_bytes(32)
+                                console.print("✓ Generated a secure random master key.")
+                            store.initialize(master_key)
+                        except Exception as e:
+                            console.print(f"[red][ERROR] Failed to reset secret store: {e}[/red]")
+                            return
+                    else:
+                        console.print("[red][ERROR] Incorrect password. Aborting encryption setup.[/red]")
+                        return
         else:
             # Fresh Master Password configuration
             use_pw = Confirm.ask("Would you like to set a master password to protect your secrets?", default=True)
