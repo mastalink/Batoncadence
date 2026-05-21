@@ -82,22 +82,8 @@ def setup_wizard():
         config.set("SUPABASE_URL", supabase_url)
         config.set("SUPABASE_KEY", supabase_key)
 
-    # 4. LLM API Keys Configuration
-    console.print("\n[bold yellow]Step 3: Configure LLM Provider Keys (Optional)[/bold yellow]")
-    gemini_key = Prompt.ask("Google Gemini API Key", default=config.get("GEMINI_API_KEY") or "", show_default=False)
-    groq_key = Prompt.ask("Groq API Key", default=config.get("GROQ_API_KEY") or "", show_default=False)
-    perplexity_key = Prompt.ask("Perplexity API Key", default=config.get("PERPLEXITY_API_KEY") or "", show_default=False)
-    openai_key = Prompt.ask("OpenAI API Key", default=config.get("OPENAI_API_KEY") or "", show_default=False)
-    xai_key = Prompt.ask("xAI API Key", default=config.get("XAI_API_KEY") or "", show_default=False)
-
-    if gemini_key: config.set("GEMINI_API_KEY", gemini_key)
-    if groq_key: config.set("GROQ_API_KEY", groq_key)
-    if perplexity_key: config.set("PERPLEXITY_API_KEY", perplexity_key)
-    if openai_key: config.set("OPENAI_API_KEY", openai_key)
-    if xai_key: config.set("XAI_API_KEY", xai_key)
-
-    # 5. Encryption Prompt (AES-256-GCM Secure Store)
-    console.print("\n[bold yellow]Step 4: Configuration Encryption (AES-256-GCM)[/bold yellow]")
+    # 4. Encryption Prompt (AES-256-GCM Secure Store)
+    console.print("\n[bold yellow]Step 3: Configuration Encryption (AES-256-GCM)[/bold yellow]")
     encrypt_creds = Confirm.ask("Do you want to encrypt sensitive credentials and API keys in the MCO Secret Store?", default=True)
 
     if encrypt_creds:

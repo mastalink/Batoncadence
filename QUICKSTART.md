@@ -33,7 +33,7 @@ mco setup
 ```
 
 **Quick Selections:**
-- Choose **[1] Local-Only** for testing without cloud dependencies, or **[3] Hybrid** to configure Supabase and LLM APIs.
+- Choose **[1] Local-Only** for testing without cloud dependencies, or **[3] Hybrid** to configure the Supabase database.
 - Opt-in to **Encrypt sensitive credentials** and **Windows Credential Manager** to enable passwordless background launches.
 
 Verify configuration health:

@@ -45,8 +45,7 @@ mco setup
 ```
 This wizard will prompt you to:
 - Choose your **Environment Profile** (Local-Only, Cloud-Heavy, Hybrid).
-- Set up **Supabase database** connection strings to persist the orchestration `agent_jobs` table.
-- Supply **LLM Provider API keys** (Gemini, Groq, Perplexity, OpenAI, xAI, Ollama, etc.).
+- Set up **Supabase database** connection strings to persist the orchestration `agent_jobs` table (required for Cloud-Heavy and Hybrid profiles).
 - Protect credentials using **AES-256-GCM encryption** (with the option to automatically store the master unlock key in Windows Credential Manager for passwordless reboots).
 
 ### 2. Check System Diagnostics

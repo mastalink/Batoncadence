@@ -30,11 +30,6 @@ class EnvironmentProfile:
 SENSITIVE_KEYS = {
     "SUPABASE_KEY",
     "SUPABASE_URL",
-    "GEMINI_API_KEY",
-    "GROQ_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "OPENAI_API_KEY",
-    "XAI_API_KEY",
 }
 
 
