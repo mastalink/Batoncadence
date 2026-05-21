@@ -48,15 +48,17 @@ class ConfigManager:
 
     def load(self) -> None:
         """Load configuration from environment, .env file, and secret store overlay."""
-        # 1. Start with system env vars
-        config = dict(os.environ)
-
-        # 2. Overlay values from .env if present
+        # 1. Start with values from .env if present
+        config = {}
         if self._env_path.is_file():
             dotenv_vals = dotenv_values(self._env_path)
             for k, v in dotenv_vals.items():
                 if v is not None:
                     config[k] = v
+
+        # 2. Overlay system env vars (system environment takes precedence)
+        for k, v in os.environ.items():
+            config[k] = v
 
         # 3. Attempt to auto-unlock secret store and overlay secrets
         if self._store.is_initialized():

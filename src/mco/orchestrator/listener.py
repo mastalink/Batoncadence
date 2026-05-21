@@ -41,25 +41,26 @@ class AgentListener:
         self.config_path = config_path or "agent_config.json"
         self.instance_id = "default_agent"
         self.role = "codex"
-        self.gateway_ws_url = "ws://127.0.0.1:18789"
+        self.gateway_ws_url = "ws://127.0.0.1:18789/ws/broadcast"
         self.poll_interval = 30.0  # seconds
 
         self._load_config()
 
-        # Initialize Supabase client via MCO config
-        config = get_config()
-        supabase_url = config.get("SUPABASE_URL") or os.environ.get("SUPABASE_URL")
-        supabase_key = config.get("SUPABASE_KEY") or os.environ.get("SUPABASE_KEY")
+        # Derive Gateway HTTP URL from WebSocket URL
+        ws_url = self.gateway_ws_url
+        if ws_url.startswith("wss://"):
+            http_url = ws_url.replace("wss://", "https://")
+        elif ws_url.startswith("ws://"):
+            http_url = ws_url.replace("ws://", "http://")
+        else:
+            http_url = ws_url
 
-        if not supabase_url or not supabase_key:
-            raise ValueError(
-                "Supabase URL and Key must be configured (via setup wizard, environment variables "
-                "SUPABASE_URL/SUPABASE_KEY, or local .env)."
-            )
+        if "/ws/broadcast" in http_url:
+            http_url = http_url.replace("/ws/broadcast", "")
+        self.gateway_http_url = http_url
+        
+        logger.info(f"Agent Listener initialized: {self.instance_id} ({self.role}) using gateway HTTP: {self.gateway_http_url}")
 
-        from supabase import create_client
-        self.db_client = create_client(supabase_url, supabase_key)
-        logger.info(f"Agent Listener initialized: {self.instance_id} ({self.role})")
 
     def _load_config(self) -> None:
         """Load configuration from JSON file or environment variables."""
@@ -111,6 +112,32 @@ class AgentListener:
                 async with websockets.connect(self.gateway_ws_url) as ws:
                     reconnect_delay = 1.0
                     logger.info("Connected to Gateway WebSocket.")
+
+                    # Load MCO_AGENT_TOKEN from config or environment
+                    token = get_config().get("MCO_AGENT_TOKEN") or os.environ.get("MCO_AGENT_TOKEN") or ""
+
+                    # Send authentication payload first
+                    auth_msg = {
+                        "type": "authenticate",
+                        "payload": {
+                            "instance_id": self.instance_id,
+                            "role": self.role,
+                            "token": token
+                        }
+                    }
+                    await ws.send(json.dumps(auth_msg))
+
+                    # Verify authentication response
+                    auth_res_str = await ws.recv()
+                    auth_res = json.loads(auth_res_str)
+                    if auth_res.get("type") == "authenticated":
+                        success = (auth_res.get("payload") or {}).get("success")
+                        if not success:
+                            err = (auth_res.get("payload") or {}).get("error", "Unknown error")
+                            logger.error(f"WebSocket authentication failed: {err}")
+                            await ws.close()
+                            raise websockets.ConnectionClosed(None, None)
+                        logger.info("WebSocket authentication successful.")
 
                     # Configure session on connection
                     setup_msg = {
@@ -166,24 +193,24 @@ class AgentListener:
             await asyncio.sleep(self.poll_interval)
 
     async def poll_and_execute(self) -> None:
-        """Poll the database for pending jobs and process them."""
-        logger.debug("Polling Job Board for pending tasks...")
+        """Poll the Gateway for pending jobs and process them."""
+        logger.debug("Polling Gateway for pending tasks...")
         
-        # Query for pending tasks targeting our role or this specific instance
-        res = self.db_client.table("agent_jobs")\
-            .select("*")\
-            .eq("status", "pending")\
-            .eq("target_agent_role", self.role)\
-            .execute()
+        import httpx
+        url = f"{self.gateway_http_url}/api/jobs/pending"
+        params = {"role": self.role, "instance_id": self.instance_id}
         
-        jobs = res.data or []
-        
-        for job in jobs:
-            target_id = job.get("target_agent_id")
-            if target_id and target_id != self.instance_id:
-                continue
-            
-            await self._process_single_job(job)
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(url, params=params, timeout=10.0)
+                if res.status_code == 200:
+                    jobs = res.json()
+                    for job in jobs:
+                        await self._process_single_job(job)
+                else:
+                    logger.error(f"Failed to poll pending jobs: HTTP {res.status_code} - {res.text}")
+        except Exception as e:
+            logger.error(f"Error polling pending jobs: {e}")
 
     async def _process_single_job(self, job: Dict[str, Any]) -> None:
         """Atomically leases and executes a single job."""
@@ -194,59 +221,48 @@ class AgentListener:
 
         logger.info(f"Attempting to lease job: {title} ({job_id})")
 
+        import httpx
         try:
-            res = self.db_client.rpc("lease_task", {
-                "p_agent_instance_id": self.instance_id,
-                "p_task_id": job_id
-            }).execute()
+            async with httpx.AsyncClient() as client:
+                # 1. Atomic lease request
+                lease_url = f"{self.gateway_http_url}/api/jobs/lease"
+                lease_payload = {
+                    "task_id": job_id,
+                    "agent_instance_id": self.instance_id
+                }
+                lease_res = await client.post(lease_url, json=lease_payload, timeout=10.0)
+                if lease_res.status_code != 200:
+                    logger.error(f"Lease request failed: HTTP {lease_res.status_code}")
+                    return
 
-            leased = res.data if hasattr(res, "data") else False
-            if not leased:
-                logger.debug(f"Job {job_id} already leased or not assignable.")
-                return
+                leased = lease_res.json().get("success", False)
+                if not leased:
+                    logger.debug(f"Job {job_id} already leased or not assignable.")
+                    return
 
-            logger.info(f"Successfully leased job: {title}. Starting execution.")
-            
-            # Update status to in_progress
-            self.db_client.table("agent_jobs").update({
-                "status": "in_progress",
-                "started_at": datetime.now(timezone.utc).isoformat()
-            }).eq("id", job_id).execute()
+                logger.info(f"Successfully leased job: {title}. Starting execution.")
 
-            # Execute the job
-            output, error = await self._execute_task(job)
+                # 2. Update status to in_progress
+                update_url = f"{self.gateway_http_url}/api/jobs/{job_id}"
+                await client.put(update_url, json={
+                    "status": "in_progress"
+                }, timeout=10.0)
 
-            if error:
-                logger.error(f"Job failed: {title}. Error: {error}")
-                self.db_client.table("agent_jobs").update({
-                    "status": "failed",
-                    "error_message": error,
-                    "completed_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", job_id).execute()
-            else:
-                logger.info(f"Job completed successfully: {title}")
-                self.db_client.table("agent_jobs").update({
-                    "status": "completed",
-                    "output_payload": {"result": output},
-                    "completed_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", job_id).execute()
+                # Execute the job
+                output, error = await self._execute_task(job)
 
-                # Trigger database unlocking logic via Gateway server
-                try:
-                    async with websockets.connect(self.gateway_ws_url) as ws:
-                        notify_msg = {
-                            "id": f"notify-{job_id}",
-                            "type": "job_update",
-                            "payload": {
-                                "task_id": job_id,
-                                "status": "completed",
-                                "output_payload": {"result": output}
-                            }
-                        }
-                        await ws.send(json.dumps(notify_msg))
-                except Exception as ws_err:
-                    logger.debug(f"Could not send socket notify: {ws_err}. Sync will happen on DB refresh.")
-
+                if error:
+                    logger.error(f"Job failed: {title}. Error: {error}")
+                    await client.put(update_url, json={
+                        "status": "failed",
+                        "error_message": error
+                    }, timeout=10.0)
+                else:
+                    logger.info(f"Job completed successfully: {title}")
+                    await client.put(update_url, json={
+                        "status": "completed",
+                        "output_payload": {"result": output}
+                    }, timeout=10.0)
         except Exception as e:
             logger.error(f"Error processing job {job_id}: {e}")
 

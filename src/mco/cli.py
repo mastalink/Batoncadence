@@ -11,8 +11,14 @@ import os
 import sys
 import asyncio
 import secrets
+import hashlib
+import json
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger("mco.cli")
+
 
 import typer
 import uvicorn
@@ -24,7 +30,7 @@ from rich.prompt import Prompt, Confirm
 
 from mco.config import get_config, EnvironmentProfile, SENSITIVE_KEYS
 from mco.security import get_secret_store, WindowsCredentialProvider, PasswordKeyProvider
-from mco.orchestrator.routes import router as jobs_router, register_broadcast_callback
+from mco.orchestrator.routes import router as jobs_router, agents_router, register_broadcast_callback
 from mco.orchestrator.listener import AgentListener
 
 # Initialize typer app and console
@@ -68,7 +74,7 @@ def setup_wizard():
     }
     selected_profile = profile_map[profile_choice]
     config.set("MCO_PROFILE", selected_profile)
-    console.print(f"✓ Profile configured as [bold green]{selected_profile}[/bold green].")
+    console.print(f"[OK] Profile configured as [bold green]{selected_profile}[/bold green].")
 
     # 3. Suppress or prompt Supabase if cloud is included
     supabase_url = ""
@@ -100,7 +106,7 @@ def setup_wizard():
                 iterations = env_dict.get("iterations", 600000)
                 cur_key = store.derive_key(pw, salt, iterations)
                 if not store.unlock(cur_key):
-                    console.print("[red]❌ Incorrect password. Aborting encryption setup.[/red]")
+                    console.print("[red][ERROR] Incorrect password. Aborting encryption setup.[/red]")
                     return
         else:
             # Fresh Master Password configuration
@@ -140,17 +146,17 @@ def setup_wizard():
                 if save_to_cred_mgr:
                     try:
                         WindowsCredentialProvider.store_key(store._master_key)
-                        console.print("✓ Successfully stored master key in Windows Credential Manager.")
+                        console.print("[OK] Successfully stored master key in Windows Credential Manager.")
                     except Exception as e:
-                        console.print(f"[red]❌ Failed to save to Windows Credential Manager: {e}[/red]")
+                        console.print(f"[red][ERROR] Failed to save to Windows Credential Manager: {e}[/red]")
             
-            console.print("✓ Secrets successfully migrated and encrypted.")
+            console.print("[OK] Secrets successfully migrated and encrypted.")
         else:
-            console.print("[red]❌ Secret store initialized but locked. Secrets migration skipped.[/red]")
+            console.print("[red][ERROR] Secret store initialized but locked. Secrets migration skipped.[/red]")
     else:
         console.print("[yellow]Plaintext environment configuration chosen. Secrets are saved in standard .env[/yellow]")
 
-    console.print("\n[bold green]✓ MCOrchestr8 Onboarding & Installation Complete![/bold green]")
+    console.print("\n[bold green][OK] MCOrchestr8 Onboarding & Installation Complete![/bold green]")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -191,30 +197,16 @@ async def server_broadcast_callback(event: str, job: dict) -> None:
     }
     await ws_manager.broadcast(payload)
 
-
-@app.command("serve")
-def serve(
-    host: str = typer.Option("127.0.0.1", help="The host to bind to."),
-    port: int = typer.Option(18789, help="The port to bind to.")
-):
-    """Start the MCOrchestr8 FastAPI WebSocket/REST API Server."""
-    console.print(Panel.fit(
-        f"[bold green]Starting MCOrchestr8 Server[/bold green]\n"
-        f"Host: http://{host}:{port}\n"
-        f"WebSocket: ws://{host}:{port}/ws/broadcast",
-        border_style="green"
-    ))
-
-    # Trigger dynamic decrypt/load
-    config = get_config()
-    
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application server."""
     app_server = FastAPI(
         title="MCOrchestr8 Gateway Server",
         description="FastAPI WebSocket and REST Hub for Agent Job Coordination."
     )
 
-    # Mount REST jobs routing
+    # Mount REST routing
     app_server.include_router(jobs_router)
+    app_server.include_router(agents_router)
 
     # Register broadcast callback
     register_broadcast_callback(server_broadcast_callback)
@@ -222,7 +214,89 @@ def serve(
     # WebSocket Broadcast route
     @app_server.websocket("/ws/broadcast")
     async def websocket_endpoint(websocket: WebSocket):
-        await ws_manager.connect(websocket)
+        await websocket.accept()
+        
+        # Wait up to 5 seconds for authentication frame
+        authenticated = False
+        authenticated_instance_id = None
+        
+        from mco.orchestrator.routes import get_db_client
+        db_client = get_db_client()
+        
+        if not db_client:
+            # If DB is not configured, bypass authentication with a warning (local-only compatibility)
+            logger.warning("Database not configured. Bypassing WebSocket authentication for incoming connection.")
+            authenticated = True
+            ws_manager.active_connections.append(websocket)
+        else:
+            try:
+                # 1. Read first message (should be authenticate)
+                auth_data_str = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+                auth_msg = json.loads(auth_data_str)
+                msg_type = auth_msg.get("type")
+                payload = auth_msg.get("payload") or {}
+                
+                if msg_type == "authenticate":
+                    instance_id = payload.get("instance_id")
+                    role = payload.get("role")
+                    token = payload.get("token")
+                    
+                    if instance_id and role and token:
+                        # Calculate SHA-256 hash of token
+                        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+                        
+                        # Verify in DB
+                        res = db_client.table("agent_registry")\
+                            .select("*")\
+                            .eq("instance_id", instance_id)\
+                            .eq("auth_token_hash", token_hash)\
+                            .execute()
+                        
+                        if res.data:
+                            authenticated = True
+                            authenticated_instance_id = instance_id
+                            
+                            # Update status to online in database
+                            from datetime import datetime, timezone
+                            db_client.table("agent_registry").update({
+                                "status": "online",
+                                "last_seen_at": datetime.now(timezone.utc).isoformat()
+                            }).eq("instance_id", instance_id).execute()
+                            
+                            # Register in ws_manager for broadcast receiving
+                            ws_manager.active_connections.append(websocket)
+                            
+                            # Send success frame
+                            await websocket.send_json({
+                                "type": "authenticated",
+                                "payload": {"success": True}
+                            })
+                            logger.info(f"Agent '{instance_id}' ({role}) successfully authenticated.")
+                        
+                if not authenticated:
+                    await websocket.send_json({
+                        "type": "authenticated",
+                        "payload": {"success": False, "error": "Authentication failed"}
+                    })
+                    await websocket.close()
+                    return
+                    
+            except asyncio.TimeoutError:
+                logger.warning("WebSocket authentication timeout (no authentication frame received in 5s).")
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                return
+            except Exception as e:
+                logger.error(f"WebSocket authentication error: {e}")
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                return
+
+        # 2. Main message loop for authenticated socket
         try:
             while True:
                 data = await websocket.receive_text()
@@ -247,10 +321,43 @@ def serve(
                 except Exception:
                     pass
         except WebSocketDisconnect:
-            ws_manager.disconnect(websocket)
+            if websocket in ws_manager.active_connections:
+                ws_manager.disconnect(websocket)
+            
+            # Set agent to offline on disconnect
+            if authenticated_instance_id and db_client:
+                try:
+                    db_client.table("agent_registry").update({
+                        "status": "offline"
+                    }).eq("instance_id", authenticated_instance_id).execute()
+                    logger.info(f"Agent '{authenticated_instance_id}' disconnected, set to offline.")
+                except Exception as db_err:
+                    logger.warning(f"Failed to set agent offline: {db_err}")
+
+    return app_server
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", help="The host to bind to."),
+    port: int = typer.Option(18789, help="The port to bind to.")
+):
+    """Start the MCOrchestr8 FastAPI WebSocket/REST API Server."""
+    console.print(Panel.fit(
+        f"[bold green]Starting MCOrchestr8 Server[/bold green]\n"
+        f"Host: http://{host}:{port}\n"
+        f"WebSocket: ws://{host}:{port}/ws/broadcast",
+        border_style="green"
+    ))
+
+    # Trigger dynamic decrypt/load
+    config = get_config()
+    
+    app_server = create_app()
 
     # Launch Uvicorn
     uvicorn.run(app_server, host=host, port=port)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,7 +387,7 @@ def listen(
     except KeyboardInterrupt:
         console.print("[yellow]Background listener shut down by user.[/yellow]")
     except Exception as e:
-        console.print(f"[red]❌ Critical error in listener daemon: {e}[/red]")
+        console.print(f"[red][ERROR] Critical error in listener daemon: {e}[/red]")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -319,6 +426,87 @@ def status():
         table.add_row(k, v)
         
     console.print(table)
+
+
+@app.command("register")
+def register_agent(
+    name: str = typer.Option(..., "--name", help="Unique name (instance ID) of the agent."),
+    role: str = typer.Option(..., "--role", help="Target role of the agent (e.g. antigravity, codex).")
+):
+    """Register a new client agent, generating a secure access token."""
+    console.print(f"[bold cyan]Registering new MCO agent...[/bold cyan]")
+    
+    from mco.orchestrator.routes import get_db_client
+    db_client = get_db_client()
+    if not db_client:
+        console.print("[red][ERROR] Database not configured. Please run 'mco setup' first.[/red]")
+        raise typer.Exit(code=1)
+        
+    token = "mco_tok_" + secrets.token_hex(24)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    
+    try:
+        data = {
+            "instance_id": name,
+            "role": role,
+            "status": "offline",
+            "auth_token_hash": token_hash
+        }
+        res = db_client.table("agent_registry").upsert(data).execute()
+        if res.data:
+            console.print(Panel.fit(
+                f"[bold green][OK] Agent '{name}' registered successfully![/bold green]\n\n"
+                f"Role: [cyan]{role}[/cyan]\n"
+                f"Status: [yellow]offline[/yellow]\n\n"
+                f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
+                f"[bold white]{token}[/bold white]",
+                border_style="green"
+            ))
+        else:
+            console.print("[red][ERROR] Database failed to return data on upsert.[/red]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to register agent in database: {e}[/red]")
+
+
+@app.command("agents")
+def list_agents():
+    """List all registered agents and their current online presence status."""
+    console.print("[bold cyan]=== MCOrchestr8 Registered Agents ===[/bold cyan]\n")
+    
+    from mco.orchestrator.routes import get_db_client
+    db_client = get_db_client()
+    if not db_client:
+        console.print("[red][ERROR] Database not configured. Please run 'mco setup' first.[/red]")
+        raise typer.Exit(code=1)
+        
+    try:
+        res = db_client.table("agent_registry").select("*").order("instance_id").execute()
+        agents = res.data or []
+        
+        if not agents:
+            console.print("[yellow]No agents registered. Use 'mco register' to onboard an agent.[/yellow]")
+            return
+            
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Agent ID (Instance ID)", style="cyan")
+        table.add_column("Role", style="green")
+        table.add_column("Status", style="bold")
+        table.add_column("Last Seen At", style="white")
+        
+        for agent in agents:
+            status = agent.get("status", "offline")
+            status_style = "[green]online[/green]" if status == "online" else "[red]offline[/red]"
+            
+            table.add_row(
+                agent.get("instance_id", ""),
+                agent.get("role", ""),
+                status_style,
+                agent.get("last_seen_at", "")
+            )
+            
+        console.print(table)
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to query agent registry: {e}[/red]")
 
 
 def main():
