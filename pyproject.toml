@@ -1,0 +1,49 @@
+[project]
+name = "mco"
+version = "0.1.0"
+description = "MCOrchestr8: Standalone Multi-Client Agent Orchestration System"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "DeepMind team", email = "antigravity@google.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "supabase>=1.0.0",
+    "httpx>=0.24.0",
+    "cryptography>=41.0.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+    "loguru>=0.7.0",
+    "python-dotenv>=1.0.0",
+    "websockets>=11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+mco = "mco.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"
