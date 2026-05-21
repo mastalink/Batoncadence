@@ -117,6 +117,7 @@ def setup_wizard():
                             # Fresh Master Password configuration
                             use_pw = Confirm.ask("Would you like to set a master password to protect your secrets?", default=True)
                             master_key = None
+                            salt = None
                             if use_pw:
                                 master_pw = Prompt.ask("Enter a strong master password", password=True)
                                 salt = os.urandom(32)
@@ -124,7 +125,7 @@ def setup_wizard():
                             else:
                                 master_key = secrets.token_bytes(32)
                                 console.print("✓ Generated a secure random master key.")
-                            store.initialize(master_key)
+                            store.initialize(master_key, salt=salt)
                         except Exception as e:
                             console.print(f"[red][ERROR] Failed to reset secret store: {e}[/red]")
                             return
@@ -135,6 +136,7 @@ def setup_wizard():
             # Fresh Master Password configuration
             use_pw = Confirm.ask("Would you like to set a master password to protect your secrets?", default=True)
             master_key = None
+            salt = None
             if use_pw:
                 master_pw = Prompt.ask("Enter a strong master password", password=True)
                 # Derive 32-byte key
@@ -146,7 +148,7 @@ def setup_wizard():
                 console.print("✓ Generated a secure random master key.")
 
             # Initialize the store
-            store.initialize(master_key)
+            store.initialize(master_key, salt=salt)
 
         # Securely migrate values to secret store
         store_unlocked = store.is_unlocked

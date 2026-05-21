@@ -174,8 +174,8 @@ class SecretStore:
         )
         return kdf.derive(password.encode("utf-8"))
 
-    def initialize(self, master_key: bytes) -> None:
-        """Create a new, empty encrypted store with the given master key.
+    def initialize(self, master_key: bytes, salt: Optional[bytes] = None) -> None:
+        """Create a new, empty encrypted store with the given master key and optional stable salt.
 
         Raises FileExistsError if the store already exists.
         """
@@ -187,6 +187,10 @@ class SecretStore:
                 )
             self._master_key = master_key
             self._secrets = {}
+            if salt:
+                self._envelope = {
+                    "salt": base64.b64encode(salt).decode()
+                }
             self._persist()
             logger.info("Initialized new secret store at {}", self._path)
 
@@ -340,7 +344,12 @@ class SecretStore:
 
         plaintext = json.dumps(self._secrets, separators=(",", ":")).encode("utf-8")
 
-        salt = os.urandom(_SALT_LENGTH)
+        # Reuse existing salt to keep PBKDF2 derivation stable
+        if self._envelope and "salt" in self._envelope:
+            salt = base64.b64decode(self._envelope["salt"])
+        else:
+            salt = os.urandom(_SALT_LENGTH)
+            
         nonce = os.urandom(_NONCE_LENGTH)
 
         aesgcm = AESGCM(self._master_key)
