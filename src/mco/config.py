@@ -95,10 +95,10 @@ class ConfigManager:
             self._store.set(key, value)
             # Remove any plaintext entry in local .env to prevent leaks
             self._update_dotenv_file(key, "encrypted_in_secret_store")
+            self._cached_config[key] = "encrypted_in_secret_store"
         else:
             self._update_dotenv_file(key, value)
-
-        self._cached_config[key] = value
+            self._cached_config[key] = value
 
     def delete(self, key: str) -> None:
         """Delete a configuration parameter."""

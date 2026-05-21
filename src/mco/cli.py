@@ -81,8 +81,15 @@ def setup_wizard():
     supabase_key = ""
     if selected_profile in (EnvironmentProfile.CLOUD_HEAVY, EnvironmentProfile.HYBRID):
         console.print("\n[bold yellow]Step 2: Database Configuration (Supabase)[/bold yellow]")
-        supabase_url = Prompt.ask("Enter Supabase URL", default=config.get("SUPABASE_URL") or "")
-        supabase_key = Prompt.ask("Enter Supabase Key (anon/service)", default=config.get("SUPABASE_KEY") or "")
+        url_def = config.get("SUPABASE_URL") or ""
+        if url_def == "encrypted_in_secret_store":
+            url_def = ""
+        key_def = config.get("SUPABASE_KEY") or ""
+        if key_def == "encrypted_in_secret_store":
+            key_def = ""
+
+        supabase_url = Prompt.ask("Enter Supabase URL", default=url_def)
+        supabase_key = Prompt.ask("Enter Supabase Key (anon/service)", default=key_def)
         
         # Save temporary plain values; we will encrypt them below if requested
         config.set("SUPABASE_URL", supabase_url)
@@ -157,9 +164,7 @@ def setup_wizard():
             for key in SENSITIVE_KEYS:
                 val = config.get(key)
                 if val and val != "encrypted_in_secret_store":
-                    store.set(key, val)
-                    # Clear plain entry in config (.env) and mark as encrypted placeholder
-                    config.set(key, "encrypted_in_secret_store", encrypt=True)
+                    config.set(key, val, encrypt=True)
 
             # Store in Windows Credential Manager ifNT
             if os.name == "nt" and store._master_key:
