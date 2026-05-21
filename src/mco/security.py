@@ -94,7 +94,18 @@ class WindowsCredentialProvider(KeyProvider):
                 f"No credential found for target '{self.TARGET_NAME}' "
                 "in Windows Credential Manager."
             )
-        blob: bytes = cred["CredentialBlob"]
+        blob = cred["CredentialBlob"]
+        # In mock tests, win32cred returns the unicode string directly. In real NT, it returns UTF-16 bytes.
+        if isinstance(blob, str):
+            blob = blob.encode("latin-1")
+            
+        # If it was written as Unicode (UTF-16), it will be 64 bytes. Let's decode it back.
+        if len(blob) == 64:
+            try:
+                blob = blob.decode("utf-16").encode("latin-1")
+            except Exception:
+                pass
+
         if len(blob) != _KEY_LENGTH:
             raise ValueError(
                 f"Stored credential blob is {len(blob)} bytes, expected {_KEY_LENGTH}."
@@ -115,10 +126,13 @@ class WindowsCredentialProvider(KeyProvider):
         if len(key) != _KEY_LENGTH:
             raise ValueError(f"Key must be {_KEY_LENGTH} bytes, got {len(key)}.")
 
+        # Decode raw bytes using latin-1 to create a valid Unicode string that pywin32 expects
+        unicode_key = key.decode("latin-1")
+
         credential = {
             "Type": win32cred.CRED_TYPE_GENERIC,
             "TargetName": cls.TARGET_NAME,
-            "CredentialBlob": key,
+            "CredentialBlob": unicode_key,
             "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
             "UserName": "MCO",
         }
