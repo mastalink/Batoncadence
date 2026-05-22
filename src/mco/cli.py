@@ -394,6 +394,17 @@ def serve(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 2b. MCP Server (for IDE/agent GUI integration)
+# ─────────────────────────────────────────────────────────────────────────────
+@app.command("mcp")
+def mcp_serve():
+    """Run the MCO dropbox as an MCP stdio server (for Claude/Codex/Antigravity)."""
+    # stdio is the MCP transport channel: do NOT write to stdout in this command.
+    from mco.mcp_server import run
+    run()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 3. Background Listener Daemon
 # ─────────────────────────────────────────────────────────────────────────────
 @app.command("listen")

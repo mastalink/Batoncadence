@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mco": {
+      "command": "C:\\AI\\MCOrchestr8\\.venv\\Scripts\\mco.exe",
+      "args": ["mcp"],
+      "env": {
+        "MCO_GATEWAY_URL": "http://127.0.0.1:18789",
+        "MCO_AGENT_TOKEN": "mco_tok_REPLACE_WITH_ANTIGRAVITY_TOKEN",
+        "AGENT_ROLE": "antigravity",
+        "AGENT_INSTANCE_ID": "coding-beast-gemini"
+      }
+    }
+  }
+}
