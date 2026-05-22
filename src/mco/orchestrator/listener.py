@@ -58,8 +58,15 @@ class AgentListener:
         if "/ws/broadcast" in http_url:
             http_url = http_url.replace("/ws/broadcast", "")
         self.gateway_http_url = http_url
-        
+
+        # Bearer token for authenticating REST calls to the gateway (same token as WS auth).
+        self.token = get_config().get("MCO_AGENT_TOKEN") or os.environ.get("MCO_AGENT_TOKEN") or ""
+
         logger.info(f"Agent Listener initialized: {self.instance_id} ({self.role}) using gateway HTTP: {self.gateway_http_url}")
+
+    def _auth_headers(self) -> Dict[str, str]:
+        """Authorization header for gateway REST calls."""
+        return {"Authorization": f"Bearer {self.token}"} if self.token else {}
 
 
     def _load_config(self) -> None:
@@ -202,7 +209,7 @@ class AgentListener:
         
         try:
             async with httpx.AsyncClient() as client:
-                res = await client.get(url, params=params, timeout=10.0)
+                res = await client.get(url, params=params, headers=self._auth_headers(), timeout=10.0)
                 if res.status_code == 200:
                     jobs = res.json()
                     for job in jobs:
@@ -230,7 +237,7 @@ class AgentListener:
                     "task_id": job_id,
                     "agent_instance_id": self.instance_id
                 }
-                lease_res = await client.post(lease_url, json=lease_payload, timeout=10.0)
+                lease_res = await client.post(lease_url, json=lease_payload, headers=self._auth_headers(), timeout=10.0)
                 if lease_res.status_code != 200:
                     logger.error(f"Lease request failed: HTTP {lease_res.status_code}")
                     return
@@ -244,7 +251,7 @@ class AgentListener:
 
                 # 2. Update status to in_progress
                 update_url = f"{self.gateway_http_url}/api/jobs/{job_id}"
-                await client.put(update_url, json={
+                await client.put(update_url, headers=self._auth_headers(), json={
                     "status": "in_progress"
                 }, timeout=10.0)
 
@@ -253,13 +260,13 @@ class AgentListener:
 
                 if error:
                     logger.error(f"Job failed: {title}. Error: {error}")
-                    await client.put(update_url, json={
+                    await client.put(update_url, headers=self._auth_headers(), json={
                         "status": "failed",
                         "error_message": error
                     }, timeout=10.0)
                 else:
                     logger.info(f"Job completed successfully: {title}")
-                    await client.put(update_url, json={
+                    await client.put(update_url, headers=self._auth_headers(), json={
                         "status": "completed",
                         "output_payload": {"result": output}
                     }, timeout=10.0)
