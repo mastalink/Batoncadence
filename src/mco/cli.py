@@ -414,6 +414,14 @@ def listen(
     os.environ["AGENT_ROLE"] = role
     os.environ["AGENT_INSTANCE_ID"] = instance
 
+    # Wire real CLI executors so leased jobs actually run (instead of mock-completing).
+    try:
+        from mco.orchestrator.executors import register_default_executors
+        registered = register_default_executors()
+        console.print(f"[dim]Registered executors for roles: {', '.join(registered)}[/dim]")
+    except Exception as e:
+        console.print(f"[yellow][WARN] Could not register default executors: {e}[/yellow]")
+
     try:
         listener = AgentListener(config_path=config_file)
         asyncio.run(listener.start())
