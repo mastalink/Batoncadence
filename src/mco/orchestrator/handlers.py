@@ -1,7 +1,6 @@
 """Decoupled database transactional handlers for Job Board operations."""
 
 import logging
-from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, Optional
 from mco.orchestrator.contracts import JobStatus
 
@@ -138,8 +137,8 @@ async def handle_job_update(
 
     try:
         update_data = {"status": status}
-        if status in (JobStatus.COMPLETED.value, JobStatus.FAILED.value):
-            update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+        # completed_at is stamped by the DB trigger (trg_mco_stamp_completed_at) via now(),
+        # keeping it on the same clock as created_at / started_at (no worker-clock skew).
         if output_payload is not None:
             update_data["output_payload"] = output_payload
         if error_message is not None:

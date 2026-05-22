@@ -208,7 +208,8 @@ async def test_handle_job_update_completion_unlocks_child():
 
     # Verify parent updated correctly
     assert db_client._update_data["status"] == JobStatus.COMPLETED.value
-    assert "completed_at" in db_client._update_data
+    # completed_at is no longer set by the app — the DB trigger stamps it via now().
+    assert "completed_at" not in db_client._update_data
 
     # Acks and broadcasts
     send_ack.assert_called_once()
