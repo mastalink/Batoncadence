@@ -385,8 +385,13 @@ def serve(
 
     # Trigger dynamic decrypt/load
     config = get_config()
-    
+
     app_server = create_app()
+
+    # Pre-warm the (now memoized) Supabase client so the first request isn't slow.
+    from mco.orchestrator.routes import get_db_client
+    if get_db_client() is not None:
+        console.print("[dim]Supabase client pre-warmed.[/dim]")
 
     # Launch Uvicorn
     uvicorn.run(app_server, host=host, port=port)

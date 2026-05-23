@@ -22,14 +22,24 @@ def register_broadcast_callback(callback) -> None:
     logger.info("Registered custom Job Board broadcast callback.")
 
 
-def get_db_client():
-    """Retrieve Supabase database client dynamically from MCO config."""
+# Memoized Supabase client. create_client() is expensive (~3-4s: spins up
+# PostgREST/Auth/Realtime sub-clients), so building it per request made every
+# endpoint slow enough to trip client timeouts. Build once, reuse.
+_db_client = None
+
+
+def get_db_client(force_new: bool = False):
+    """Return a cached Supabase client (created on first use), or None if unconfigured."""
+    global _db_client
+    if _db_client is not None and not force_new:
+        return _db_client
     config = get_config()
     url = config.get("SUPABASE_URL")
     key = config.get("SUPABASE_KEY")
     if url and key and url != "encrypted_in_secret_store":
         from supabase import create_client
-        return create_client(url, key)
+        _db_client = create_client(url, key)
+        return _db_client
 
     return None
 
