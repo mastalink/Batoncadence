@@ -1,38 +1,59 @@
-# MCO scheduler prompt
+# MCO scheduler prompts (one per agent)
 
-Paste this into each app's recurring scheduler — **Antigravity** Scheduled Tasks,
-**Codex** Automations, **Claude** Routines. Suggested interval: 2-10 minutes.
+Each agent's GUI runs a recurring prompt that works its MCO inbox. The MCP env
+already identifies the agent (its `role` + `instance`), and the **recurrence is
+owned by the scheduler** (`/loop`, a cron, or a scheduled task) — so the prompt
+describes ONLY the work.
 
-The MCP env already identifies the agent (its `role` + `instance`), so the *same*
-prompt works for every agent. Each run is **one pass** — the scheduler re-runs it
-next interval; the prompt must not loop on its own.
+> ⚠️ CRITICAL: never put control-flow words ("stop", "do not loop", "one pass")
+> in a scheduled/looped prompt. A looping agent reads "stop" and cancels its own
+> loop (this killed an early Claude `/loop`). The prompt does one inbox sweep and
+> ends its turn naturally; the scheduler re-runs it.
+
+Prereqs: the gateway (`mco serve`) must be running and reachable at
+`http://127.0.0.1:18789`, and each app must be able to reach it (i.e. running on
+this machine, not a cloud-only runner).
 
 ---
-You are an MCO worker. Do exactly ONE pass, then stop:
 
-1. Call `mco_inbox`. If it returns an empty list, stop — there is nothing to do.
-2. For each job (handle at most 3 per run):
-   a. Call `mco_lease(task_id)`. If it returns `success: false`, skip that job —
-      another worker already claimed it. NEVER work a job you didn't lease.
-   b. If the lease succeeded, do the work described in the job's
-      `input_payload.prompt` (fall back to its `description`), using your full
-      tools and workspace.
-   c. On success: `mco_complete(task_id, <concise result or summary>)`.
-      On failure: `mco_fail(task_id, <what went wrong>)`.
-3. OPTIONAL hand-off: if completing a job should trigger downstream work, call
-   `mco_send(to_role, title, instructions)` to drop a new job for another agent
-   (e.g. plan → code → test → review).
-4. Stop. Do not loop — the scheduler runs you again next interval.
+## Claude — `/loop` (sub-hour; GUI Routines floor at 1h)
+Run inside a Claude session you leave open:
 
-Rules: only ever work a job you successfully leased; keep results concise; if
-`mco_inbox` errors, stop and report (do not retry in a tight loop).
+```
+/loop 10m Check your MCO inbox: call mco_inbox. For each job addressed to you (up to 3), call mco_lease(task_id); if the lease succeeds, carry out its input_payload.prompt using your tools, then mco_complete(task_id, <concise result>) — or mco_fail(task_id, <error>). If the inbox is empty, there is nothing to do this run.
+```
+
+Note: each `/loop` tick costs a small Claude turn even when the inbox is empty.
+10m is a sane default; tighten only if you need faster pickup.
+
+## Codex — custom cron / Automation (role: implementer)
+Cron example (every 5 min): `*/5 * * * *`
+
+```
+Check your MCO inbox: call mco_inbox. For each job (up to 3): mco_lease(task_id); if the lease succeeds, implement what its input_payload.prompt asks in the workspace, then mco_complete(task_id, <summary of files changed>) — or mco_fail(task_id, <error>) — and hand off: mco_send(to_role="antigravity", title="Review & test: <feature>", instructions="<what to verify / how to run tests>"). If the inbox is empty, there is nothing to do.
+```
+
+## Antigravity — custom cron / Scheduled Task (role: reviewer/tester)
+Cron example (every 5 min): `*/5 * * * *`
+
+```
+Check your MCO inbox: call mco_inbox. For each job (up to 3): mco_lease(task_id); if the lease succeeds, review/test what the job points to (run the tests). If it passes: mco_complete(task_id, <verdict>). If it needs fixes: mco_complete(task_id, <findings>) and mco_send(to_role="codex", title="Fix: <issue>", instructions="<what to fix>"). If the inbox is empty, there is nothing to do.
+```
+
 ---
 
-## The one knob that's yours: the hand-off topology (step 3)
-The default leaves hand-offs to your judgement. If you want a fixed pipeline,
-make step 3 explicit per role, e.g.:
-- `claude` (planner): after completing, `mco_send(to_role="codex", ...)` with the plan.
-- `codex` (coder): after completing, `mco_send(to_role="antigravity", ...)` to test/review.
-- `antigravity` (reviewer): completes the chain (no further send).
+## Cron quick reference
+| Interval | Expression |
+|----------|------------|
+| 5 min  | `*/5 * * * *` |
+| 10 min | `*/10 * * * *` |
+| 15 min | `*/15 * * * *` |
+| hourly | `0 * * * *` |
 
-That chain is what turns four independent mailboxes into an assembly line.
+## Topology (plan → build → review)
+- **claude** (planner): turns a goal into a plan, `mco_send` → `codex`.
+- **codex** (implementer): writes code, `mco_send` → `antigravity`.
+- **antigravity** (reviewer): tests; on failure `mco_send` → `codex` (fix loop); else done.
+
+Change the `mco_send` targets to re-wire the pipeline (or drop them for a flat
+peer model where each agent only does what it's explicitly sent).
