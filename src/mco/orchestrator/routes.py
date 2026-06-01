@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from mco.orchestrator.contracts import JobStatus
 from mco.orchestrator.auth import require_agent
 from mco.config import get_config
+from mco.notifiers.ntfy import notify_job_created, notify_job_completed, notify_job_failed
 
 logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
@@ -107,6 +108,16 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
                     await _broadcast_callback(event_name, res.data[0])
                 except Exception as e:
                     logger.warning(f"Error executing broadcast callback: {e}")
+            # ntfy webhook addon (if enabled via NTFY_* env vars)
+            try:
+                notify_job_created(
+                    job_id=res.data[0].get("id", "unknown"),
+                    title=res.data[0].get("title", "Untitled job"),
+                    to_role=res.data[0].get("target_agent_role", "unknown"),
+                )
+            except Exception as ntfy_err:
+                logger.debug(f"ntfy addon skipped: {ntfy_err}")
+
             return {"success": True, "job": res.data[0]}
         return {"success": False, "error": "Insert failed"}
     except Exception as e:
@@ -117,7 +128,7 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
 @router.get("/pending")
 async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Depends(require_agent)):
     """Retrieve pending jobs for a role. Dropbox rule: you may only poll your own mail."""
-    if role != agent["role"]:
+    if role.lower() != agent["role"].lower():
         raise HTTPException(status_code=403, detail="Cannot poll jobs for a role you are not registered as")
     if instance_id and instance_id != agent["instance_id"]:
         raise HTTPException(status_code=403, detail="instance_id does not match the authenticated agent")
@@ -192,7 +203,11 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
         job_res = db_client.table("agent_jobs").select("target_agent_role, target_agent_id").eq("id", job_id).execute()
         if job_res.data:
             j = job_res.data[0]
-            if j.get("target_agent_role") != agent["role"] and j.get("target_agent_id") != agent["instance_id"]:
+            target_role = (j.get("target_agent_role") or "").lower()
+            caller_role = (agent.get("role") or "").lower()
+            target_id = j.get("target_agent_id")
+            caller_id = agent.get("instance_id")
+            if target_role != caller_role and target_id != caller_id:
                 raise HTTPException(status_code=403, detail="Cannot update a job not addressed to you")
 
         status = payload.get("status")
@@ -235,7 +250,20 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
         
         if error_occurred:
             raise HTTPException(status_code=400, detail=error_occurred)
-            
+
+        # NTFY addon hooks for completion/failure
+        try:
+            final_status = (updated_job or {}).get("status", status)
+            role = (updated_job or {}).get("target_agent_role") or "unknown"
+            jid = (updated_job or {}).get("id", job_id)
+
+            if final_status in ("completed", "success", "done"):
+                notify_job_completed(jid, final_status, role)
+            elif final_status in ("failed", "error"):
+                notify_job_failed(jid, error_message or "Unknown error", role)
+        except Exception as ntfy_err:
+            logger.debug(f"ntfy completion/failure hook skipped: {ntfy_err}")
+
         return {"success": True, "job": updated_job}
     except HTTPException:
         raise

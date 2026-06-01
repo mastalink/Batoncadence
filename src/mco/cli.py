@@ -14,6 +14,7 @@ import secrets
 import hashlib
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +33,7 @@ from mco.config import get_config, EnvironmentProfile, SENSITIVE_KEYS
 from mco.security import get_secret_store, WindowsCredentialProvider, PasswordKeyProvider
 from mco.orchestrator.routes import router as jobs_router, agents_router, register_broadcast_callback
 from mco.orchestrator.listener import AgentListener
+from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config
 
 # Initialize typer app and console
 app = typer.Typer(help="MCOrchestr8: Multi-Client Agent Orchestrator.")
@@ -305,6 +307,12 @@ def create_app() -> FastAPI:
                                 "payload": {"success": True}
                             })
                             logger.info(f"Agent '{instance_id}' ({role}) successfully authenticated.")
+                            
+                            # NTFY addon: notify agent online
+                            try:
+                                notify_agent_online(role, instance_id)
+                            except Exception:
+                                pass
                         
                 if not authenticated:
                     await websocket.send_json({
@@ -357,13 +365,20 @@ def create_app() -> FastAPI:
             if websocket in ws_manager.active_connections:
                 ws_manager.disconnect(websocket)
             
-            # Set agent to offline on disconnect
+            # Set agent to offline on disconnect + ntfy notification
             if authenticated_instance_id and db_client:
                 try:
                     db_client.table("agent_registry").update({
                         "status": "offline"
                     }).eq("instance_id", authenticated_instance_id).execute()
                     logger.info(f"Agent '{authenticated_instance_id}' disconnected, set to offline.")
+                    
+                    # NTFY addon: notify agent offline
+                    try:
+                        # We don't have the role easily here, so use a generic notification
+                        notify_agent_offline("unknown", authenticated_instance_id)
+                    except Exception:
+                        pass
                 except Exception as db_err:
                     logger.warning(f"Failed to set agent offline: {db_err}")
 
@@ -393,7 +408,73 @@ def serve(
     if get_db_client() is not None:
         console.print("[dim]Supabase client pre-warmed.[/dim]")
 
+    # Initialize ntfy webhook addon if env vars are present
+    ntfy_cfg = get_ntfy_config()
+    if ntfy_cfg.get("server") and ntfy_cfg.get("topic"):
+        try:
+            # Gather rich stats for the startup notification
+            stats = {
+                "host": host,
+                "port": port,
+                "pid": os.getpid(),
+            }
+
+            db_client = get_db_client()
+            if db_client:
+                try:
+                    agents_res = db_client.table("agent_registry").select("status").execute()
+                    stats["agent_count"] = len(agents_res.data or [])
+                    stats["online_count"] = sum(1 for a in (agents_res.data or []) if a.get("status") == "online")
+
+                    jobs_res = db_client.table("agent_jobs").select("id").eq("status", "pending").execute()
+                    stats["pending_jobs"] = len(jobs_res.data or [])
+                except Exception:
+                    pass
+
+            # Light process info to help detect leaks (mco.exe, node, git, etc.)
+            try:
+                import psutil
+                stats["process_count"] = len(psutil.pids())
+            except Exception:
+                pass
+
+            notify_gateway_startup(stats)
+            console.print(f"[dim]NTFY notifier enabled → {ntfy_cfg['server']}/{ntfy_cfg['topic']}[/dim]")
+        except Exception as ntfy_err:
+            console.print(f"[yellow]NTFY notifier init warning: {ntfy_err}[/yellow]")
+
     # Launch Uvicorn
+    # Start background process snapshot reporter (helps catch mco.exe / codex / git / node leaks)
+    def _periodic_process_snapshot():
+        import threading
+        import time
+        ntfy_cfg = get_ntfy_config()
+        if not (ntfy_cfg.get("server") and ntfy_cfg.get("topic")):
+            return
+        def _reporter():
+            while True:
+                try:
+                    import psutil
+                    snapshot = {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "total_processes": len(psutil.pids()),
+                        "mco_processes": len([p for p in psutil.process_iter(['name']) if 'mco' in (p.info['name'] or '').lower()]),
+                        "node_processes": len([p for p in psutil.process_iter(['name']) if 'node' in (p.info['name'] or '').lower()]),
+                        "git_processes": len([p for p in psutil.process_iter(['name']) if 'git' in (p.info['name'] or '').lower()]),
+                    }
+                    notify(
+                        json.dumps(snapshot, indent=2),
+                        title="MCO Process Snapshot",
+                        priority=1,
+                        tags=["mco", "process-snapshot", "leak-detection"],
+                    )
+                except Exception:
+                    pass
+                time.sleep(600)  # every 10 minutes
+        threading.Thread(target=_reporter, daemon=True).start()
+
+    _periodic_process_snapshot()
+
     uvicorn.run(app_server, host=host, port=port)
 
 
