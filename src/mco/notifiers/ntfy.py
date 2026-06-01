@@ -33,6 +33,7 @@ def get_ntfy_config() -> dict:
     return {
         "server": os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/"),
         "topic": os.getenv("NTFY_TOPIC", "mco-events"),
+        "token": os.getenv("NTFY_TOKEN"),
         "levels": [x.strip().upper() for x in os.getenv("NTFY_LEVELS", "INFO,WARNING,ERROR,CRITICAL").split(",")],
     }
 
@@ -62,6 +63,10 @@ def notify(
     }
     if tags:
         headers["Tags"] = ",".join(tags)
+
+    token = cfg.get("token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     try:
         resp = requests.post(url, data=message.encode("utf-8"), headers=headers, timeout=10)
