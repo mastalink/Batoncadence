@@ -28,13 +28,17 @@ import requests
 from loguru import logger
 
 
+from mco.config import get_config
+
+
 def get_ntfy_config() -> dict:
-    """Read ntfy settings from environment."""
+    """Read ntfy settings from MCOrchestr8 config."""
+    config = get_config()
     return {
-        "server": os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/"),
-        "topic": os.getenv("NTFY_TOPIC", "mco-events"),
-        "token": os.getenv("NTFY_TOKEN"),
-        "levels": [x.strip().upper() for x in os.getenv("NTFY_LEVELS", "INFO,WARNING,ERROR,CRITICAL").split(",")],
+        "server": config.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/"),
+        "topic": config.get("NTFY_TOPIC", "mco-events"),
+        "token": config.get("NTFY_TOKEN"),
+        "levels": [x.strip().upper() for x in config.get("NTFY_LEVELS", "INFO,WARNING,ERROR,CRITICAL").split(",")],
     }
 
 
@@ -85,6 +89,16 @@ def notify_job_created(job_id: str, title: str, to_role: str):
         title="MCO Job Created",
         priority=3,
         tags=["mco", "job", to_role.lower()],
+        topic=f"mco-{to_role.lower()}" if to_role else None,
+    )
+
+
+def notify_job_leased(job_id: str, agent_id: str, to_role: str):
+    notify(
+        f"🏃 Job {job_id} leased by {agent_id} ({to_role})",
+        title="MCO Job Leased",
+        priority=2,
+        tags=["mco", "job", "leased", to_role.lower()],
         topic=f"mco-{to_role.lower()}" if to_role else None,
     )
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from mco.orchestrator.contracts import JobStatus
 from mco.orchestrator.auth import require_agent
 from mco.config import get_config
-from mco.notifiers.ntfy import notify_job_created, notify_job_completed, notify_job_failed
+from mco.notifiers.ntfy import notify_job_created, notify_job_completed, notify_job_failed, notify_job_leased
 
 logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
@@ -175,6 +175,12 @@ async def lease_job(payload: dict, agent: dict = Depends(require_agent)):
         }).execute()
         
         success = res.data if hasattr(res, "data") else False
+        
+        if success:
+            try:
+                notify_job_leased(task_id, agent_instance_id, agent["role"])
+            except Exception as ntfy_err:
+                logger.debug(f"ntfy lease hook skipped: {ntfy_err}")
         
         if success and _broadcast_callback:
             try:
