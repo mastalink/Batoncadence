@@ -33,7 +33,7 @@ from mco.config import get_config, EnvironmentProfile, SENSITIVE_KEYS
 from mco.security import get_secret_store, WindowsCredentialProvider, PasswordKeyProvider
 from mco.orchestrator.routes import router as jobs_router, agents_router, register_broadcast_callback
 from mco.orchestrator.listener import AgentListener
-from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config
+from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
 
 # Initialize typer app and console
 app = typer.Typer(help="MCOrchestr8: Multi-Client Agent Orchestrator.")
