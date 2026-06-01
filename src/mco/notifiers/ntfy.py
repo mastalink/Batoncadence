@@ -92,7 +92,7 @@ def notify_job_created(job_id: str, title: str, to_role: str):
 def notify_job_completed(job_id: str, status: str, to_role: str):
     emoji = "✅" if status.lower() in ("success", "done", "completed") else "❌"
     notify(
-        f"{emoji} Job {job_id} for {to_role} → {status}",
+        f"{emoji} Job {job_id} for {to_role} -> {status}",
         title="MCO Job Completed",
         priority=2 if status.lower() in ("success", "done", "completed") else 4,
         tags=["mco", "job", status.lower(), to_role.lower()],

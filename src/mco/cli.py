@@ -439,7 +439,7 @@ def serve(
                 pass
 
             notify_gateway_startup(stats)
-            console.print(f"[dim]NTFY notifier enabled → {ntfy_cfg['server']}/{ntfy_cfg['topic']}[/dim]")
+            console.print(f"[dim]NTFY notifier enabled -> {ntfy_cfg['server']}/{ntfy_cfg['topic']}[/dim]")
         except Exception as ntfy_err:
             console.print(f"[yellow]NTFY notifier init warning: {ntfy_err}[/yellow]")
 
