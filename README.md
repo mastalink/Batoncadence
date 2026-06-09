@@ -22,7 +22,7 @@ MCOrchestr8 is a highly secure, modular, and completely standalone agent orchest
 - **Enterprise Connectors**: First-class ServiceNow and Dynatrace integrations plus a generic webhook contract - ingest incidents/problems as agent jobs (polled or pushed, idempotent by external id), control the platforms back (create/resolve incidents, comment/close problems) as auditable connector-role jobs or approver-gated direct actions, and mirror terminal job failures into ITSM via the escalation bridge. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 - **Control-Plane Dashboard**: Zero-build web UI at `http://host:port/dashboard` — job board, approval queue with approve/reject buttons, agent fleet presence, and per-job audit viewer.
 - **Windows Console Stability**: Pure ASCII console notation (`->`) replacing unicode symbols to avoid legacy terminal encoding crashes on Windows.
-- **CLI-First**: Ergonomic, rich CLI commands `setup`, `serve`, `listen`, `status`, `workflow`, `audit`, `approve`, `reject`, `connectors`, `sync`, and `platform`.
+- **CLI-First**: Ergonomic, rich CLI commands `setup`, `serve`, `listen`, `status`, `workflow`, `audit`, `approve`, `reject`, `retry`, `connectors`, `sync`, and `platform`.
 
 ---
 

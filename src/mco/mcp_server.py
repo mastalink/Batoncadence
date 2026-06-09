@@ -81,6 +81,13 @@ def mco_audit(task_id: str) -> List[dict]:
 
 
 @mcp.tool()
+def mco_retry(task_id: str) -> dict:
+    """Re-queue a failed or rejected job back to pending (human override).
+    Only approver roles (MCO_APPROVER_ROLES) may call this."""
+    return _client().retry(task_id)
+
+
+@mcp.tool()
 def mco_agents() -> List[dict]:
     """List registered agents and their online/offline presence."""
     return _client().agents()

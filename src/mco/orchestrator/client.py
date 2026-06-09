@@ -105,6 +105,13 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
+    def retry(self, task_id: str) -> dict:
+        """Re-queue a failed/rejected job to pending (approver roles only)."""
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/retry")
+            r.raise_for_status()
+            return r.json()
+
     def events(self, task_id: str) -> List[dict]:
         """Immutable audit trail for a job, oldest first."""
         with self._client() as c:

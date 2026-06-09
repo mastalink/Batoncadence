@@ -825,6 +825,17 @@ def reject(
         raise typer.Exit(code=1)
 
 
+@app.command("retry")
+def retry(job_id: str = typer.Argument(..., help="Failed/rejected job ID to re-queue.")):
+    """Re-queue a failed or rejected job back to pending (approver-role token)."""
+    try:
+        res = _gateway_client().retry(job_id)
+        console.print(f"[bold green][OK] Job {job_id} re-queued -> {res['job']['status']}[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Retry failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Enterprise integrations
 # ─────────────────────────────────────────────────────────────────────────────

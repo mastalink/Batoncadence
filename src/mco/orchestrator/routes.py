@@ -376,6 +376,47 @@ async def approve_job(job_id: str, agent: dict = Depends(require_agent)):
     return await _decide_approval(job_id, agent, approve=True)
 
 
+@router.post("/{job_id}/retry")
+async def retry_job(job_id: str, agent: dict = Depends(require_agent)):
+    """Re-queue a FAILED or REJECTED job (approver roles only).
+
+    Clears the lease and puts the job back to PENDING so a worker can pick it
+    up again - the human override behind the console's 'Try again' button.
+    """
+    db_client = get_db_client()
+    if not db_client:
+        raise HTTPException(status_code=400, detail="Database not configured")
+    if (agent.get("role") or "").lower() not in get_approver_roles():
+        raise HTTPException(status_code=403, detail="Your role is not permitted to re-queue jobs")
+
+    job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    if not job_res.data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = job_res.data[0]
+    if job.get("status") not in (JobStatus.FAILED.value, JobStatus.REJECTED.value):
+        raise HTTPException(status_code=400, detail=f"Only failed/rejected jobs can be retried (status: {job.get('status')})")
+
+    res = db_client.table("agent_jobs").update({
+        "status": JobStatus.PENDING.value,
+        "leased_by_instance_id": None,
+        "error_message": None,
+    }).eq("id", job_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Retry failed to persist")
+    requeued_job = res.data[0]
+
+    record_event(db_client, job_id, "retried", agent["instance_id"], agent["role"],
+                 {"manual": True, "previous_status": job.get("status")})
+
+    if _broadcast_callback:
+        try:
+            await _broadcast_callback("job_pending", requeued_job)
+        except Exception as e:
+            logger.warning(f"Error executing broadcast callback after retry: {e}")
+
+    return {"success": True, "job": requeued_job}
+
+
 @router.post("/{job_id}/reject")
 async def reject_job(job_id: str, payload: dict = None, agent: dict = Depends(require_agent)):
     """Reject a NEEDS_APPROVAL job. Terminal: the job moves to REJECTED."""

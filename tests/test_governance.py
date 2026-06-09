@@ -141,6 +141,43 @@ class TestAuditTrail(_GovernanceBase):
         assert "approved" in self._events("ga1")
 
 
+class TestManualRetry(_GovernanceBase):
+    def test_approver_requeues_failed_job(self):
+        self.db.add_job(id="mr1", status="failed", target_agent_role="codex",
+                        leased_by_instance_id="agent-1", error_message="boom")
+        self._as(HUMAN_AGENT)
+        resp = self.http.post("/api/jobs/mr1/retry")
+        assert resp.status_code == 200
+        job = resp.json()["job"]
+        assert job["status"] == "pending"
+        assert job["leased_by_instance_id"] is None
+        events = self.http.get("/api/jobs/mr1/events").json()
+        assert any(e["event"] == "retried" and e["actor_id"] == "joe" for e in events)
+
+    def test_rejected_job_can_be_retried(self):
+        self.db.add_job(id="mr2", status="rejected", target_agent_role="codex")
+        self._as(HUMAN_AGENT)
+        resp = self.http.post("/api/jobs/mr2/retry")
+        assert resp.status_code == 200
+        assert resp.json()["job"]["status"] == "pending"
+
+    def test_non_approver_403(self):
+        self.db.add_job(id="mr3", status="failed", target_agent_role="codex")
+        resp = self.http.post("/api/jobs/mr3/retry")
+        assert resp.status_code == 403
+
+    def test_non_terminal_job_400(self):
+        self.db.add_job(id="mr4", status="in_progress", target_agent_role="codex")
+        self._as(HUMAN_AGENT)
+        resp = self.http.post("/api/jobs/mr4/retry")
+        assert resp.status_code == 400
+
+    def test_unknown_job_404(self):
+        self._as(HUMAN_AGENT)
+        resp = self.http.post("/api/jobs/missing/retry")
+        assert resp.status_code == 404
+
+
 class TestEscalation(_GovernanceBase):
     def test_failed_job_with_retry_budget_is_requeued(self):
         self.db.add_job(id="rt1", status="in_progress", target_agent_role="codex",
