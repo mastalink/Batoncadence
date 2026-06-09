@@ -94,6 +94,13 @@ mco reject <job_id> --reason "too risky"
 Or open the control-plane dashboard at `http://127.0.0.1:18789/dashboard` and
 paste an agent token to manage the approval queue visually.
 
+### BatonCadence Console
+A full GUI ships at `http://127.0.0.1:18789/console` - mission-control
+overview, job board with audit drawer, approvals inbox, visual workflow
+builder (no YAML needed), and agent fleet presence. Open it, go to
+Settings -> Connection, and paste an agent token (approver role for
+approve/reject). It starts in a safe demo mode until connected.
+
 Full usage documentation for approval gates, the audit trail, retries/escalation,
 the workflow DSL, and the dashboard lives in [docs/GOVERNANCE.md](docs/GOVERNANCE.md).
 

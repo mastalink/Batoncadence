@@ -251,6 +251,13 @@ def create_app() -> FastAPI:
     async def dashboard() -> str:
         return DASHBOARD_HTML
 
+    # BatonCadence Console (full control-plane GUI; auth via API bearer token)
+    from mco.console import get_console_html
+
+    @app_server.get("/console", response_class=HTMLResponse, include_in_schema=False)
+    async def console_ui() -> str:
+        return get_console_html()
+
     # Register broadcast callback
     register_broadcast_callback(server_broadcast_callback)
 
@@ -402,6 +409,7 @@ def serve(
     console.print(Panel.fit(
         f"[bold green]Starting MCOrchestr8 Server[/bold green]\n"
         f"Host: http://{host}:{port}\n"
+        f"Console: http://{host}:{port}/console\n"
         f"WebSocket: ws://{host}:{port}/ws/broadcast",
         border_style="green"
     ))
