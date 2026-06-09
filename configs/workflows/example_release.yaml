@@ -1,0 +1,23 @@
+# Example MCOrchestr8 workflow: research -> build (with retries/escalation) -> gated ship.
+# Submit with: mco workflow configs/workflows/example_release.yaml
+name: release-pipeline
+steps:
+  - id: research
+    role: claude
+    title: Research the change
+    instructions: Summarize the open issues and decide the scope for this release.
+
+  - id: build
+    role: codex
+    title: Implement the change
+    instructions: Apply the fixes identified by the research step and run the tests.
+    depends_on: [research]
+    max_retries: 2
+    escalate_to_role: human
+
+  - id: ship
+    role: codex
+    title: Tag and publish the release
+    instructions: Tag the release and publish artifacts.
+    depends_on: [build]
+    requires_approval: true

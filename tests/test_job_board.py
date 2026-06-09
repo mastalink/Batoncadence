@@ -33,11 +33,15 @@ class MockSupabaseClient:
         return self
 
     def insert(self, data: Dict[str, Any]):
-        self._update_data = data
+        # Audit-trail writes (agent_job_events) must not clobber the job data
+        # the assertions inspect.
+        if self._table_name == "agent_jobs":
+            self._update_data = data
         return self
 
     def update(self, data: Dict[str, Any]):
-        self._update_data = data
+        if self._table_name == "agent_jobs":
+            self._update_data = data
         return self
 
     def eq(self, column: str, value: Any):

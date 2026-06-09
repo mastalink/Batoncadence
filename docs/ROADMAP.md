@@ -52,33 +52,38 @@ Cross-cutting validated requirements still open:
 
 ## 3. Close-Out Plan
 
-### Phase A - MVP Close-Out (governance core) <- WE ARE HERE
-The minimum work to honestly claim the validated value proposition:
+### Phase A - MVP Close-Out (governance core) — **SHIPPED (June 2026)**
 
-1. **Immutable audit trail**
-   - Append-only `agent_job_events` table in Supabase (job_id, actor, event,
-     payload hash, timestamp); written on every create/lease/status mutation.
-   - `GET /api/jobs/{id}/events` endpoint + `mco audit <job_id>` CLI command.
-2. **Human-in-the-loop approval gates**
-   - New `NEEDS_APPROVAL` status; jobs flagged `requires_approval` pause there.
-   - `POST /api/jobs/{id}/approve` / `reject` endpoints (human token scope).
-   - ntfy notification when a job is awaiting approval.
-3. **Escalation paths**
-   - `max_retries` + `escalate_to_role` job fields; on terminal failure,
-     auto-create an escalation job and notify.
-4. **Tests + docs** for all of the above; update README feature list.
+1. **Immutable audit trail** — DONE
+   - Append-only `agent_job_events` table with a DB trigger rejecting
+     UPDATE/DELETE (`docs/migrations/2026-06_phase_a_governance.sql`); written
+     on every create/lease/status/approval/retry/escalation mutation
+     (`src/mco/orchestrator/audit.py`).
+   - `GET /api/jobs/{id}/events` endpoint, `mco audit <job_id>` CLI command,
+     and `mco_audit` MCP tool.
+2. **Human-in-the-loop approval gates** — DONE
+   - `needs_approval` status; jobs flagged `requires_approval` pause there
+     (including after dependency unlock).
+   - `POST /api/jobs/{id}/approve` / `reject` endpoints, restricted to
+     approver roles (`MCO_APPROVER_ROLES`, default `human,admin,operator`).
+   - CLI (`mco approve`/`mco reject`), MCP tools (`mco_approve`/`mco_reject`),
+     and ntfy alerts when a job awaits approval.
+3. **Escalation paths** — DONE
+   - `max_retries`/`retry_count` re-queue failed jobs; once exhausted,
+     `escalate_to_role` auto-creates an escalation job with the failure
+     context and fires a priority-5 ntfy alert.
+4. **Tests + docs** — DONE: governance + workflow test suites added (114
+   tests total), README and SETUP_GUIDE updated.
 
-**Definition of done for Phase A:** every job mutation is auditable, any job
-can be gated on human approval, failures escalate instead of dying silently,
-and the full test suite passes.
+### Phase B - Alpha Hardening — **PARTIALLY SHIPPED**
+- ~~Declarative workflow DSL (YAML)~~ DONE: DAG workflows with per-step
+  governance (`mco workflow`, `src/mco/orchestrator/workflows.py`).
+- ~~Minimal web dashboard~~ DONE: `/dashboard` control plane (job board,
+  approval queue, agent fleet, audit viewer).
+- RBAC: approver-role gating shipped; full per-scope token permissions still open.
+- Packaged Agent SDK with quickstart for third-party agents — still open.
 
-### Phase B - Alpha Hardening
-- Declarative workflow DSL (YAML): multi-step pipelines with fan-out/fan-in.
-- Minimal web dashboard (job board, agent fleet, approval queue, audit view).
-- RBAC: separate human/admin/agent token scopes.
-- Packaged Agent SDK with quickstart for third-party agents.
-
-### Phase C - Pilot / Beta
+### Phase C - Pilot / Beta <- WE ARE HERE
 - Re-engage Gartner conference contacts; target 3-5 pilot deployments.
 - One-pager + demo script built from the working approval-gate + audit demo.
 - Pilot feedback loop drives the 1.0 scope.

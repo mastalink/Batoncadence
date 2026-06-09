@@ -69,7 +69,8 @@ class GatewayClient:
             return r.json()
 
     def send(self, to_role: str, title: str, instructions: str, to_instance: Optional[str] = None,
-             depends_on: Optional[List[str]] = None) -> dict:
+             depends_on: Optional[List[str]] = None, requires_approval: bool = False,
+             max_retries: int = 0, escalate_to_role: Optional[str] = None) -> dict:
         """Drop a task/message into another agent's dropbox."""
         payload: dict[str, Any] = {
             "title": title,
@@ -79,8 +80,42 @@ class GatewayClient:
             "input_payload": {"prompt": instructions},
             "depends_on": depends_on or [],
         }
+        if requires_approval:
+            payload["requires_approval"] = True
+        if max_retries:
+            payload["max_retries"] = max_retries
+        if escalate_to_role:
+            payload["escalate_to_role"] = escalate_to_role
         with self._client() as c:
             r = c.post("/api/jobs", json=payload)
+            r.raise_for_status()
+            return r.json()
+
+    def approve(self, task_id: str) -> dict:
+        """Approve a job paused at the human-in-the-loop gate (releases it to pending)."""
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/approve")
+            r.raise_for_status()
+            return r.json()
+
+    def reject(self, task_id: str, reason: str = "") -> dict:
+        """Reject a job paused at the human-in-the-loop gate (terminal)."""
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/reject", json={"reason": reason})
+            r.raise_for_status()
+            return r.json()
+
+    def events(self, task_id: str) -> List[dict]:
+        """Immutable audit trail for a job, oldest first."""
+        with self._client() as c:
+            r = c.get(f"/api/jobs/{task_id}/events")
+            r.raise_for_status()
+            return r.json()
+
+    def jobs(self) -> List[dict]:
+        """Most recent jobs on the board (any status)."""
+        with self._client() as c:
+            r = c.get("/api/jobs")
             r.raise_for_status()
             return r.json()
 

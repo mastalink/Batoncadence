@@ -47,10 +47,37 @@ def mco_fail(task_id: str, error: str) -> dict:
 
 
 @mcp.tool()
-def mco_send(to_role: str, title: str, instructions: str, to_instance: str = "") -> dict:
+def mco_send(to_role: str, title: str, instructions: str, to_instance: str = "",
+             requires_approval: bool = False, max_retries: int = 0,
+             escalate_to_role: str = "") -> dict:
     """Drop a task/message into another agent's dropbox. to_instance is optional
-    (omit to address the whole role)."""
-    return _client().send(to_role, title, instructions, to_instance or None)
+    (omit to address the whole role). Set requires_approval=True to pause the job
+    at a human approval gate; max_retries/escalate_to_role control what happens
+    when the job fails."""
+    return _client().send(to_role, title, instructions, to_instance or None,
+                          requires_approval=requires_approval, max_retries=max_retries,
+                          escalate_to_role=escalate_to_role or None)
+
+
+@mcp.tool()
+def mco_approve(task_id: str) -> dict:
+    """Approve a job paused at the human-in-the-loop gate, releasing it for
+    execution. Only approver roles (MCO_APPROVER_ROLES) may call this."""
+    return _client().approve(task_id)
+
+
+@mcp.tool()
+def mco_reject(task_id: str, reason: str = "") -> dict:
+    """Reject a job paused at the human-in-the-loop gate (terminal). Only
+    approver roles (MCO_APPROVER_ROLES) may call this."""
+    return _client().reject(task_id, reason)
+
+
+@mcp.tool()
+def mco_audit(task_id: str) -> List[dict]:
+    """Read a job's immutable audit trail (create/lease/status/approval/retry/
+    escalation events), oldest first."""
+    return _client().events(task_id)
 
 
 @mcp.tool()

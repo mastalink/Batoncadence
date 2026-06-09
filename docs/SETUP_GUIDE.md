@@ -140,8 +140,14 @@ end;
 $$;
 ```
 
-> **Status lifecycle:** `waiting` (blocked by `depends_on`) → `pending` (ready) →
-> `leased` → `in_progress` → `completed` / `failed`.
+Then run the governance migration (approval gates, retries/escalation, and the
+immutable audit trail) from [`migrations/2026-06_phase_a_governance.sql`](migrations/2026-06_phase_a_governance.sql)
+in the same SQL Editor.
+
+> **Status lifecycle:** `waiting` (blocked by `depends_on`) → `needs_approval`
+> (paused at a human gate, if `requires_approval`) → `pending` (ready) →
+> `leased` → `in_progress` → `completed` / `failed` (may retry or escalate) /
+> `rejected` (human declined the gate).
 
 ---
 

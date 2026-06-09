@@ -243,6 +243,14 @@ def create_app() -> FastAPI:
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
 
+    # Control-plane dashboard (static single page; auth happens via the API token)
+    from fastapi.responses import HTMLResponse
+    from mco.dashboard import DASHBOARD_HTML
+
+    @app_server.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+    async def dashboard() -> str:
+        return DASHBOARD_HTML
+
     # Register broadcast callback
     register_broadcast_callback(server_broadcast_callback)
 
@@ -645,6 +653,116 @@ def list_agents():
         console.print(table)
     except Exception as e:
         console.print(f"[red][ERROR] Failed to query agent registry: {e}[/red]")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Governance: workflows, audit trail, approval gates
+# ─────────────────────────────────────────────────────────────────────────────
+def _gateway_client():
+    """Env-configured GatewayClient (MCO_GATEWAY_URL / MCO_AGENT_TOKEN / AGENT_*)."""
+    from mco.orchestrator.client import GatewayClient
+    return GatewayClient()
+
+
+@app.command("workflow")
+def run_workflow(
+    file: str = typer.Argument(..., help="Path to a workflow YAML file."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate and print the plan without submitting."),
+):
+    """Submit a declarative YAML workflow (DAG of jobs) to the Job Board."""
+    from mco.orchestrator.workflows import load_workflow, topo_order, submit_workflow, WorkflowError
+
+    try:
+        workflow = load_workflow(file)
+    except WorkflowError as e:
+        console.print(f"[red][ERROR] Invalid workflow: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    ordered = topo_order(workflow["steps"])
+    console.print(f"[bold cyan]Workflow:[/bold cyan] {workflow['name']} ({len(ordered)} steps)")
+    for step in ordered:
+        gates = []
+        if step.get("requires_approval"):
+            gates.append("approval-gated")
+        if step.get("max_retries"):
+            gates.append(f"retries={step['max_retries']}")
+        if step.get("escalate_to_role"):
+            gates.append(f"escalates->{step['escalate_to_role']}")
+        deps = ", ".join(step.get("depends_on") or []) or "-"
+        console.print(f"  - {step['id']} [green]({step['role']})[/green] deps: {deps} {' '.join(gates)}")
+
+    if dry_run:
+        console.print("[yellow]Dry run: nothing submitted.[/yellow]")
+        return
+
+    try:
+        job_ids = submit_workflow(_gateway_client(), workflow)
+    except WorkflowError as e:
+        console.print(f"[red][ERROR] {e}[/red]")
+        raise typer.Exit(code=1)
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to submit workflow: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print("[bold green][OK] Workflow submitted.[/bold green]")
+    for step_id, job_id in job_ids.items():
+        console.print(f"  {step_id} -> {job_id}")
+
+
+@app.command("audit")
+def audit_trail(job_id: str = typer.Argument(..., help="Job ID to inspect.")):
+    """Print a job's immutable audit trail (oldest event first)."""
+    try:
+        events = _gateway_client().events(job_id)
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to fetch audit trail: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    if not events:
+        console.print("[yellow]No audit events found for this job.[/yellow]")
+        return
+
+    table = Table(title=f"Audit Trail: {job_id}", show_header=True, header_style="bold magenta")
+    table.add_column("Time", style="white")
+    table.add_column("Event", style="cyan")
+    table.add_column("Actor", style="green")
+    table.add_column("Detail", style="dim")
+    for ev in events:
+        actor = ev.get("actor_id") or "-"
+        if ev.get("actor_role"):
+            actor = f"{actor} ({ev['actor_role']})"
+        table.add_row(
+            str(ev.get("created_at", "")),
+            str(ev.get("event", "")),
+            actor,
+            json.dumps(ev.get("detail") or {}),
+        )
+    console.print(table)
+
+
+@app.command("approve")
+def approve(job_id: str = typer.Argument(..., help="Job ID awaiting approval.")):
+    """Approve a job paused at the human-in-the-loop gate."""
+    try:
+        res = _gateway_client().approve(job_id)
+        console.print(f"[bold green][OK] Job {job_id} approved -> {res['job']['status']}[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Approval failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("reject")
+def reject(
+    job_id: str = typer.Argument(..., help="Job ID awaiting approval."),
+    reason: str = typer.Option("", "--reason", help="Why the job was rejected."),
+):
+    """Reject a job paused at the human-in-the-loop gate (terminal)."""
+    try:
+        res = _gateway_client().reject(job_id, reason)
+        console.print(f"[bold yellow][OK] Job {job_id} rejected -> {res['job']['status']}[/bold yellow]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Rejection failed: {e}[/red]")
+        raise typer.Exit(code=1)
 
 
 def main():
