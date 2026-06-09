@@ -130,3 +130,10 @@ Execute the comprehensive Pytest suite to verify route handlers, secure vault co
 pytest tests/
 ```
 All 52 unit and E2E test cases must pass cleanly.
+
+---
+
+## Project Background & Roadmap
+
+- [docs/VALIDATION_SUMMARY.md](docs/VALIDATION_SUMMARY.md) - the December 2025 market validation (Gartner IT Infrastructure Conference) that launched this project under the "AgentMesh" codename.
+- [docs/ROADMAP.md](docs/ROADMAP.md) - current state vs. the original plan, gap analysis, and the close-out roadmap (audit trail, human-in-the-loop approval gates, escalation paths).
