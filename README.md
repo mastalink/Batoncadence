@@ -94,6 +94,9 @@ mco reject <job_id> --reason "too risky"
 Or open the control-plane dashboard at `http://127.0.0.1:18789/dashboard` and
 paste an agent token to manage the approval queue visually.
 
+Full usage documentation for approval gates, the audit trail, retries/escalation,
+the workflow DSL, and the dashboard lives in [docs/GOVERNANCE.md](docs/GOVERNANCE.md).
+
 ---
 
 ## Advanced Integrations
@@ -155,5 +158,7 @@ All 52 unit and E2E test cases must pass cleanly.
 
 ## Project Background & Roadmap
 
+- [docs/GOVERNANCE.md](docs/GOVERNANCE.md) - usage guide for the governance layer: approval gates, audit trail, retries/escalation, workflow DSL, and the dashboard.
+- [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) - end-to-end setup: Supabase schema, gateway config, agent registration, and GUI/MCP wiring.
 - [docs/VALIDATION_SUMMARY.md](docs/VALIDATION_SUMMARY.md) - the December 2025 market validation (Gartner IT Infrastructure Conference) that launched this project under the "AgentMesh" codename.
 - [docs/ROADMAP.md](docs/ROADMAP.md) - current state vs. the original plan, gap analysis, and the close-out roadmap (audit trail, human-in-the-loop approval gates, escalation paths).
