@@ -15,8 +15,13 @@ MCOrchestr8 is a highly secure, modular, and completely standalone agent orchest
 - **Supabase Performance Optimization**: Memoized, pre-warmed Supabase clients preventing polling delays or query timeouts.
 - **`ntfy.sh` centralized hooks**: Integrated central configuration manager notifier wiring process snapshot leak detections, case-insensitive role filtering, and dynamic job lease notifications.
 - **Dropbox MCP Server**: Custom MCP server integrating the dropbox schema and specialized GUI configuration maps (Claude, Codex, Antigravity).
+- **Immutable Audit Trail**: Every job mutation (create, lease, status change, approval decision, retry, escalation) is appended to a tamper-evident `agent_job_events` table protected by a database trigger that rejects UPDATE/DELETE. Inspect with `mco audit <job_id>` or `GET /api/jobs/{id}/events`.
+- **Human-in-the-Loop Approval Gates**: Jobs flagged `requires_approval` pause at `needs_approval` until an approver role (configurable via `MCO_APPROVER_ROLES`, default `human,admin,operator`) approves or rejects them — via REST, CLI (`mco approve` / `mco reject`), MCP tools, or the dashboard.
+- **Escalation Paths**: Failed jobs retry up to `max_retries`, then auto-create an escalation job for `escalate_to_role` instead of dying silently — with ntfy alerts at every step.
+- **Declarative Workflow DSL**: YAML-defined DAGs of multi-agent steps (`mco workflow pipeline.yaml`), with per-step approval gates, retry budgets, and escalation roles. See `configs/workflows/example_release.yaml`.
+- **Control-Plane Dashboard**: Zero-build web UI at `http://host:port/dashboard` — job board, approval queue with approve/reject buttons, agent fleet presence, and per-job audit viewer.
 - **Windows Console Stability**: Pure ASCII console notation (`->`) replacing unicode symbols to avoid legacy terminal encoding crashes on Windows.
-- **CLI-First**: Ergonomic, rich CLI commands `setup`, `serve`, `listen`, and `status`.
+- **CLI-First**: Ergonomic, rich CLI commands `setup`, `serve`, `listen`, `status`, `workflow`, `audit`, `approve`, and `reject`.
 
 ---
 
@@ -74,6 +79,24 @@ Run the background agent client listener to poll the job board, claim/lease task
 mco listen --role codex --instance local-worker-1
 ```
 
+### 5. Governance Commands
+```bash
+# Submit a multi-step, multi-agent workflow (validate first with --dry-run)
+mco workflow configs/workflows/example_release.yaml
+
+# Inspect a job's immutable audit trail
+mco audit <job_id>
+
+# Decide a human-in-the-loop approval gate (requires an approver-role token)
+mco approve <job_id>
+mco reject <job_id> --reason "too risky"
+```
+Or open the control-plane dashboard at `http://127.0.0.1:18789/dashboard` and
+paste an agent token to manage the approval queue visually.
+
+Full usage documentation for approval gates, the audit trail, retries/escalation,
+the workflow DSL, and the dashboard lives in [docs/GOVERNANCE.md](docs/GOVERNANCE.md).
+
 ---
 
 ## Advanced Integrations
@@ -130,3 +153,12 @@ Execute the comprehensive Pytest suite to verify route handlers, secure vault co
 pytest tests/
 ```
 All 52 unit and E2E test cases must pass cleanly.
+
+---
+
+## Project Background & Roadmap
+
+- [docs/GOVERNANCE.md](docs/GOVERNANCE.md) - usage guide for the governance layer: approval gates, audit trail, retries/escalation, workflow DSL, and the dashboard.
+- [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) - end-to-end setup: Supabase schema, gateway config, agent registration, and GUI/MCP wiring.
+- [docs/VALIDATION_SUMMARY.md](docs/VALIDATION_SUMMARY.md) - the December 2025 market validation (Gartner IT Infrastructure Conference) that launched this project under the "AgentMesh" codename.
+- [docs/ROADMAP.md](docs/ROADMAP.md) - current state vs. the original plan, gap analysis, and the close-out roadmap (audit trail, human-in-the-loop approval gates, escalation paths).

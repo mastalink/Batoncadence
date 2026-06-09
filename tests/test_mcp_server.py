@@ -36,9 +36,22 @@ class FakeGatewayClient:
         self.calls.append(("fail", task_id, error))
         return self._responses.get("fail", {"success": True})
 
-    def send(self, to_role: str, title: str, instructions: str, to_instance=None):
+    def send(self, to_role: str, title: str, instructions: str, to_instance=None,
+             depends_on=None, requires_approval=False, max_retries=0, escalate_to_role=None):
         self.calls.append(("send", to_role, title, instructions, to_instance))
         return self._responses.get("send", {"success": True})
+
+    def approve(self, task_id: str):
+        self.calls.append(("approve", task_id))
+        return self._responses.get("approve", {"success": True})
+
+    def reject(self, task_id: str, reason: str = ""):
+        self.calls.append(("reject", task_id, reason))
+        return self._responses.get("reject", {"success": True})
+
+    def events(self, task_id: str):
+        self.calls.append(("events", task_id))
+        return self._responses.get("events", [])
 
     def agents(self):
         self.calls.append(("agents",))
@@ -125,3 +138,26 @@ def test_each_tool_call_builds_a_fresh_client(monkeypatch):
     mco_inbox()
     mco_agents()
     assert call_count == 2
+
+
+def test_mco_approve_delegates(monkeypatch):
+    from mco.mcp_server import mco_approve
+    fake = _fake(monkeypatch, approve={"success": True, "job": {"status": "pending"}})
+    result = mco_approve("j1")
+    assert result["success"] is True
+    assert fake.calls == [("approve", "j1")]
+
+
+def test_mco_reject_delegates_with_reason(monkeypatch):
+    from mco.mcp_server import mco_reject
+    fake = _fake(monkeypatch, reject={"success": True, "job": {"status": "rejected"}})
+    mco_reject("j1", "nope")
+    assert fake.calls == [("reject", "j1", "nope")]
+
+
+def test_mco_audit_delegates(monkeypatch):
+    from mco.mcp_server import mco_audit
+    events = [{"event": "created"}, {"event": "leased"}]
+    fake = _fake(monkeypatch, events=events)
+    assert mco_audit("j1") == events
+    assert fake.calls == [("events", "j1")]

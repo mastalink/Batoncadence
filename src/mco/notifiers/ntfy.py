@@ -124,6 +124,28 @@ def notify_job_failed(job_id: str, error: str, to_role: str):
     )
 
 
+def notify_job_needs_approval(job_id: str, title: str, to_role: str):
+    """Human-in-the-loop gate: a job is paused waiting for an approval decision."""
+    notify(
+        f"Job {job_id} for {to_role} awaits approval: {title}",
+        title="MCO Approval Required",
+        priority=4,
+        tags=["mco", "job", "approval", to_role.lower()],
+        topic=f"mco-{to_role.lower()}" if to_role else None,
+    )
+
+
+def notify_job_escalated(job_id: str, title: str, escalate_to_role: str, error: str):
+    """A job exhausted retries and was escalated to another role."""
+    notify(
+        f"Job {job_id} escalated to {escalate_to_role}: {title}\nLast error: {error}",
+        title="MCO Job ESCALATED",
+        priority=5,
+        tags=["mco", "job", "escalated", escalate_to_role.lower()],
+        topic=f"mco-{escalate_to_role.lower()}" if escalate_to_role else None,
+    )
+
+
 def notify_force_pull(role: str, reason: str = "Manual trigger"):
     """Special signal used by force-pull scripts."""
     notify(

@@ -26,6 +26,7 @@ class FakeDB:
     def __init__(self):
         self._jobs: dict = {}
         self._agents: list = []
+        self._events: list = []
         self._rpc_result: bool = True
         self._next_id = 1
         self._q_table = None
@@ -118,6 +119,19 @@ class FakeDB:
             for col, val in self._q_conds.items():
                 rows = [r for r in rows if r.get(col) == val]
             return R([{k: v for k, v in r.items() if k != "auth_token_hash"} for r in rows])
+
+        if t == "agent_job_events":
+            if op == "insert":
+                data = dict(self._q_insert_data)
+                data.setdefault("id", len(self._events) + 1)
+                data.setdefault("created_at", f"2026-01-01T00:00:{len(self._events):02d}Z")
+                self._events.append(data)
+                return R([dict(data)])
+            if op == "select":
+                rows = list(self._events)
+                for col, val in self._q_conds.items():
+                    rows = [r for r in rows if r.get(col) == val]
+                return R([dict(r) for r in rows])
 
         if t == "agent_jobs":
             if op == "select":

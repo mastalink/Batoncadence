@@ -5,8 +5,24 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from mco.orchestrator.contracts import JobStatus
 from mco.orchestrator.auth import require_agent
+from mco.orchestrator.audit import record_event, get_events
 from mco.config import get_config
-from mco.notifiers.ntfy import notify_job_created, notify_job_completed, notify_job_failed, notify_job_leased
+from mco.notifiers.ntfy import (
+    notify_job_created,
+    notify_job_completed,
+    notify_job_failed,
+    notify_job_leased,
+    notify_job_needs_approval,
+)
+
+# Roles allowed to approve/reject jobs paused at the human-in-the-loop gate.
+DEFAULT_APPROVER_ROLES = "human,admin,operator"
+
+
+def get_approver_roles() -> set:
+    """Lower-cased roles permitted to decide approval gates (MCO_APPROVER_ROLES)."""
+    raw = get_config().get("MCO_APPROVER_ROLES") or DEFAULT_APPROVER_ROLES
+    return {r.strip().lower() for r in raw.split(",") if r.strip()}
 
 logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
@@ -72,20 +88,15 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
         target_agent_id = payload.get("target_agent_id")
         depends_on = payload.get("depends_on") or []
         input_payload = payload.get("input_payload") or {}
+        requires_approval = bool(payload.get("requires_approval"))
+        max_retries = int(payload.get("max_retries") or 0)
+        escalate_to_role = payload.get("escalate_to_role")
 
         if not title or not target_agent_role:
             raise HTTPException(status_code=400, detail="title and target_agent_role are required")
 
-        # Check dependencies
-        has_incomplete_deps = False
-        if depends_on:
-            dep_res = db_client.table("agent_jobs").select("status").in_("id", depends_on).execute()
-            for dep in (dep_res.data or []):
-                if dep.get("status") != JobStatus.COMPLETED.value:
-                    has_incomplete_deps = True
-                    break
-
-        status = JobStatus.WAITING.value if has_incomplete_deps else JobStatus.PENDING.value
+        from mco.orchestrator.handlers import _initial_status
+        status = _initial_status(db_client, depends_on, requires_approval)
 
         data = {
             "title": title,
@@ -98,27 +109,50 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
             "depends_on": depends_on,
             "input_payload": input_payload,
         }
+        # Governance columns are only sent when used (pre-migration DB compatibility).
+        if requires_approval:
+            data["requires_approval"] = True
+        if max_retries:
+            data["max_retries"] = max_retries
+        if escalate_to_role:
+            data["escalate_to_role"] = escalate_to_role
 
         res = db_client.table("agent_jobs").insert(data).execute()
         if res.data:
+            new_job = res.data[0]
+            record_event(db_client, new_job.get("id"), "created",
+                         agent["instance_id"], agent["role"],
+                         {"status": status, "target_agent_role": target_agent_role})
             # Trigger registered broadcast callback first
             if _broadcast_callback:
                 try:
-                    event_name = "job_created" if status == JobStatus.WAITING.value else "job_pending"
-                    await _broadcast_callback(event_name, res.data[0])
+                    if status == JobStatus.PENDING.value:
+                        event_name = "job_pending"
+                    elif status == JobStatus.NEEDS_APPROVAL.value:
+                        event_name = "job_needs_approval"
+                    else:
+                        event_name = "job_created"
+                    await _broadcast_callback(event_name, new_job)
                 except Exception as e:
                     logger.warning(f"Error executing broadcast callback: {e}")
             # ntfy webhook addon (if enabled via NTFY_* env vars)
             try:
-                notify_job_created(
-                    job_id=res.data[0].get("id", "unknown"),
-                    title=res.data[0].get("title", "Untitled job"),
-                    to_role=res.data[0].get("target_agent_role", "unknown"),
-                )
+                if status == JobStatus.NEEDS_APPROVAL.value:
+                    notify_job_needs_approval(
+                        job_id=new_job.get("id", "unknown"),
+                        title=new_job.get("title", "Untitled job"),
+                        to_role=new_job.get("target_agent_role", "unknown"),
+                    )
+                else:
+                    notify_job_created(
+                        job_id=new_job.get("id", "unknown"),
+                        title=new_job.get("title", "Untitled job"),
+                        to_role=new_job.get("target_agent_role", "unknown"),
+                    )
             except Exception as ntfy_err:
                 logger.debug(f"ntfy addon skipped: {ntfy_err}")
 
-            return {"success": True, "job": res.data[0]}
+            return {"success": True, "job": new_job}
         return {"success": False, "error": "Insert failed"}
     except Exception as e:
         logger.error(f"Error creating job: {e}")
@@ -177,6 +211,7 @@ async def lease_job(payload: dict, agent: dict = Depends(require_agent)):
         success = res.data if hasattr(res, "data") else False
         
         if success:
+            record_event(db_client, task_id, "leased", agent_instance_id, agent["role"])
             try:
                 notify_job_leased(task_id, agent_instance_id, agent["role"])
             except Exception as ntfy_err:
@@ -251,7 +286,8 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
             correlation_id="http_update",
             send_error=send_error,
             send_ack=send_ack,
-            broadcast_event=broadcast_event
+            broadcast_event=broadcast_event,
+            actor=agent,
         )
         
         if error_occurred:
@@ -276,6 +312,75 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
     except Exception as e:
         logger.error(f"Error updating job: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{job_id}/events")
+async def get_job_events(job_id: str, agent: dict = Depends(require_agent)):
+    """Immutable audit trail for one job, oldest event first."""
+    db_client = get_db_client()
+    if not db_client:
+        return []
+    return get_events(db_client, job_id)
+
+
+async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str = "") -> dict:
+    """Shared approve/reject flow for jobs paused at the human-in-the-loop gate."""
+    db_client = get_db_client()
+    if not db_client:
+        raise HTTPException(status_code=400, detail="Database not configured")
+
+    if (agent.get("role") or "").lower() not in get_approver_roles():
+        raise HTTPException(status_code=403, detail="Your role is not permitted to decide approval gates")
+
+    job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    if not job_res.data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = job_res.data[0]
+    if job.get("status") != JobStatus.NEEDS_APPROVAL.value:
+        raise HTTPException(status_code=400, detail=f"Job is not awaiting approval (status: {job.get('status')})")
+
+    if approve:
+        update_data = {
+            "status": JobStatus.PENDING.value,
+            "approved_by": agent["instance_id"],
+        }
+        event, event_name = "approved", "job_pending"
+    else:
+        update_data = {
+            "status": JobStatus.REJECTED.value,
+            "approved_by": agent["instance_id"],
+            "error_message": f"Rejected by {agent['instance_id']}: {reason or 'no reason given'}",
+        }
+        event, event_name = "rejected", "job_updated"
+
+    res = db_client.table("agent_jobs").update(update_data).eq("id", job_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Approval decision failed to persist")
+    decided_job = res.data[0]
+
+    record_event(db_client, job_id, event, agent["instance_id"], agent["role"],
+                 {"reason": reason} if reason else None)
+
+    if _broadcast_callback:
+        try:
+            await _broadcast_callback(event_name, decided_job)
+        except Exception as e:
+            logger.warning(f"Error executing broadcast callback after approval decision: {e}")
+
+    return {"success": True, "job": decided_job}
+
+
+@router.post("/{job_id}/approve")
+async def approve_job(job_id: str, agent: dict = Depends(require_agent)):
+    """Approve a NEEDS_APPROVAL job, releasing it to PENDING for execution."""
+    return await _decide_approval(job_id, agent, approve=True)
+
+
+@router.post("/{job_id}/reject")
+async def reject_job(job_id: str, payload: dict = None, agent: dict = Depends(require_agent)):
+    """Reject a NEEDS_APPROVAL job. Terminal: the job moves to REJECTED."""
+    reason = (payload or {}).get("reason", "")
+    return await _decide_approval(job_id, agent, approve=False, reason=reason)
 
 
 @agents_router.get("")
