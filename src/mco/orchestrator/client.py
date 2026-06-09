@@ -119,6 +119,28 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
+    def integrations(self) -> List[dict]:
+        """Configured enterprise connectors with health and supported actions."""
+        with self._client() as c:
+            r = c.get("/api/integrations")
+            r.raise_for_status()
+            return r.json()
+
+    def sync_connector(self, name: str) -> dict:
+        """Ingest open platform objects (incidents/problems) as jobs."""
+        with self._client() as c:
+            r = c.post(f"/api/integrations/{name}/sync")
+            r.raise_for_status()
+            return r.json()
+
+    def platform_action(self, name: str, action: str, params: Optional[dict] = None) -> dict:
+        """Run a connector control action directly (approver roles only)."""
+        with self._client() as c:
+            r = c.post(f"/api/integrations/{name}/action",
+                       json={"action": action, "params": params or {}})
+            r.raise_for_status()
+            return r.json()
+
     def agents(self) -> List[dict]:
         with self._client() as c:
             r = c.get("/api/agents")

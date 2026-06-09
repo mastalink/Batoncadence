@@ -86,6 +86,29 @@ def mco_agents() -> List[dict]:
     return _client().agents()
 
 
+@mcp.tool()
+def mco_integrations() -> List[dict]:
+    """List configured enterprise connectors (ServiceNow, Dynatrace, ...) with
+    health status and the platform actions each one supports."""
+    return _client().integrations()
+
+
+@mcp.tool()
+def mco_sync_connector(name: str) -> dict:
+    """Pull open platform objects (ServiceNow incidents / Dynatrace problems)
+    onto the job board as agent jobs. Idempotent - already-ingested objects are
+    skipped via their external_id."""
+    return _client().sync_connector(name)
+
+
+@mcp.tool()
+def mco_platform_action(name: str, action: str, params: dict = None) -> dict:
+    """Run an enterprise platform action through a connector (e.g.
+    servicenow create_incident / resolve_incident, dynatrace add_comment /
+    close_problem). Requires an approver-role token."""
+    return _client().platform_action(name, action, params or {})
+
+
 def run() -> None:
     """Run the MCP server over stdio."""
     mcp.run()

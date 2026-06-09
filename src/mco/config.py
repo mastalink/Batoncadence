@@ -30,6 +30,10 @@ class EnvironmentProfile:
 SENSITIVE_KEYS = {
     "SUPABASE_KEY",
     "SUPABASE_URL",
+    "SERVICENOW_PASSWORD",
+    "SERVICENOW_TOKEN",
+    "DYNATRACE_API_TOKEN",
+    "MCO_WEBHOOK_SECRET",
 }
 
 

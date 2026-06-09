@@ -268,6 +268,24 @@ async def _handle_failure(
             await broadcast_event("job_pending", requeued_job)
         return
 
+    # Enterprise escalation bridge: mirror the failure into an external ITSM
+    # platform (e.g. open a ServiceNow incident) when configured. Best-effort -
+    # a platform outage must never break the orchestration path.
+    try:
+        from mco.config import get_config
+        bridge_name = get_config().get("MCO_ESCALATION_CONNECTOR")
+        if bridge_name:
+            from mco.connectors import get_connector
+            bridge = get_connector(bridge_name)
+            if bridge:
+                ref = bridge.escalate(job, error_message or job.get("error_message") or "unknown")
+                record_event(db_client, job_id, "escalated_external", "system", "orchestrator",
+                             {"connector": bridge.name, "platform_ref": ref})
+    except NotImplementedError:
+        pass
+    except Exception as e:
+        logger.warning(f"Escalation bridge failed for job {job_id}: {e}")
+
     if not escalate_to_role:
         return
 
