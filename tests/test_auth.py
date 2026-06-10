@@ -83,7 +83,29 @@ async def test_require_agent_auth_paths(monkeypatch):
         await require_agent(authorization="Bearer not-a-real-token")
     assert bad.value.status_code == 401
 
+    # Local-Only mode: no DB, no MCO_LOCAL_TOKEN configured -> any bearer accepted.
+    import mco.orchestrator.auth as auth_mod
+
+    class _NullCfg:
+        def get(self, key):
+            return None
+
     monkeypatch.setattr(routes_mod, "get_db_client", lambda: None)
-    with pytest.raises(HTTPException) as nodb:
-        await require_agent(authorization=f"Bearer {tok}")
-    assert nodb.value.status_code == 503
+    monkeypatch.setattr(auth_mod, "get_config", lambda: _NullCfg())
+    agent_local = await require_agent(authorization=f"Bearer {tok}")
+    assert agent_local["instance_id"] == "local"
+    assert agent_local["role"] == "admin"
+
+    # Local-Only with MCO_LOCAL_TOKEN set: wrong token -> 401.
+    class _TokenCfg:
+        def get(self, key):
+            return "correct-local-token" if key == "MCO_LOCAL_TOKEN" else None
+
+    monkeypatch.setattr(auth_mod, "get_config", lambda: _TokenCfg())
+    with pytest.raises(HTTPException) as bad_local:
+        await require_agent(authorization="Bearer wrong-local-token")
+    assert bad_local.value.status_code == 401
+
+    # Correct local token accepted.
+    agent_local2 = await require_agent(authorization="Bearer correct-local-token")
+    assert agent_local2["instance_id"] == "local"

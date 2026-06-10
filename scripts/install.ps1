@@ -105,17 +105,29 @@ Ok "BatonCadence installed"
 # ----------------------------------------------------------------------------
 # 4. Configuration (.env) - safe Local-Only default, no cloud, no secrets
 # ----------------------------------------------------------------------------
-if (-not (Test-Path (Join-Path $root ".env"))) {
-    Set-Content -Path (Join-Path $root ".env") -Encoding ascii -Value @(
+$envPath = Join-Path $root ".env"
+if (-not (Test-Path $envPath)) {
+    # Generate a secure local access token (used in place of a database token).
+    $localToken = "mco_tok_" + (& $py -c "import secrets; print(secrets.token_hex(24))")
+    Set-Content -Path $envPath -Encoding ascii -Value @(
         "# BatonCadence configuration (created by install.ps1)",
         "# Local-Only profile: everything runs on this computer, no database",
         "# or cloud account needed. Run 'mco setup' later to change profiles.",
         "MCO_PROFILE=Local-Only",
-        "OPERATOR_NAME=$env:USERNAME"
+        "OPERATOR_NAME=$env:USERNAME",
+        "MCO_LOCAL_TOKEN=$localToken"
     )
-    Ok "Created Local-Only configuration (.env)"
+    Ok "Created Local-Only configuration (.env) with access token"
 } else {
-    Ok "Configuration (.env) already exists - leaving it untouched"
+    # Add MCO_LOCAL_TOKEN if it is missing from an existing .env
+    $envContent = Get-Content $envPath -Raw
+    if ($envContent -notmatch 'MCO_LOCAL_TOKEN') {
+        $localToken = "mco_tok_" + (& $py -c "import secrets; print(secrets.token_hex(24))")
+        Add-Content -Path $envPath -Encoding ascii -Value "MCO_LOCAL_TOKEN=$localToken"
+        Ok "Added MCO_LOCAL_TOKEN to existing .env"
+    } else {
+        Ok "Configuration (.env) already exists - leaving it untouched"
+    }
 }
 
 # ----------------------------------------------------------------------------

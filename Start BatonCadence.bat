@@ -2,9 +2,6 @@
 REM ============================================================================
 REM Start BatonCadence
 REM ============================================================================
-REM Starts the BatonCadence gateway and opens the console GUI in your browser.
-REM Close this window to stop BatonCadence.
-REM ============================================================================
 cd /d "%~dp0"
 title BatonCadence Server
 
@@ -14,19 +11,64 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-REM If a server is already running, just open the console and exit.
+REM ------------------------------------------------------------------
+REM Read MCO_LOCAL_TOKEN from .env so we can display it to the user
+REM ------------------------------------------------------------------
+set MCO_LOCAL_TOKEN=
+for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
+    if "%%A"=="MCO_LOCAL_TOKEN" set MCO_LOCAL_TOKEN=%%B
+)
+
+REM If a server is already running, just open the console.
 powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18789/healthz -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 if %errorlevel%==0 (
-    echo BatonCadence is already running. Opening the console...
+    cls
+    echo ============================================================
+    echo   BatonCadence is already running
+    echo ============================================================
+    echo.
+    if not "%MCO_LOCAL_TOKEN%"=="" (
+        echo   Your access token:
+        echo.
+        echo     %MCO_LOCAL_TOKEN%
+        echo.
+        echo   Copy that token, paste it in the console, click Connect.
+        echo   ^(It has been copied to your clipboard.^)
+        powershell -NoProfile -Command "Set-Clipboard '%MCO_LOCAL_TOKEN%'" >nul 2>&1
+    )
+    echo.
     start "" http://127.0.0.1:18789/console
     exit /b 0
 )
 
-echo Starting BatonCadence... your browser will open in a few seconds.
-echo Keep this window open. Close it to stop BatonCadence.
+cls
+echo.
+echo ============================================================
+echo   Starting BatonCadence...
+echo ============================================================
 echo.
 
-REM Open the console GUI once the server has had a moment to start.
-start "" /b cmd /c "timeout /t 4 /nobreak >nul & start http://127.0.0.1:18789/console"
+REM Copy the token to clipboard and show it BEFORE the server starts
+if not "%MCO_LOCAL_TOKEN%"=="" (
+    powershell -NoProfile -Command "Set-Clipboard '%MCO_LOCAL_TOKEN%'" >nul 2>&1
+    echo   Your access token ^(already copied to clipboard^):
+    echo.
+    echo     %MCO_LOCAL_TOKEN%
+    echo.
+    echo   In 5 seconds your browser will open the console.
+    echo   Paste the token into the "Agent token" box and click Connect.
+    echo.
+    echo   Keep this window open while BatonCadence is running.
+    echo   Close it to stop BatonCadence.
+    echo.
+    echo ============================================================
+) else (
+    echo   Opening console in a few seconds...
+    echo   Keep this window open. Close it to stop BatonCadence.
+    echo ============================================================
+)
+
+REM Open the console after a short delay so the server is ready.
+start "" /b cmd /c "timeout /t 5 /nobreak >nul & start http://127.0.0.1:18789/console"
 
 ".venv\Scripts\python.exe" -m mco.cli serve

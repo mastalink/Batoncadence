@@ -216,10 +216,20 @@ class TestAuthEnforcement:
             resp = self._request(method, path, body, headers={"Authorization": "Bearer garbage-token"})
             assert resp.status_code == 401, f"{method} {path} returned {resp.status_code}"
 
-    def test_503_when_db_not_configured(self, monkeypatch):
+    def test_local_only_mode_accepts_any_token(self, monkeypatch):
+        # When no DB is configured and MCO_LOCAL_TOKEN is unset, any bearer token
+        # is accepted (Local-Only profile with no secret configured).
+        import mco.orchestrator.auth as auth_mod
+
+        class _NullCfg:
+            def get(self, key):
+                return None
+
         monkeypatch.setattr(routes_mod, "get_db_client", lambda: None)
+        monkeypatch.setattr(auth_mod, "get_config", lambda: _NullCfg())
         resp = self.http.get("/api/jobs", headers={"Authorization": f"Bearer {TOKEN}"})
-        assert resp.status_code == 503
+        # Returns [] (no DB) with 200 — not a 503 anymore.
+        assert resp.status_code == 200
 
 
 # ── Dropbox policy tests ──────────────────────────────────────────────────────
