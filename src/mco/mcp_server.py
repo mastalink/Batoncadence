@@ -81,9 +81,57 @@ def mco_audit(task_id: str) -> List[dict]:
 
 
 @mcp.tool()
+def mco_retry(task_id: str) -> dict:
+    """Re-queue a failed or rejected job back to pending (human override).
+    Only approver roles (MCO_APPROVER_ROLES) may call this."""
+    return _client().retry(task_id)
+
+
+@mcp.tool()
 def mco_agents() -> List[dict]:
     """List registered agents and their online/offline presence."""
     return _client().agents()
+
+
+@mcp.tool()
+def mco_recall(query: str = "", tags: str = "", limit: int = 5) -> List[dict]:
+    """Dip into Mythos, the mesh's shared context: recall the most relevant
+    facts/decisions/lessons/handoffs recorded by any agent or distilled from
+    completed jobs. Call this before starting non-trivial work."""
+    tag_list = [t for t in tags.split(",") if t.strip()] if tags else None
+    return _client().recall(query, tags=tag_list, limit=limit)
+
+
+@mcp.tool()
+def mco_remember(title: str, content: str, kind: str = "fact", tags: str = "") -> dict:
+    """Write to Mythos, the mesh's shared context, for every agent downstream.
+    kind: fact | decision | lesson | handoff | artifact. Record durable
+    knowledge (decisions made, gotchas found, environment facts) - not chatter."""
+    tag_list = [t for t in tags.split(",") if t.strip()] if tags else []
+    return _client().remember(title, content, kind=kind, tags=tag_list)
+
+
+@mcp.tool()
+def mco_integrations() -> List[dict]:
+    """List configured enterprise connectors (ServiceNow, Dynatrace, ...) with
+    health status and the platform actions each one supports."""
+    return _client().integrations()
+
+
+@mcp.tool()
+def mco_sync_connector(name: str) -> dict:
+    """Pull open platform objects (ServiceNow incidents / Dynatrace problems)
+    onto the job board as agent jobs. Idempotent - already-ingested objects are
+    skipped via their external_id."""
+    return _client().sync_connector(name)
+
+
+@mcp.tool()
+def mco_platform_action(name: str, action: str, params: dict = None) -> dict:
+    """Run an enterprise platform action through a connector (e.g.
+    servicenow create_incident / resolve_incident, dynatrace add_comment /
+    close_problem). Requires an approver-role token."""
+    return _client().platform_action(name, action, params or {})
 
 
 def run() -> None:

@@ -243,6 +243,14 @@ def create_app() -> FastAPI:
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
 
+    # Enterprise integrations (ServiceNow, Dynatrace, webhooks)
+    from mco.orchestrator.integration_routes import integrations_router
+    app_server.include_router(integrations_router)
+
+    # Mythos shared context (collective agent memory)
+    from mco.orchestrator.context_routes import context_router
+    app_server.include_router(context_router)
+
     # Control-plane dashboard (static single page; auth happens via the API token)
     from fastapi.responses import HTMLResponse
     from mco.dashboard import DASHBOARD_HTML
@@ -250,6 +258,13 @@ def create_app() -> FastAPI:
     @app_server.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
     async def dashboard() -> str:
         return DASHBOARD_HTML
+
+    # BatonCadence Console (full control-plane GUI; auth via API bearer token)
+    from mco.console import get_console_html
+
+    @app_server.get("/console", response_class=HTMLResponse, include_in_schema=False)
+    async def console_ui() -> str:
+        return get_console_html()
 
     # Register broadcast callback
     register_broadcast_callback(server_broadcast_callback)
@@ -402,6 +417,7 @@ def serve(
     console.print(Panel.fit(
         f"[bold green]Starting MCOrchestr8 Server[/bold green]\n"
         f"Host: http://{host}:{port}\n"
+        f"Console: http://{host}:{port}/console\n"
         f"WebSocket: ws://{host}:{port}/ws/broadcast",
         border_style="green"
     ))
@@ -483,6 +499,41 @@ def serve(
 
     _periodic_process_snapshot()
 
+    # Background enterprise connector sync (opt-in via MCO_SYNC_INTERVAL seconds).
+    # Pulls open ServiceNow incidents / Dynatrace problems onto the job board.
+    def _periodic_connector_sync():
+        import threading
+        import time
+        try:
+            interval = float(config.get("MCO_SYNC_INTERVAL") or 0)
+        except (TypeError, ValueError):
+            interval = 0
+        if interval <= 0:
+            return
+        from mco.connectors import build_connectors
+        from mco.connectors.sync import sync_connector
+        connectors = build_connectors()
+        if not connectors:
+            return
+        console.print(f"[dim]Connector sync enabled every {interval:.0f}s: "
+                      f"{', '.join(c.name for c in connectors)}[/dim]")
+
+        def _syncer():
+            from mco.orchestrator.routes import get_db_client
+            while True:
+                time.sleep(interval)
+                db = get_db_client()
+                if not db:
+                    continue
+                for conn in connectors:
+                    try:
+                        sync_connector(db, conn)
+                    except Exception as sync_err:
+                        logger.warning(f"Background sync failed for {conn.name}: {sync_err}")
+        threading.Thread(target=_syncer, daemon=True).start()
+
+    _periodic_connector_sync()
+
     uvicorn.run(app_server, host=host, port=port)
 
 
@@ -526,6 +577,19 @@ def listen(
         console.print(f"[dim]Registered executors for roles: {', '.join(registered)}[/dim]")
     except Exception as e:
         console.print(f"[yellow][WARN] Could not register default executors: {e}[/yellow]")
+
+    # Connector roles: a listener for role "servicenow"/"dynatrace" executes
+    # platform actions (input_payload.action) instead of running a CLI tool.
+    try:
+        from mco.connectors import get_connector, make_connector_executor
+        from mco.orchestrator.listener import register_executor
+        conn = get_connector(role)
+        if conn:
+            register_executor(role, make_connector_executor(conn))
+            console.print(f"[dim]Role '{role}' wired to the {conn.name} connector "
+                          f"(actions: {', '.join(conn.actions())}).[/dim]")
+    except Exception as e:
+        console.print(f"[yellow][WARN] Connector executor not wired: {e}[/yellow]")
 
     try:
         listener = AgentListener(config_path=config_file)
@@ -762,6 +826,78 @@ def reject(
         console.print(f"[bold yellow][OK] Job {job_id} rejected -> {res['job']['status']}[/bold yellow]")
     except Exception as e:
         console.print(f"[red][ERROR] Rejection failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("retry")
+def retry(job_id: str = typer.Argument(..., help="Failed/rejected job ID to re-queue.")):
+    """Re-queue a failed or rejected job back to pending (approver-role token)."""
+    try:
+        res = _gateway_client().retry(job_id)
+        console.print(f"[bold green][OK] Job {job_id} re-queued -> {res['job']['status']}[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Retry failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Enterprise integrations
+# ─────────────────────────────────────────────────────────────────────────────
+@app.command("connectors")
+def list_connectors_cmd():
+    """List configured enterprise connectors and their health (via the gateway)."""
+    try:
+        rows = _gateway_client().integrations()
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to query integrations: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    if not rows:
+        console.print("[yellow]No connectors configured. Set SERVICENOW_INSTANCE_URL / "
+                      "DYNATRACE_BASE_URL (plus credentials) and restart the gateway.[/yellow]")
+        return
+
+    table = Table(title="Enterprise Connectors", show_header=True, header_style="bold magenta")
+    table.add_column("Connector", style="cyan")
+    table.add_column("Health", style="bold")
+    table.add_column("Actions", style="dim")
+    for row in rows:
+        health = row.get("health") or {}
+        status = "[green]ok[/green]" if health.get("ok") else f"[red]down[/red] {health.get('detail', '')}"
+        table.add_row(row.get("name", ""), status, ", ".join(row.get("actions") or []))
+    console.print(table)
+
+
+@app.command("sync")
+def sync_cmd(connector: str = typer.Argument(..., help="Connector name (servicenow, dynatrace).")):
+    """Pull open platform objects (incidents/problems) onto the job board."""
+    try:
+        summary = _gateway_client().sync_connector(connector)
+    except Exception as e:
+        console.print(f"[red][ERROR] Sync failed: {e}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[bold green][OK] {connector} sync:[/bold green] "
+                  f"pulled={summary.get('pulled')} created={len(summary.get('created') or [])} "
+                  f"skipped={summary.get('skipped')} (already on the board)")
+
+
+@app.command("platform")
+def platform_action(
+    connector: str = typer.Argument(..., help="Connector name (servicenow, dynatrace)."),
+    action: str = typer.Argument(..., help="Action name (see 'mco connectors')."),
+    params: str = typer.Option("{}", "--params", help="JSON parameters for the action."),
+):
+    """Run a connector control action directly (requires an approver-role token)."""
+    try:
+        parsed = json.loads(params)
+    except json.JSONDecodeError as e:
+        console.print(f"[red][ERROR] --params is not valid JSON: {e}[/red]")
+        raise typer.Exit(code=1)
+    try:
+        res = _gateway_client().platform_action(connector, action, parsed)
+        console.print(f"[bold green][OK][/bold green] {json.dumps(res.get('result'), indent=2)}")
+    except Exception as e:
+        console.print(f"[red][ERROR] Action failed: {e}[/red]")
         raise typer.Exit(code=1)
 
 

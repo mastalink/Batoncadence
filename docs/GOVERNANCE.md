@@ -144,6 +144,13 @@ curl -X POST http://127.0.0.1:18789/api/jobs \
        "max_retries": 2, "escalate_to_role": "human"}'
 ```
 
+A human with an approver-role token can also **manually re-queue** any
+`failed` or `rejected` job (lease and error cleared, audited as `retried`):
+
+```bash
+mco retry <job_id>      # or POST /api/jobs/{id}/retry, or the mco_retry MCP tool
+```
+
 ---
 
 ## 5. Workflow DSL
@@ -215,6 +222,7 @@ agents use - it has no privileged backdoor.
 | `GET` | `/api/jobs/{id}/events` | any agent | Audit trail, oldest first |
 | `POST` | `/api/jobs/{id}/approve` | approver roles | `needs_approval` -> `pending`, stamps `approved_by` |
 | `POST` | `/api/jobs/{id}/reject` | approver roles | `needs_approval` -> `rejected` (terminal); body: `{"reason": "..."}` |
+| `POST` | `/api/jobs/{id}/retry` | approver roles | `failed`/`rejected` -> `pending` (human override; clears lease + error) |
 
 Errors: `403` if the caller's role is not in `MCO_APPROVER_ROLES`, `400` if
 the job is not at the gate, `404` if the job does not exist.

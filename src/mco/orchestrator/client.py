@@ -105,6 +105,13 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
+    def retry(self, task_id: str) -> dict:
+        """Re-queue a failed/rejected job to pending (approver roles only)."""
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/retry")
+            r.raise_for_status()
+            return r.json()
+
     def events(self, task_id: str) -> List[dict]:
         """Immutable audit trail for a job, oldest first."""
         with self._client() as c:
@@ -116,6 +123,50 @@ class GatewayClient:
         """Most recent jobs on the board (any status)."""
         with self._client() as c:
             r = c.get("/api/jobs")
+            r.raise_for_status()
+            return r.json()
+
+    def recall(self, query: str = "", tags: Optional[List[str]] = None, limit: int = 5) -> List[dict]:
+        """Recall the most relevant Mythos shared-context entries."""
+        params: dict = {"query": query, "role": self.role, "limit": limit}
+        if tags:
+            params["tags"] = ",".join(tags)
+        with self._client() as c:
+            r = c.get("/api/context", params=params)
+            r.raise_for_status()
+            return r.json()
+
+    def remember(self, title: str, content: str, kind: str = "fact",
+                 tags: Optional[List[str]] = None, role: Optional[str] = None,
+                 source_job_id: Optional[str] = None) -> dict:
+        """Append an entry to the Mythos shared context."""
+        with self._client() as c:
+            r = c.post("/api/context", json={
+                "title": title, "content": content, "kind": kind,
+                "tags": tags or [], "role": role, "source_job_id": source_job_id,
+            })
+            r.raise_for_status()
+            return r.json()
+
+    def integrations(self) -> List[dict]:
+        """Configured enterprise connectors with health and supported actions."""
+        with self._client() as c:
+            r = c.get("/api/integrations")
+            r.raise_for_status()
+            return r.json()
+
+    def sync_connector(self, name: str) -> dict:
+        """Ingest open platform objects (incidents/problems) as jobs."""
+        with self._client() as c:
+            r = c.post(f"/api/integrations/{name}/sync")
+            r.raise_for_status()
+            return r.json()
+
+    def platform_action(self, name: str, action: str, params: Optional[dict] = None) -> dict:
+        """Run a connector control action directly (approver roles only)."""
+        with self._client() as c:
+            r = c.post(f"/api/integrations/{name}/action",
+                       json={"action": action, "params": params or {}})
             r.raise_for_status()
             return r.json()
 

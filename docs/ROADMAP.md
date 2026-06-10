@@ -83,6 +83,25 @@ Cross-cutting validated requirements still open:
 - RBAC: approver-role gating shipped; full per-scope token permissions still open.
 - Packaged Agent SDK with quickstart for third-party agents — still open.
 
+### Phase B+ - Enterprise Integrations — **SHIPPED (June 2026)**
+The cross-vendor control capability named explicitly in the Gartner action
+item ("centralized orchestration ... across vendors, including ServiceNow
+control towers"):
+- **Connector framework** (`src/mco/connectors/`) with a registry, health
+  probes, and a connector-as-worker-role pattern.
+- **ServiceNow** (ITSM): ingest incidents as agent jobs; create/update/
+  comment/resolve incidents from agents or approver-gated direct actions.
+- **Dynatrace** (observability): ingest OPEN problems; comment/close from
+  agent workflows.
+- **Generic webhook contract** for any other platform (PagerDuty,
+  LogicMonitor, Datadog, custom apps) secured by `MCO_WEBHOOK_SECRET`.
+- **Idempotent sync engine** (dedupe by external id) - on-demand
+  (`mco sync`, REST, MCP) or background (`MCO_SYNC_INTERVAL`).
+- **Escalation bridge** (`MCO_ESCALATION_CONNECTOR`): terminal job failures
+  mirrored into ITSM with full audit (`escalated_external` events).
+- Credentials ride the AES-256-GCM secret store; docs in
+  `docs/INTEGRATIONS.md`; suite at 151 tests.
+
 ### Phase C - Pilot / Beta <- WE ARE HERE
 - Re-engage Gartner conference contacts; target 3-5 pilot deployments.
 - One-pager + demo script built from the working approval-gate + audit demo.

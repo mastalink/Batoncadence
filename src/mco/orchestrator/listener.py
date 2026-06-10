@@ -273,6 +273,28 @@ class AgentListener:
         except Exception as e:
             logger.error(f"Error processing job {job_id}: {e}")
 
+    async def _fetch_shared_context(self, job: Dict[str, Any]) -> str:
+        """Mythos tap: recall relevant shared context for this job from the
+        gateway and render it as an injectable block. Never raises."""
+        inject = get_config().get("MCO_MYTHOS_INJECT") or os.environ.get("MCO_MYTHOS_INJECT") or "true"
+        if str(inject).lower() == "false":
+            return ""
+        try:
+            import httpx
+            from mco.orchestrator.mythos import render_context_block
+            query = f"{job.get('title', '')} {job.get('description', '')[:200]}"
+            async with httpx.AsyncClient() as client:
+                res = await client.get(
+                    f"{self.gateway_http_url}/api/context",
+                    params={"query": query, "role": self.role, "limit": 5},
+                    headers=self._auth_headers(), timeout=10.0,
+                )
+                if res.status_code == 200:
+                    return render_context_block(res.json())
+        except Exception as e:
+            logger.debug(f"Mythos context fetch skipped: {e}")
+        return ""
+
     async def _execute_task(self, job: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
         """Run the actual tool wrapper based on target role."""
         description = job.get("description", "")
@@ -282,6 +304,12 @@ class AgentListener:
         prompt = f"Task Title: {title}\nInstructions:\n{description}"
         if "prompt" in input_payload:
             prompt = input_payload["prompt"]
+
+        # Mythos: prepend the shared-context block so every agent starts from
+        # the mesh's collective memory, not a blank slate.
+        context_block = await self._fetch_shared_context(job)
+        if context_block:
+            prompt = f"{context_block}\n\n{prompt}"
 
         logger.info(f"Running task with prompt length {len(prompt)}...")
 
