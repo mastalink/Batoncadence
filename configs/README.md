@@ -10,6 +10,19 @@ each app uses its own scheduler to check its inbox.
    and you must paste its **current** access token into the config below.
    (Re-running `register` rotates the token — use the latest.)
 
+> **Windows / `uv` gotcha.** If `mco <cmd>` errors with
+> `can't open file '...\main.py'` or runs from
+> `AppData\Roaming\uv\...\python.exe`, a global `uv`/`pipx` shim is shadowing
+> the venv's `mco`. Fix once with `scripts\setup.ps1`, then invoke the CLI
+> shim-proof: `scripts\mco.ps1 <cmd>` (or
+> `.venv\Scripts\python.exe -m mco.cli <cmd>`). The MCP `command` paths below
+> point at the venv's `mco.exe` directly, so the GUIs are unaffected.
+
+> **Tokens from `.env`.** `mco workflow|approve|sync|...` read
+> `MCO_AGENT_TOKEN` / `MCO_GATEWAY_URL` from your `.env` and secret store (not
+> just the OS environment) — set the token in `.env` once instead of
+> `set MCO_AGENT_TOKEN=...` in every shell.
+
 ## Install per app
 Replace `mco_tok_REPLACE_WITH_*` with each agent's real token first.
 

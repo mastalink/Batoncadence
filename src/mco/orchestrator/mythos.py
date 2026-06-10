@@ -62,6 +62,7 @@ def remember(
     created_by: str = "system",
     source_job_id: Optional[str] = None,
     weight: float = 1.0,
+    org_id: str = "default",
 ) -> Optional[dict]:
     """Append one entry to the shared context. Returns the stored row or None."""
     if db_client is None or not title or not content:
@@ -79,6 +80,9 @@ def remember(
         "source_job_id": source_job_id,
         "weight": max(0.1, min(float(weight), 5.0)),
     }
+    # Tenant stamp (omitted for the default org so pre-migration DBs keep working).
+    if org_id and org_id != "default":
+        data["org_id"] = org_id
     try:
         res = db_client.table(CONTEXT_TABLE).insert(data).execute()
         return res.data[0] if res.data else None
@@ -119,6 +123,7 @@ def distill_job(db_client: Any, job: dict) -> Optional[dict]:
         tags=tags,
         created_by=job.get("leased_by_instance_id") or job.get("target_agent_role") or "system",
         source_job_id=str(job.get("id")),
+        org_id=job.get("org_id") or "default",
     )
 
 
@@ -145,6 +150,7 @@ def recall(
     role: Optional[str] = None,
     tags: Optional[List[str]] = None,
     limit: int = 5,
+    org_id: str = "default",
 ) -> List[dict]:
     """Return the most relevant shared-context entries, best first.
 
@@ -165,7 +171,8 @@ def recall(
         logger.warning(f"Mythos recall skipped: {e}")
         return []
 
-    entries = res.data or []
+    # Tenant isolation: an org only ever recalls its own memory.
+    entries = [e for e in (res.data or []) if (e.get("org_id") or "default") == (org_id or "default")]
     if tags:
         wanted = {t.strip().lower() for t in tags if t and t.strip()}
         entries = [e for e in entries if wanted & set(e.get("tags") or [])]

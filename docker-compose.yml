@@ -1,0 +1,28 @@
+# Local/any-cloud deployment: gateway + one worker per role you want to run.
+# Set SUPABASE_URL / SUPABASE_KEY / MCO_AGENT_TOKEN in .env or your secret manager.
+services:
+  gateway:
+    build: .
+    ports:
+      - "18789:18789"
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      MCO_APPROVER_ROLES: ${MCO_APPROVER_ROLES:-human,admin,operator}
+      MCO_POLICY_GATED_ROLES: ${MCO_POLICY_GATED_ROLES:-servicenow,dynatrace}
+      MCO_SYNC_INTERVAL: ${MCO_SYNC_INTERVAL:-0}
+      NTFY_SERVER: ${NTFY_SERVER:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+    restart: unless-stopped
+
+  worker-codex:
+    build: .
+    command: ["mco", "listen", "--role", "codex", "--instance", "codex-docker-1"]
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      MCO_AGENT_TOKEN: ${MCO_CODEX_TOKEN}
+      GATEWAY_WS_URL: ws://gateway:18789/ws/broadcast
+    depends_on:
+      - gateway
+    restart: unless-stopped

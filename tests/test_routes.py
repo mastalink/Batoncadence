@@ -49,6 +49,7 @@ class FakeDB:
 
     def add_job(self, **kwargs) -> str:
         jid = kwargs.setdefault("id", f"job-{self._next_id}")
+        kwargs.setdefault("org_id", "default")  # mirrors the DB column default
         self._next_id += 1
         self._jobs[jid] = dict(kwargs)
         return jid
@@ -157,6 +158,7 @@ class FakeDB:
             if op == "insert":
                 data = dict(self._q_insert_data)
                 data.setdefault("id", f"job-{self._next_id}")
+                data.setdefault("org_id", "default")  # mirrors the DB column default
                 self._next_id += 1
                 self._jobs[data["id"]] = data
                 return R([dict(data)])
