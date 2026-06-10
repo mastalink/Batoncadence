@@ -31,6 +31,16 @@ BatonCadence is a highly secure, modular, and completely standalone agent orches
 
 ## Installation
 
+### One-click install (Windows)
+
+Double-click **`install.bat`** in the repo root. It finds (or installs)
+Python, creates the `.venv`, installs BatonCadence, writes a safe Local-Only
+config, and drops a **BatonCadence** shortcut on the Desktop that starts the
+server and opens the console GUI. Full walkthrough and troubleshooting in
+[docs/INSTALL.md](docs/INSTALL.md).
+
+### Manual install
+
 BatonCadence is designed to be installed as a local editable python package.
 
 ### Prerequisites
