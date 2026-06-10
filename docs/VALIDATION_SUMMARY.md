@@ -1,10 +1,10 @@
-# MCOrchestr8 (AgentMesh) - Market Validation Summary
+# BatonCadence (AgentMesh) - Market Validation Summary
 
 **Validation date:** December 9, 2025
 **Location:** Gartner IT Infrastructure Conference, Las Vegas
 **Source material:** Fireflies meeting transcripts (3 recorded sessions), Gartner session content, vendor and peer conversations.
 
-> MCOrchestr8 is the working name of the platform validated under the project
+> BatonCadence is the working name of the platform validated under the project
 > codename **"AgentMesh - the Ansible for AI Agents"**: a vendor-neutral
 > orchestration and governance layer for multi-vendor AI agents.
 

@@ -123,13 +123,13 @@ class DynatraceConnector(BaseConnector):
             pid = self._require(params, "problem_id")
             self._request("POST", f"/api/v2/problems/{pid}/comments", json={
                 "message": params.get("comment") or params.get("message") or "",
-                "context": "MCOrchestr8",
+                "context": "BatonCadence",
             })
             return {"problem_id": pid, "commented": True}
         if action == "close_problem":
             pid = self._require(params, "problem_id")
             self._request("POST", f"/api/v2/problems/{pid}/close", json={
-                "message": params.get("message") or "Closed by MCOrchestr8 agent.",
+                "message": params.get("message") or "Closed by BatonCadence agent.",
             })
             return {"problem_id": pid, "closed": True}
         if action == "get_problem":

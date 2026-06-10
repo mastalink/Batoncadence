@@ -92,7 +92,7 @@ async def test_handle_job_create_no_dependencies():
     db_client = MockSupabaseClient()
     payload = {
         "title": "Write Unit Tests",
-        "description": "Create tests for MCOrchestr8",
+        "description": "Create tests for BatonCadence",
         "target_agent_role": "codex"
     }
 

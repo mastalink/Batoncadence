@@ -1,5 +1,5 @@
 """
-MCOrchestr8 Encrypted Secret Store
+BatonCadence Encrypted Secret Store
 ==================================
 AES-256-GCM encryption for sensitive configuration values.
 

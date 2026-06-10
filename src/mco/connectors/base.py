@@ -1,7 +1,7 @@
 """
 Enterprise connector framework.
 
-Connectors bridge MCOrchestr8 to the agent surfaces of enterprise platforms
+Connectors bridge BatonCadence to the agent surfaces of enterprise platforms
 (ServiceNow, Dynatrace, ...). Each connector plays two roles:
 
 1. **Ingestion** - `pull_events()` normalizes platform objects (incidents,

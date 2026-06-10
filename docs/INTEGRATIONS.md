@@ -1,6 +1,6 @@
-# MCOrchestr8 Enterprise Integrations
+# BatonCadence Enterprise Integrations
 
-How to connect MCOrchestr8 to the agent surfaces of enterprise platforms -
+How to connect BatonCadence to the agent surfaces of enterprise platforms -
 **ServiceNow** (ITSM control tower), **Dynatrace** (observability/AIOps), and
 any other system via the **generic webhook contract**. This is the
 "centralized orchestration and monitoring of multiple AI agents across

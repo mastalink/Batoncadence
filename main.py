@@ -1,4 +1,4 @@
-"""Main script entrypoint for running MCOrchestr8 directly via python."""
+"""Main script entrypoint for running BatonCadence directly via python."""
 
 from mco.cli import main
 

@@ -1,11 +1,11 @@
 """
-MCOrchestr8 NTFY Notifier Addon
+BatonCadence NTFY Notifier Addon
 ================================
 
 Simple addon to push important MCO events and logs to ntfy.sh (or self-hosted ntfy server)
 via webhooks.
 
-Usage in MCOrchestr8:
+Usage in BatonCadence:
 - Set in .env or config:
   NTFY_SERVER=https://ntfy.sh
   NTFY_TOPIC=mco-events   # or mco-codex, mco-grok, etc. for per-agent topics
@@ -32,7 +32,7 @@ from mco.config import get_config
 
 
 def get_ntfy_config() -> dict:
-    """Read ntfy settings from MCOrchestr8 config."""
+    """Read ntfy settings from BatonCadence config."""
     config = get_config()
     return {
         "server": config.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/"),
@@ -62,7 +62,7 @@ def notify(
     url = f"{server}/{topic}"
 
     headers = {
-        "Title": title or "MCOrchestr8",
+        "Title": title or "BatonCadence",
         "Priority": str(priority),
     }
     if tags:
@@ -86,7 +86,7 @@ def notify(
 def notify_job_created(job_id: str, title: str, to_role: str):
     notify(
         f"New MCO job for {to_role}: {title}",
-        title="MCO Job Created",
+        title="BatonCadence Job Created",
         priority=3,
         tags=["mco", "job", to_role.lower()],
         topic=f"mco-{to_role.lower()}" if to_role else None,
@@ -96,7 +96,7 @@ def notify_job_created(job_id: str, title: str, to_role: str):
 def notify_job_leased(job_id: str, agent_id: str, to_role: str):
     notify(
         f"🏃 Job {job_id} leased by {agent_id} ({to_role})",
-        title="MCO Job Leased",
+        title="BatonCadence Job Leased",
         priority=2,
         tags=["mco", "job", "leased", to_role.lower()],
         topic=f"mco-{to_role.lower()}" if to_role else None,
@@ -107,7 +107,7 @@ def notify_job_completed(job_id: str, status: str, to_role: str):
     emoji = "✅" if status.lower() in ("success", "done", "completed") else "❌"
     notify(
         f"{emoji} Job {job_id} for {to_role} -> {status}",
-        title="MCO Job Completed",
+        title="BatonCadence Job Completed",
         priority=2 if status.lower() in ("success", "done", "completed") else 4,
         tags=["mco", "job", status.lower(), to_role.lower()],
         topic=f"mco-{to_role.lower()}" if to_role else None,
@@ -117,7 +117,7 @@ def notify_job_completed(job_id: str, status: str, to_role: str):
 def notify_job_failed(job_id: str, error: str, to_role: str):
     notify(
         f"❌ Job {job_id} for {to_role} FAILED: {error}",
-        title="MCO Job FAILED",
+        title="BatonCadence Job FAILED",
         priority=5,
         tags=["mco", "job", "failed", to_role.lower()],
         topic=f"mco-{to_role.lower()}" if to_role else None,
@@ -128,7 +128,7 @@ def notify_job_needs_approval(job_id: str, title: str, to_role: str):
     """Human-in-the-loop gate: a job is paused waiting for an approval decision."""
     notify(
         f"Job {job_id} for {to_role} awaits approval: {title}",
-        title="MCO Approval Required",
+        title="BatonCadence Approval Required",
         priority=4,
         tags=["mco", "job", "approval", to_role.lower()],
         topic=f"mco-{to_role.lower()}" if to_role else None,
@@ -139,7 +139,7 @@ def notify_job_escalated(job_id: str, title: str, escalate_to_role: str, error: 
     """A job exhausted retries and was escalated to another role."""
     notify(
         f"Job {job_id} escalated to {escalate_to_role}: {title}\nLast error: {error}",
-        title="MCO Job ESCALATED",
+        title="BatonCadence Job ESCALATED",
         priority=5,
         tags=["mco", "job", "escalated", escalate_to_role.lower()],
         topic=f"mco-{escalate_to_role.lower()}" if escalate_to_role else None,
@@ -160,7 +160,7 @@ def notify_force_pull(role: str, reason: str = "Manual trigger"):
 def notify_agent_online(role: str, instance_id: str):
     notify(
         f"Agent online: {role} ({instance_id})",
-        title="MCO Agent Online",
+        title="BatonCadence Agent Online",
         priority=2,
         tags=["mco", "agent", "online", role.lower()],
     )
@@ -169,7 +169,7 @@ def notify_agent_online(role: str, instance_id: str):
 def notify_agent_offline(role: str, instance_id: str):
     notify(
         f"Agent offline: {role} ({instance_id})",
-        title="MCO Agent Offline",
+        title="BatonCadence Agent Offline",
         priority=3,
         tags=["mco", "agent", "offline", role.lower()],
     )
@@ -188,7 +188,7 @@ def notify_gateway_startup(stats: dict):
     
     notify(
         "\n".join(msg_lines),
-        title="MCOrchestr8 Gateway Started",
+        title="BatonCadence Gateway Started",
         priority=2,
         tags=["gateway", "startup", "mco"],
     )

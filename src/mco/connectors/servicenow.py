@@ -154,7 +154,7 @@ class ServiceNowConnector(BaseConnector):
             self._request("PATCH", f"/api/now/table/incident/{sys_id}", json={
                 "state": "6",  # Resolved
                 "close_code": params.get("close_code") or "Solved (Permanently)",
-                "close_notes": params.get("close_notes") or "Resolved by MCOrchestr8 agent.",
+                "close_notes": params.get("close_notes") or "Resolved by BatonCadence agent.",
             })
             return {"sys_id": sys_id, "resolved": True}
         if action == "get_incident":
@@ -168,7 +168,7 @@ class ServiceNowConnector(BaseConnector):
         return self.execute_action("create_incident", {
             "short_description": f"MCO escalation: {job.get('title', 'agent job failed')}",
             "description": (
-                f"MCOrchestr8 job {job.get('id')} failed after exhausting retries.\n"
+                f"BatonCadence job {job.get('id')} failed after exhausting retries.\n"
                 f"Target role: {job.get('target_agent_role')}\n"
                 f"Last error: {error}\n\n"
                 f"Original instructions:\n{job.get('description') or ''}"

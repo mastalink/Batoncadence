@@ -1,7 +1,7 @@
 [project]
 name = "mco"
 version = "0.1.0"
-description = "MCOrchestr8: Standalone Multi-Client Agent Orchestration System"
+description = "BatonCadence: Standalone Multi-Client Agent Orchestration System"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
