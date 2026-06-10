@@ -153,26 +153,104 @@ $shortcut.Save()
 Ok "Shortcut 'BatonCadence' added to the Desktop"
 
 # ----------------------------------------------------------------------------
-# Done
+# Done - choose your starting mode
 # ----------------------------------------------------------------------------
 Write-Host ""
 Ok "Setup complete!"
 Write-Host ""
-Write-Host "Next steps:" -ForegroundColor Cyan
+
+if ($NoPrompt) {
+    Write-Host "Run 'Start BatonCadence.bat' to launch." -ForegroundColor Cyan
+    exit 0
+}
+
+# Read the token we just generated/verified (it's in .env)
+$localToken = (Get-Content (Join-Path $root ".env") | Where-Object { $_ -match "^MCO_LOCAL_TOKEN=" }) -replace "^MCO_LOCAL_TOKEN=",""
+
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "  How do you want to start?" -ForegroundColor Cyan
+Write-Host "============================================================"
 Write-Host ""
-Write-Host "  1. Double-click the 'BatonCadence' icon on your Desktop."
-Write-Host "  2. Your browser opens the console at http://127.0.0.1:18789/console"
-Write-Host "  3. To stop BatonCadence, close its black server window."
+Write-Host "  [1] Demo mode    Look around with sample data first." -ForegroundColor Yellow
+Write-Host "                   The console shows simulated jobs and agents."
+Write-Host "                   You can connect to the live server any time."
 Write-Host ""
-Write-Host "Power-user commands (from this folder):" -ForegroundColor Cyan
-Write-Host "  .venv\Scripts\python.exe -m mco.cli setup    # interactive wizard (profiles, encryption)"
-Write-Host "  .venv\Scripts\python.exe -m mco.cli status   # configuration health check"
-Write-Host "  .venv\Scripts\python.exe -m mco.cli serve    # run the gateway in the foreground"
+Write-Host "  [2] Connect now  Get the console talking to this computer" -ForegroundColor Green
+Write-Host "                   right away. Takes about 30 seconds."
+Write-Host ""
+$modeChoice = Read-Host "Choose [1] or [2] (default: 1)"
+if ($modeChoice -eq "") { $modeChoice = "1" }
+
 Write-Host ""
 
-if (-not $NoPrompt) {
-    $answer = Read-Host "Would you like to start BatonCadence now? [Y/n]"
-    if ($answer -eq "" -or $answer -match "^[Yy]") {
+if ($modeChoice -eq "2") {
+    # ---- CONNECT NOW path ----
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "  Connect the console to your server" -ForegroundColor Green
+    Write-Host "============================================================"
+    Write-Host ""
+    Write-Host "  Your access token:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "    $localToken" -ForegroundColor White
+    Write-Host ""
+    if ($localToken) {
+        try { Set-Clipboard $localToken } catch {}
+        Write-Host "  (Copied to your clipboard.)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    Write-Host "  When the browser opens:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "    1. The Gateway URL box already says http://127.0.0.1:18789"
+    Write-Host "       -- leave it as-is."
+    Write-Host ""
+    Write-Host "    2. Click the 'Agent token' box and press Ctrl+V to paste."
+    Write-Host ""
+    Write-Host "    3. Click Connect."
+    Write-Host ""
+    Write-Host "  That's it. The console switches from demo data to real data."
+    Write-Host ""
+    Write-Host "  Profile: Local-Only (everything runs on this computer)." -ForegroundColor DarkGray
+    Write-Host "  To add a cloud database later, run:" -ForegroundColor DarkGray
+    Write-Host "    .venv\Scripts\python.exe -m mco.cli setup" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "  Starting BatonCadence and opening your browser..." -ForegroundColor Green
+    Write-Host "============================================================"
+    Write-Host ""
+    Start-Process -FilePath (Join-Path $root "Start BatonCadence.bat") -WorkingDirectory $root
+
+} else {
+    # ---- DEMO MODE path ----
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host "  Demo mode" -ForegroundColor Yellow
+    Write-Host "============================================================"
+    Write-Host ""
+    Write-Host "  The console will open showing sample jobs, agents, and"
+    Write-Host "  workflows so you can explore the interface."
+    Write-Host ""
+    Write-Host "  When you're ready to switch to real data:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "    1. Double-click the BatonCadence icon on your Desktop."
+    Write-Host "    2. Your browser opens -- look for the Settings panel."
+    Write-Host "    3. Leave Gateway URL as http://127.0.0.1:18789"
+    Write-Host "    4. Paste your access token in the 'Agent token' box:"
+    Write-Host ""
+    if ($localToken) {
+        Write-Host "         $localToken" -ForegroundColor White
+        Write-Host ""
+        Write-Host "       (Also saved in .env in the BatonCadence folder.)" -ForegroundColor DarkGray
+    } else {
+        Write-Host "       Run install again - no token was generated." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "    5. Click Connect." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Yellow
+    $launch = Read-Host "Open BatonCadence in demo mode now? [Y/n]"
+    if ($launch -eq "" -or $launch -match "^[Yy]") {
         Start-Process -FilePath (Join-Path $root "Start BatonCadence.bat") -WorkingDirectory $root
+    } else {
+        Write-Host ""
+        Write-Host "When you're ready, double-click the BatonCadence icon on your Desktop." -ForegroundColor Cyan
     }
 }
