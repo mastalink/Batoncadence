@@ -737,9 +737,21 @@ def list_agents():
 # 5. Governance: workflows, audit trail, approval gates
 # ─────────────────────────────────────────────────────────────────────────────
 def _gateway_client():
-    """Env-configured GatewayClient (MCO_GATEWAY_URL / MCO_AGENT_TOKEN / AGENT_*)."""
+    """GatewayClient resolved from the full config stack, not just os.environ.
+
+    Reads MCO_GATEWAY_URL / MCO_AGENT_TOKEN / AGENT_ROLE / AGENT_INSTANCE_ID
+    from get_config() (which layers .env + the AES-256-GCM secret store over
+    the OS environment), so `mco workflow|approve|sync|...` work from any shell
+    once the token is in .env or the vault - no per-shell `set` required.
+    """
     from mco.orchestrator.client import GatewayClient
-    return GatewayClient()
+    config = get_config()
+    return GatewayClient(
+        base_url=config.get("MCO_GATEWAY_URL") or None,
+        token=config.get("MCO_AGENT_TOKEN") or None,
+        role=config.get("AGENT_ROLE") or None,
+        instance_id=config.get("AGENT_INSTANCE_ID") or None,
+    )
 
 
 @app.command("workflow")
