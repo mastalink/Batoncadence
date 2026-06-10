@@ -1,4 +1,4 @@
-# MCOrchestr8 (Multi-Client Orchestrator)
+# Baton Cadence (Multi-Client Orchestrator)
 
 MCOrchestr8 is a highly secure, modular, and completely standalone agent orchestration and job board system. It acts as a lightweight coordination hub enabling multiple diverse agents on different platforms or machines to register, lease, and atomically execute tasks.
 
