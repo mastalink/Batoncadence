@@ -20,6 +20,7 @@ MCOrchestr8 is a highly secure, modular, and completely standalone agent orchest
 - **Escalation Paths**: Failed jobs retry up to `max_retries`, then auto-create an escalation job for `escalate_to_role` instead of dying silently — with ntfy alerts at every step.
 - **Declarative Workflow DSL**: YAML-defined DAGs of multi-agent steps (`mco workflow pipeline.yaml`), with per-step approval gates, retry budgets, and escalation roles. See `configs/workflows/example_release.yaml`.
 - **Enterprise Connectors**: First-class ServiceNow and Dynatrace integrations plus a generic webhook contract - ingest incidents/problems as agent jobs (polled or pushed, idempotent by external id), control the platforms back (create/resolve incidents, comment/close problems) as auditable connector-role jobs or approver-gated direct actions, and mirror terminal job failures into ITSM via the escalation bridge. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+- **Mythos Shared Context**: One collective memory all agents dip into - completed jobs are auto-distilled into recallable handoffs, agents record facts/decisions/lessons via `mco_remember`/`mco_recall`, and workers inject the most relevant entries into every prompt before execution. See [docs/MYTHOS.md](docs/MYTHOS.md).
 - **Control-Plane Dashboard**: Zero-build web UI at `http://host:port/dashboard` — job board, approval queue with approve/reject buttons, agent fleet presence, and per-job audit viewer.
 - **Windows Console Stability**: Pure ASCII console notation (`->`) replacing unicode symbols to avoid legacy terminal encoding crashes on Windows.
 - **CLI-First**: Ergonomic, rich CLI commands `setup`, `serve`, `listen`, `status`, `workflow`, `audit`, `approve`, `reject`, `retry`, `connectors`, `sync`, and `platform`.
@@ -166,6 +167,7 @@ All 52 unit and E2E test cases must pass cleanly.
 
 ## Project Background & Roadmap
 
+- [docs/MYTHOS.md](docs/MYTHOS.md) - the shared context substrate: auto-distilled job outcomes, deliberate agent memory, and prompt injection.
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) - enterprise connectors: ServiceNow, Dynatrace, generic webhooks, the sync engine, and the ITSM escalation bridge.
 - [docs/GOVERNANCE.md](docs/GOVERNANCE.md) - usage guide for the governance layer: approval gates, audit trail, retries/escalation, workflow DSL, and the dashboard.
 - [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) - end-to-end setup: Supabase schema, gateway config, agent registration, and GUI/MCP wiring.
