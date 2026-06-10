@@ -35,6 +35,74 @@ Write-Host "  ==================" -ForegroundColor Cyan
 Write-Host ""
 
 # ----------------------------------------------------------------------------
+# 0. Check for updates
+# ----------------------------------------------------------------------------
+Step "Checking for updates..."
+
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if (-not $gitCmd) {
+    Write-Host "     git not found - skipping update check." -ForegroundColor DarkGray
+    Write-Host "     To get updates, download the latest ZIP from:" -ForegroundColor DarkGray
+    Write-Host "     https://github.com/mastalink/Batoncadence" -ForegroundColor DarkGray
+} else {
+    # Is this folder a git repo?
+    $gitDir = git -C $root rev-parse --git-dir 2>$null
+    if (-not $gitDir) {
+        Write-Host "     This folder is not a git repo (probably a ZIP download)." -ForegroundColor DarkGray
+        Write-Host "     To get updates, download the latest ZIP from:" -ForegroundColor DarkGray
+        Write-Host "     https://github.com/mastalink/Batoncadence" -ForegroundColor DarkGray
+    } else {
+        # Fetch quietly so we can compare local vs remote
+        git -C $root fetch --quiet origin 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "     Could not reach GitHub (offline?) - skipping update check." -ForegroundColor DarkGray
+        } else {
+            $localHash  = git -C $root rev-parse HEAD 2>$null
+            $remoteHash = git -C $root rev-parse origin/main 2>$null
+            if ($localHash -eq $remoteHash) {
+                Ok "Already up to date"
+            } else {
+                $behind = [int](git -C $root rev-list "HEAD..origin/main" --count 2>$null)
+                $ahead  = [int](git -C $root rev-list "origin/main..HEAD" --count 2>$null)
+                if ($behind -gt 0) {
+                    Write-Host ""
+                    Write-Host "  ============================================================" -ForegroundColor Yellow
+                    $word = if ($behind -eq 1) { "update" } else { "updates" }
+                    Write-Host "  $behind new $word available on GitHub." -ForegroundColor Yellow
+                    Write-Host "  ============================================================" -ForegroundColor Yellow
+                    Write-Host ""
+                    # Show the last few incoming commit messages so the user knows what changed
+                    $log = git -C $root log "HEAD..origin/main" --oneline --no-decorate 2>$null
+                    if ($log) {
+                        Write-Host "  What's new:" -ForegroundColor Cyan
+                        $log -split "`n" | Select-Object -First 8 | ForEach-Object {
+                            Write-Host "    $_" -ForegroundColor White
+                        }
+                        Write-Host ""
+                    }
+                    if ($NoPrompt) {
+                        Write-Host "  Pulling updates (-NoPrompt)..." -ForegroundColor Cyan
+                        git -C $root pull --ff-only origin main 2>&1 | ForEach-Object { Write-Host "  $_" }
+                        Ok "Updated to latest version"
+                    } else {
+                        $upd = Read-Host "  Pull updates now? [Y/n]"
+                        if ($upd -eq "" -or $upd -match "^[Yy]") {
+                            git -C $root pull --ff-only origin main 2>&1 | ForEach-Object { Write-Host "  $_" }
+                            Ok "Updated to latest version"
+                        } else {
+                            Warn "Skipping update - continuing with current version"
+                        }
+                    }
+                } elseif ($ahead -gt 0) {
+                    Warn "Your copy is $ahead commit(s) ahead of GitHub (local changes present)"
+                }
+            }
+        }
+    }
+}
+Write-Host ""
+
+# ----------------------------------------------------------------------------
 # 1. Find Python 3.9+
 # ----------------------------------------------------------------------------
 Step "Checking for Python 3.9 or newer..."
