@@ -1,1 +1,1 @@
-"""Unit tests for the MCOrchestr8 package."""
+"""Unit tests for the BatonCadence package."""

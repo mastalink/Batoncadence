@@ -1,6 +1,6 @@
-# MCOrchestr8 Quickstart Guide
+# BatonCadence Quickstart Guide
 
-This quickstart guide gets a local, secure instance of MCOrchestr8 up and running in under 2 minutes.
+This quickstart guide gets a local, secure instance of BatonCadence up and running in under 2 minutes.
 
 ---
 
@@ -9,7 +9,7 @@ This quickstart guide gets a local, secure instance of MCOrchestr8 up and runnin
 First, open your terminal (PowerShell, Command Prompt, or Bash) and navigate to the project directory:
 
 ```bash
-cd C:/AI/MCOrchestr8
+cd C:/AI/BatonCadence
 
 # Create and activate virtual environment
 python -m venv .venv
@@ -67,7 +67,7 @@ The listener will register itself, poll for jobs, and execute them safely.
 
 ## 5. Programmatic Quickstart Example (`quickstart.py`)
 
-A simple python script to interact with MCOrchestr8 programmatically is located in the root of the workspace. Run it to verify direct API access:
+A simple python script to interact with BatonCadence programmatically is located in the root of the workspace. Run it to verify direct API access:
 
 ```bash
 python quickstart.py

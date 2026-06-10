@@ -1,6 +1,8 @@
-# MCOrchestr8 (Multi-Client Orchestrator)
+# BatonCadence
 
-MCOrchestr8 is a highly secure, modular, and completely standalone agent orchestration and job board system. It acts as a lightweight coordination hub enabling multiple diverse agents on different platforms or machines to register, lease, and atomically execute tasks.
+> Formerly **MCOrchestr8**. The CLI command and Python package remain `mco`.
+
+BatonCadence is a highly secure, modular, and completely standalone agent orchestration and job board system. It acts as a lightweight coordination hub enabling multiple diverse agents on different platforms or machines to register, lease, and atomically execute tasks.
 
 ---
 
@@ -29,7 +31,7 @@ MCOrchestr8 is a highly secure, modular, and completely standalone agent orchest
 
 ## Installation
 
-MCOrchestr8 is designed to be installed as a local editable python package.
+BatonCadence is designed to be installed as a local editable python package.
 
 ### Prerequisites
 - Python 3.9 or higher
@@ -37,7 +39,7 @@ MCOrchestr8 is designed to be installed as a local editable python package.
 
 ```bash
 # Clone or navigate to the repository
-cd C:/AI/MCOrchestr8
+cd C:/AI/BatonCadence
 
 # Set up virtual environment
 python -m venv .venv
@@ -111,7 +113,7 @@ the workflow DSL, and the dashboard lives in [docs/GOVERNANCE.md](docs/GOVERNANC
 ## Advanced Integrations
 
 ### ntfy Notification Setup
-MCOrchestr8 supports instant task push alerts over `ntfy.sh` (or any custom ntfy server). Hook up notifications by configuring the following variables in your secure vault:
+BatonCadence supports instant task push alerts over `ntfy.sh` (or any custom ntfy server). Hook up notifications by configuring the following variables in your secure vault:
 *   `NTFY_URL`: The URL to your target ntfy topic (e.g. `https://ntfy.sh/moses_leases`).
 *   `NTFY_TOKEN`: Optional bearer authorization token for secured ntfy topics.
 
@@ -134,7 +136,7 @@ The custom MCP server can map database schemas and client variables to GUI front
 
 ## Technical Security Design (AES-256-GCM)
 
-All sensitive API keys and connection tokens are kept safely out of raw `.env` files. Instead, MCOrchestr8 uses a secure envelope format stored at `~/.mco/secrets.enc`:
+All sensitive API keys and connection tokens are kept safely out of raw `.env` files. Instead, BatonCadence uses a secure envelope format stored at `~/.mco/secrets.enc`:
 
 ```json
 {

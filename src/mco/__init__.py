@@ -1,3 +1,3 @@
-"""MCOrchestr8: Standalone Multi-Client Agent Orchestrator."""
+"""BatonCadence: Standalone Multi-Client Agent Orchestrator."""
 
 __version__ = "0.1.0"

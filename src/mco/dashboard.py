@@ -11,7 +11,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>MCOrchestr8 Control Plane</title>
+<title>BatonCadence Control Plane</title>
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #e6edf3; margin: 0; padding: 1.5rem; }
@@ -35,7 +35,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>MCOrchestr8 Control Plane</h1>
+<h1>BatonCadence Control Plane</h1>
 <div id="token-bar">
   <input id="token" type="password" placeholder="Paste agent bearer token (approver role for approvals)">
   <button onclick="saveToken()">Connect</button>

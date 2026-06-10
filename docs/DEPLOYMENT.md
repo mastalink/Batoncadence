@@ -1,4 +1,4 @@
-# Deploying MCOrchestr8 - Any Cloud, Multi-Tenant, Guarded
+# Deploying BatonCadence - Any Cloud, Multi-Tenant, Guarded
 
 The gateway is a stateless container in front of a Postgres/Supabase data
 plane: it runs identically on AWS (ECS/EKS/App Runner), GCP (Cloud Run/GKE),

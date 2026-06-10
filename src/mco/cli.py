@@ -1,5 +1,5 @@
 """
-MCOrchestr8 Typer CLI & Setup Wizard
+BatonCadence Typer CLI & Setup Wizard
 ===================================
 Provides user onboarding, credentials encryption, FastAPI serving,
 and background daemon listener.
@@ -36,7 +36,7 @@ from mco.orchestrator.listener import AgentListener
 from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
 
 # Initialize typer app and console
-app = typer.Typer(help="MCOrchestr8: Multi-Client Agent Orchestrator.")
+app = typer.Typer(help="BatonCadence: Multi-Client Agent Orchestrator.")
 console = Console()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ console = Console()
 def setup_wizard():
     """Run the interactive onboarding and environment installer wizard."""
     console.print(Panel.fit(
-        "[bold cyan]MCOrchestr8 Standalone Setup Wizard[/bold cyan]\n"
+        "[bold cyan]BatonCadence Standalone Setup Wizard[/bold cyan]\n"
         "Configure your agent profile, credentials, and military-grade encryption.",
         border_style="cyan"
     ))
@@ -191,7 +191,7 @@ def setup_wizard():
     else:
         console.print("[yellow]Plaintext environment configuration chosen. Secrets are saved in standard .env[/yellow]")
 
-    console.print("\n[bold green][OK] MCOrchestr8 Onboarding & Installation Complete![/bold green]")
+    console.print("\n[bold green][OK] BatonCadence Onboarding & Installation Complete![/bold green]")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -235,7 +235,7 @@ async def server_broadcast_callback(event: str, job: dict) -> None:
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application server."""
     app_server = FastAPI(
-        title="MCOrchestr8 Gateway Server",
+        title="BatonCadence Gateway Server",
         description="FastAPI WebSocket and REST Hub for Agent Job Coordination."
     )
 
@@ -424,9 +424,9 @@ def serve(
     host: str = typer.Option("127.0.0.1", help="The host to bind to."),
     port: int = typer.Option(18789, help="The port to bind to.")
 ):
-    """Start the MCOrchestr8 FastAPI WebSocket/REST API Server."""
+    """Start the BatonCadence FastAPI WebSocket/REST API Server."""
     console.print(Panel.fit(
-        f"[bold green]Starting MCOrchestr8 Server[/bold green]\n"
+        f"[bold green]Starting BatonCadence Server[/bold green]\n"
         f"Host: http://{host}:{port}\n"
         f"Console: http://{host}:{port}/console\n"
         f"WebSocket: ws://{host}:{port}/ws/broadcast",
@@ -499,7 +499,7 @@ def serve(
                     }
                     notify(
                         json.dumps(snapshot, indent=2),
-                        title="MCO Process Snapshot",
+                        title="BatonCadence Process Snapshot",
                         priority=1,
                         tags=["mco", "process-snapshot", "leak-detection"],
                     )
@@ -571,7 +571,7 @@ def listen(
 ):
     """Spawn the background daemon client that polls and executes Job Board tasks."""
     console.print(Panel.fit(
-        f"[bold blue]Spawning MCOrchestr8 Background Daemon[/bold blue]\n"
+        f"[bold blue]Spawning BatonCadence Background Daemon[/bold blue]\n"
         f"Role: [green]{role}[/green]\n"
         f"Instance ID: [green]{instance}[/green]",
         border_style="blue"
@@ -616,11 +616,11 @@ def listen(
 # ─────────────────────────────────────────────────────────────────────────────
 @app.command("status")
 def status():
-    """Print MCOrchestr8 health check and diagnostics."""
+    """Print BatonCadence health check and diagnostics."""
     config = get_config()
     store = get_secret_store()
 
-    console.print("[bold cyan]=== MCOrchestr8 Status Diagnostics ===[/bold cyan]\n")
+    console.print("[bold cyan]=== BatonCadence Status Diagnostics ===[/bold cyan]\n")
 
     # 1. Store state
     store_init = store.is_initialized()
@@ -695,7 +695,7 @@ def register_agent(
 @app.command("agents")
 def list_agents():
     """List all registered agents and their current online presence status."""
-    console.print("[bold cyan]=== MCOrchestr8 Registered Agents ===[/bold cyan]\n")
+    console.print("[bold cyan]=== BatonCadence Registered Agents ===[/bold cyan]\n")
     
     from mco.orchestrator.routes import get_db_client
     db_client = get_db_client()

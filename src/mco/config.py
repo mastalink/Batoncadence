@@ -1,5 +1,5 @@
 """
-MCOrchestr8 Configuration Management
+BatonCadence Configuration Management
 ====================================
 Handles environment profile selections and loading/writing settings
 from local .env files and the encrypted SecretStore.

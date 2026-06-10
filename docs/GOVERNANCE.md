@@ -1,4 +1,4 @@
-# MCOrchestr8 Governance Guide
+# BatonCadence Governance Guide
 
 Usage documentation for the governance layer: **human-in-the-loop approval
 gates**, the **immutable audit trail**, **retry/escalation paths**, the

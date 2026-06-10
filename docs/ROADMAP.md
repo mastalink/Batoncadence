@@ -1,9 +1,9 @@
-# MCOrchestr8 - Current State, Gap Analysis & Close-Out Roadmap
+# BatonCadence - Current State, Gap Analysis & Close-Out Roadmap
 
 **Status date:** June 2026
 **Origin:** December 2025 "AgentMesh" validation plan (see [VALIDATION_SUMMARY.md](VALIDATION_SUMMARY.md))
 
-This document maps the original AgentMesh plan against what MCOrchestr8 has
+This document maps the original AgentMesh plan against what BatonCadence has
 actually shipped, identifies the remaining gaps, and defines the work needed
 to close out the MVP phase.
 
@@ -11,7 +11,7 @@ to close out the MVP phase.
 
 ## 1. Where We Are Today
 
-MCOrchestr8 is a working, tested orchestration MVP:
+BatonCadence is a working, tested orchestration MVP:
 
 | Capability | Status | Where |
 |---|---|---|
