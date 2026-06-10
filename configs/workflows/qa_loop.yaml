@@ -1,0 +1,50 @@
+# The QA loop: a self-perpetuating test cycle farmed out to codex+antigravity.
+#
+# How the loop works (two options, use either or both):
+#   1. Cron the submitter:  */30 * * * *  mco workflow configs/workflows/qa_loop.yaml
+#   2. Self-perpetuation: the 'next-round' step instructs the agent to
+#      re-submit this workflow via its MCO tools, so each round queues the
+#      next one. The human-gated 'continue-loop' step is the circuit breaker -
+#      the loop only continues while a human keeps approving it.
+#
+# Every round's outcomes are auto-distilled into Mythos, so each iteration
+# starts with the memory of every previous round's failures and fixes.
+name: qa-loop
+steps:
+  - id: unit-tests
+    role: codex
+    title: "QA loop: run unit tests"
+    instructions: |
+      In the MCOrchestr8 repo: git pull, pytest tests/ -q. Report counts and
+      failures. Before starting, mco_recall 'qa loop failures' to see what
+      broke in previous rounds and check those areas first.
+    max_retries: 1
+    escalate_to_role: human
+
+  - id: api-probe
+    role: antigravity
+    title: "QA loop: probe the live gateway API"
+    instructions: |
+      Against your local gateway: GET /healthz (expect 200), GET /api/agents
+      with your token (expect 200 list), POST a throwaway job to role 'codex'
+      titled 'qa-probe' and verify it appears in GET /api/jobs. Report each
+      probe pass/fail.
+
+  - id: digest
+    role: claude
+    title: "QA loop: digest round results into Mythos"
+    instructions: |
+      Summarize this round's QA outcomes in 5 lines max and mco_remember it
+      (kind=lesson, tags=qa-loop). Flag regressions vs prior rounds.
+    depends_on: [unit-tests, api-probe]
+
+  - id: continue-loop
+    role: codex
+    title: "QA loop: queue the next round"
+    instructions: |
+      Re-submit this workflow for the next round: use your MCO tools to send
+      the same three QA jobs again (or run 'mco workflow
+      configs/workflows/qa_loop.yaml' if you have CLI access). This keeps the
+      loop alive for the next cycle.
+    depends_on: [digest]
+    requires_approval: true   # circuit breaker: a human approves each next round

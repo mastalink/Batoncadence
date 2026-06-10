@@ -20,17 +20,34 @@ def hash_token(token: str) -> str:
 
 
 def verify_token(db_client: Any, token: str) -> Optional[dict]:
-    """Return the `agent_registry` row for a valid token, else None."""
+    """Return the `agent_registry` row for a valid token, else None.
+
+    The row includes `org_id`, the tenant boundary every downstream query is
+    scoped to (pre-migration databases fall back to the 'default' org).
+    """
     if not token or db_client is None:
         return None
-    res = (
-        db_client.table("agent_registry")
-        .select("instance_id, role, status")
-        .eq("auth_token_hash", hash_token(token))
-        .execute()
-    )
+    try:
+        res = (
+            db_client.table("agent_registry")
+            .select("instance_id, role, status, org_id")
+            .eq("auth_token_hash", hash_token(token))
+            .execute()
+        )
+    except Exception:
+        # Pre-multi-tenancy schema without org_id.
+        res = (
+            db_client.table("agent_registry")
+            .select("instance_id, role, status")
+            .eq("auth_token_hash", hash_token(token))
+            .execute()
+        )
     rows = res.data or []
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    agent = rows[0]
+    agent.setdefault("org_id", "default")
+    return agent
 
 
 def extract_bearer(authorization: str) -> str:

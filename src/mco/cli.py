@@ -251,6 +251,17 @@ def create_app() -> FastAPI:
     from mco.orchestrator.context_routes import context_router
     app_server.include_router(context_router)
 
+    # Unauthenticated liveness/readiness probe for cloud load balancers and
+    # orchestrators (K8s, ECS, Cloud Run). Reports DB wiring, never secrets.
+    @app_server.get("/healthz", include_in_schema=False)
+    async def healthz() -> dict:
+        from mco.orchestrator.routes import get_db_client, kill_switch_active
+        return {
+            "status": "ok",
+            "database": get_db_client() is not None,
+            "paused": kill_switch_active(),
+        }
+
     # Control-plane dashboard (static single page; auth happens via the API token)
     from fastapi.responses import HTMLResponse
     from mco.dashboard import DASHBOARD_HTML
@@ -641,7 +652,8 @@ def status():
 @app.command("register")
 def register_agent(
     name: str = typer.Option(..., "--name", help="Unique name (instance ID) of the agent."),
-    role: str = typer.Option(..., "--role", help="Target role of the agent (e.g. antigravity, codex).")
+    role: str = typer.Option(..., "--role", help="Target role of the agent (e.g. antigravity, codex)."),
+    org: str = typer.Option("default", "--org", help="Tenant org the agent belongs to (multi-tenant installs).")
 ):
     """Register a new client agent, generating a secure access token."""
     console.print(f"[bold cyan]Registering new MCO agent...[/bold cyan]")
@@ -662,6 +674,8 @@ def register_agent(
             "status": "offline",
             "auth_token_hash": token_hash
         }
+        if org and org != "default":
+            data["org_id"] = org
         res = db_client.table("agent_registry").upsert(data).execute()
         if res.data:
             console.print(Panel.fit(

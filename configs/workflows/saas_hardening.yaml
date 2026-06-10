@@ -1,0 +1,53 @@
+# Farm-out workflow: SaaS hardening pass distributed across the mesh.
+# Simple build/test work goes to codex and antigravity; claude reviews;
+# a human signs off before anything ships.
+# Submit with: mco workflow configs/workflows/saas_hardening.yaml
+name: saas-hardening
+steps:
+  - id: pull-and-test
+    role: codex
+    title: Pull latest main and run the full test suite
+    instructions: |
+      git pull origin main in the MCOrchestr8 repo, run 'pip install -e .[dev]'
+      then 'pytest tests/ -q'. Report the pass/fail count and any failures
+      verbatim. If failures exist, attempt the smallest fix and re-run.
+    max_retries: 1
+    escalate_to_role: human
+
+  - id: docker-smoke
+    role: codex
+    title: Build the Docker image and smoke-test /healthz
+    instructions: |
+      From the repo root run 'docker build -t mco:smoke .', start it with the
+      SUPABASE_* env vars from your local .env, then GET /healthz and
+      GET /dashboard. Report status codes and the healthz JSON body.
+    depends_on: [pull-and-test]
+    max_retries: 1
+    escalate_to_role: human
+
+  - id: console-verify
+    role: antigravity
+    title: Verify the BatonCadence console end to end
+    instructions: |
+      Open http://127.0.0.1:18789/console. Verify: demo mode renders all five
+      views; Settings -> Connection with your MCO token flips to live mode;
+      the approval queue shows gated jobs; the audit drawer opens on a job.
+      Report each check as pass/fail with notes.
+    depends_on: [pull-and-test]
+
+  - id: review
+    role: claude
+    title: Review the QA reports and summarize release readiness
+    instructions: |
+      Recall the shared context (mco_recall 'saas-hardening') for the QA
+      outcomes of this workflow, weigh failures, and write a go/no-go
+      recommendation with reasons. Remember your verdict to Mythos
+      (kind=decision, tags=release,qa).
+    depends_on: [docker-smoke, console-verify]
+
+  - id: sign-off
+    role: codex
+    title: Tag release candidate
+    instructions: Tag the current main as the next rc once approved.
+    depends_on: [review]
+    requires_approval: true

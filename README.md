@@ -167,6 +167,7 @@ All 52 unit and E2E test cases must pass cleanly.
 
 ## Project Background & Roadmap
 
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - any-cloud container deployment, multi-tenancy, guardrails (gated roles, kill switch), and the farm-out QA workflows.
 - [docs/MYTHOS.md](docs/MYTHOS.md) - the shared context substrate: auto-distilled job outcomes, deliberate agent memory, and prompt injection.
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) - enterprise connectors: ServiceNow, Dynatrace, generic webhooks, the sync engine, and the ITSM escalation bridge.
 - [docs/GOVERNANCE.md](docs/GOVERNANCE.md) - usage guide for the governance layer: approval gates, audit trail, retries/escalation, workflow DSL, and the dashboard.

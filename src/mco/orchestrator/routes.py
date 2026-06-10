@@ -24,6 +24,34 @@ def get_approver_roles() -> set:
     raw = get_config().get("MCO_APPROVER_ROLES") or DEFAULT_APPROVER_ROLES
     return {r.strip().lower() for r in raw.split(",") if r.strip()}
 
+
+def agent_org(agent: dict) -> str:
+    """Tenant boundary for the calling agent ('default' on single-tenant installs)."""
+    return agent.get("org_id") or "default"
+
+
+def job_org(job: dict) -> str:
+    return job.get("org_id") or "default"
+
+
+def get_gated_roles() -> set:
+    """Roles whose jobs are force-gated on human approval (MCO_POLICY_GATED_ROLES).
+
+    Guardrail for high-blast-radius targets: set it to your connector roles
+    (e.g. 'servicenow,dynatrace') and no agent can write to those platforms
+    without a human approving first - regardless of what the sender asked for.
+    """
+    raw = get_config().get("MCO_POLICY_GATED_ROLES") or ""
+    return {r.strip().lower() for r in raw.split(",") if r.strip()}
+
+
+def kill_switch_active() -> bool:
+    """Global pause (MCO_KILL_SWITCH): no new jobs created, no leases granted.
+
+    In-flight work may finish and report; humans can still approve/audit.
+    """
+    return str(get_config().get("MCO_KILL_SWITCH") or "").lower() in ("1", "true", "on", "yes")
+
 logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
 agents_router = APIRouter(prefix="/api/agents")
@@ -68,7 +96,11 @@ async def get_jobs(agent: dict = Depends(require_agent)):
     if not db_client:
         return []
     try:
-        res = db_client.table("agent_jobs").select("*").order("created_at", desc=True).limit(100).execute()
+        res = (
+            db_client.table("agent_jobs").select("*")
+            .eq("org_id", agent_org(agent))
+            .order("created_at", desc=True).limit(100).execute()
+        )
         return res.data or []
     except Exception as e:
         logger.error(f"Error fetching jobs: {e}")
@@ -81,6 +113,8 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
     db_client = get_db_client()
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
+    if kill_switch_active():
+        raise HTTPException(status_code=503, detail="MCO_KILL_SWITCH is active: job intake is paused")
     try:
         title = payload.get("title")
         description = payload.get("description")
@@ -94,6 +128,11 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
 
         if not title or not target_agent_role:
             raise HTTPException(status_code=400, detail="title and target_agent_role are required")
+
+        # Policy guardrail: jobs targeting gated roles ALWAYS pause for a human,
+        # no matter what the sender requested.
+        if target_agent_role.lower() in get_gated_roles():
+            requires_approval = True
 
         from mco.orchestrator.handlers import _initial_status
         status = _initial_status(db_client, depends_on, requires_approval)
@@ -109,6 +148,9 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
             "depends_on": depends_on,
             "input_payload": input_payload,
         }
+        # Tenant stamp (omitted for the default org so pre-migration DBs keep working).
+        if agent_org(agent) != "default":
+            data["org_id"] = agent_org(agent)
         # Governance columns are only sent when used (pre-migration DB compatibility).
         if requires_approval:
             data["requires_approval"] = True
@@ -175,10 +217,12 @@ async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Dep
             .eq("status", "pending")\
             .eq("target_agent_role", role)\
             .execute()
-        
+
         jobs = res.data or []
         filtered = []
         for job in jobs:
+            if job_org(job) != agent_org(agent):
+                continue
             target_id = job.get("target_agent_id")
             if target_id and target_id != instance_id:
                 continue
@@ -195,6 +239,8 @@ async def lease_job(payload: dict, agent: dict = Depends(require_agent)):
     db_client = get_db_client()
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
+    if kill_switch_active():
+        raise HTTPException(status_code=503, detail="MCO_KILL_SWITCH is active: leasing is paused")
     try:
         task_id = payload.get("task_id")
         agent_instance_id = payload.get("agent_instance_id")
@@ -202,7 +248,12 @@ async def lease_job(payload: dict, agent: dict = Depends(require_agent)):
             raise HTTPException(status_code=400, detail="task_id and agent_instance_id are required")
         if agent_instance_id != agent["instance_id"]:
             raise HTTPException(status_code=403, detail="Cannot lease on behalf of another agent")
-        
+
+        # Tenant isolation: you can only lease jobs inside your own org.
+        pre = db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+        if pre.data and job_org(pre.data[0]) != agent_org(agent):
+            raise HTTPException(status_code=404, detail="Job not found")
+
         res = db_client.rpc("lease_task", {
             "p_agent_instance_id": agent_instance_id,
             "p_task_id": task_id
@@ -241,9 +292,11 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
         raise HTTPException(status_code=400, detail="Database not configured")
     try:
         # Authorization: the job must be addressed to the calling agent's role or instance.
-        job_res = db_client.table("agent_jobs").select("target_agent_role, target_agent_id").eq("id", job_id).execute()
+        job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
         if job_res.data:
             j = job_res.data[0]
+            if job_org(j) != agent_org(agent):
+                raise HTTPException(status_code=404, detail="Job not found")
             target_role = (j.get("target_agent_role") or "").lower()
             caller_role = (agent.get("role") or "").lower()
             target_id = j.get("target_agent_id")
@@ -320,6 +373,10 @@ async def get_job_events(job_id: str, agent: dict = Depends(require_agent)):
     db_client = get_db_client()
     if not db_client:
         return []
+    # Tenant isolation: only jobs in the caller's org expose their trail.
+    job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    if job_res.data and job_org(job_res.data[0]) != agent_org(agent):
+        return []
     return get_events(db_client, job_id)
 
 
@@ -336,6 +393,8 @@ async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str 
     if not job_res.data:
         raise HTTPException(status_code=404, detail="Job not found")
     job = job_res.data[0]
+    if job_org(job) != agent_org(agent):
+        raise HTTPException(status_code=404, detail="Job not found")
     if job.get("status") != JobStatus.NEEDS_APPROVAL.value:
         raise HTTPException(status_code=400, detail=f"Job is not awaiting approval (status: {job.get('status')})")
 
@@ -393,6 +452,8 @@ async def retry_job(job_id: str, agent: dict = Depends(require_agent)):
     if not job_res.data:
         raise HTTPException(status_code=404, detail="Job not found")
     job = job_res.data[0]
+    if job_org(job) != agent_org(agent):
+        raise HTTPException(status_code=404, detail="Job not found")
     if job.get("status") not in (JobStatus.FAILED.value, JobStatus.REJECTED.value):
         raise HTTPException(status_code=400, detail=f"Only failed/rejected jobs can be retried (status: {job.get('status')})")
 
@@ -431,9 +492,16 @@ async def get_agents(agent: dict = Depends(require_agent)):
     if not db_client:
         return []
     try:
-        # Never expose auth_token_hash over the API.
-        res = db_client.table("agent_registry").select("instance_id, role, status, last_seen_at").order("instance_id").execute()
-        return res.data or []
+        res = db_client.table("agent_registry").select("*").order("instance_id").execute()
+        org = agent_org(agent)
+        out = []
+        for r in (res.data or []):
+            # Tenant isolation (app-side so pre-migration schemas keep working).
+            if (r.get("org_id") or "default") != org:
+                continue
+            # Never expose auth_token_hash over the API.
+            out.append({k: v for k, v in r.items() if k != "auth_token_hash"})
+        return out
     except Exception as e:
         logger.error(f"Error fetching registered agents: {e}")
         return []

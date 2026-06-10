@@ -29,7 +29,9 @@ async def recall_context(
 ):
     """Recall the most relevant shared-context entries (best first)."""
     tag_list = [t for t in (tags or "").split(",") if t.strip()]
-    return recall(_db(), query=query, role=role or None, tags=tag_list or None, limit=limit)
+    org = agent.get("org_id") or "default"
+    return recall(_db(), query=query, role=role or None, tags=tag_list or None,
+                  limit=limit, org_id=org)
 
 
 @context_router.post("")
@@ -50,6 +52,7 @@ async def remember_context(payload: dict, agent: dict = Depends(require_agent)):
         created_by=agent["instance_id"],
         source_job_id=payload.get("source_job_id"),
         weight=payload.get("weight") or 1.0,
+        org_id=agent.get("org_id") or "default",
     )
     if not entry:
         raise HTTPException(status_code=500, detail="Failed to store context entry")

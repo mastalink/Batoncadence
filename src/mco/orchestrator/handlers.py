@@ -317,6 +317,9 @@ async def _handle_failure(
         "depends_on": [],
         "input_payload": {"escalated_from": job_id},
     }
+    # Escalations stay inside the failed job's org.
+    if (job.get("org_id") or "default") != "default":
+        escalation["org_id"] = job["org_id"]
     esc_res = db_client.table("agent_jobs").insert(escalation).execute()
     if esc_res.data:
         esc_job = esc_res.data[0]
