@@ -29,7 +29,8 @@ First run creates the project and prints the live URL
 (`https://batoncadence.pages.dev`). Subsequent runs deploy in seconds.
 
 **Custom domain:** Cloudflare dashboard → Pages → batoncadence →
-Custom domains → add `batoncadence.dev` (or whatever you register).
+Custom domains → add `batoncadence.com` (already owned, catch-all email
+configured — `pilots@batoncadence.com` just works).
 
 **Zero-config alternative:** the Cloudflare dashboard also accepts a
 drag-and-drop of the `website/` folder, or can auto-deploy from this

@@ -37,8 +37,8 @@ replace.
 
 ### Phase 0 — Pre-flight (this week)
 - [x] **LICENSE file** — done 2026-06-10: MIT, copyright Joe Arroyo
-- [ ] Register domain (`batoncadence.dev` or `.com`) + set up
-      `pilots@` forwarding (the site's enterprise CTA already points there)
+- [x] Domain — `batoncadence.com` owned, catch-all email live;
+      site CTA points at `pilots@batoncadence.com`
 - [ ] Deploy site to Cloudflare Pages, connect repo for auto-deploy
 - [ ] Make the GitHub repo public, add topics
       (`agents`, `orchestration`, `mcp`, `self-hosted`, `ai-governance`)
@@ -98,6 +98,6 @@ replace.
 - ~~The repo's author field still says "DeepMind team" in pyproject.toml~~
   fixed 2026-06-10.
 - ~~No LICENSE file~~ fixed 2026-06-10 (MIT, Joe Arroyo).
-- `pilots@batoncadence.dev` must exist before the site ships, or swap the
-  mailto for a GitHub Discussions link.
+- ~~pilots@ must exist before the site ships~~ resolved: catch-all on
+  batoncadence.com covers it.
 - Demo video must show real software, no mockups — this crowd checks.
