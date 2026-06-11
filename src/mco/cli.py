@@ -27,10 +27,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.prompt import Prompt, Confirm
 
-from mco.config import get_config, EnvironmentProfile, SENSITIVE_KEYS
-from mco.security import get_secret_store, WindowsCredentialProvider, PasswordKeyProvider
+from mco.config import get_config
+from mco.security import get_secret_store
 from mco.orchestrator.routes import router as jobs_router, agents_router, register_broadcast_callback
 from mco.orchestrator.listener import AgentListener
 from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
@@ -43,155 +42,13 @@ console = Console()
 # 1. Onboarding Setup Wizard
 # ─────────────────────────────────────────────────────────────────────────────
 @app.command("setup")
-def setup_wizard():
-    """Run the interactive onboarding and environment installer wizard."""
-    console.print(Panel.fit(
-        "[bold cyan]BatonCadence Standalone Setup Wizard[/bold cyan]\n"
-        "Configure your agent profile, credentials, and military-grade encryption.",
-        border_style="cyan"
-    ))
-
-    config = get_config()
-    
-    # 1. Operator Info
-    operator_name = Prompt.ask("Enter Operator Name", default="Operator")
-    config.set("OPERATOR_NAME", operator_name)
-
-    # 2. Environment Profile Selection
-    console.print("\n[bold yellow]Step 1: Select Environment Profile[/bold yellow]")
-    console.print("  [1] Local-Only  - Run tools and LLMs locally (e.g. Ollama). No database needed.")
-    console.print("  [2] Cloud-Heavy - Connect to cloud-hosted databases (Supabase) and proprietary LLM APIs.")
-    console.print("  [3] Hybrid      - Connect to both local tools and cloud integrations.")
-    
-    profile_choice = Prompt.ask(
-        "Choose profile",
-        choices=["1", "2", "3"],
-        default="3"
-    )
-    
-    profile_map = {
-        "1": EnvironmentProfile.LOCAL_ONLY,
-        "2": EnvironmentProfile.CLOUD_HEAVY,
-        "3": EnvironmentProfile.HYBRID
-    }
-    selected_profile = profile_map[profile_choice]
-    config.set("MCO_PROFILE", selected_profile)
-    console.print(f"[OK] Profile configured as [bold green]{selected_profile}[/bold green].")
-
-    # 3. Suppress or prompt Supabase if cloud is included
-    supabase_url = ""
-    supabase_key = ""
-    if selected_profile in (EnvironmentProfile.CLOUD_HEAVY, EnvironmentProfile.HYBRID):
-        console.print("\n[bold yellow]Step 2: Database Configuration (Supabase)[/bold yellow]")
-        url_def = config.get("SUPABASE_URL") or ""
-        if url_def == "encrypted_in_secret_store":
-            url_def = ""
-        key_def = config.get("SUPABASE_KEY") or ""
-        if key_def == "encrypted_in_secret_store":
-            key_def = ""
-
-        supabase_url = Prompt.ask("Enter Supabase URL", default=url_def)
-        supabase_key = Prompt.ask("Enter Supabase Key (anon/service)", default=key_def)
-        
-        # Save temporary plain values; we will encrypt them below if requested
-        config.set("SUPABASE_URL", supabase_url)
-        config.set("SUPABASE_KEY", supabase_key)
-
-    # 4. Encryption Prompt (AES-256-GCM Secure Store)
-    console.print("\n[bold yellow]Step 3: Configuration Encryption (AES-256-GCM)[/bold yellow]")
-    encrypt_creds = Confirm.ask("Do you want to encrypt sensitive credentials and API keys in the MCO Secret Store?", default=True)
-
-    if encrypt_creds:
-        store = get_secret_store()
-        if store.is_initialized():
-            console.print("[warning]An existing secret store was found. Re-keying existing store...[/warning]")
-            # Attempt to unlock first
-            if not store.auto_unlock():
-                pw = Prompt.ask("Enter current master password to unlock and overwrite", password=True)
-                envelope = Path(store._path).read_text(encoding="utf-8")
-                import json, base64
-                env_dict = json.loads(envelope)
-                salt = base64.b64decode(env_dict["salt"])
-                iterations = env_dict.get("iterations", 600000)
-                cur_key = store.derive_key(pw, salt, iterations)
-                if not store.unlock(cur_key):
-                    console.print("[yellow][WARNING] Incorrect password.[/yellow]")
-                    overwrite = Confirm.ask("Would you like to delete the existing secret store and start fresh?", default=False)
-                    if overwrite:
-                        try:
-                            Path(store._path).unlink(missing_ok=True)
-                            store._secrets = None
-                            store._master_key = None
-                            
-                            # Fresh Master Password configuration
-                            use_pw = Confirm.ask("Would you like to set a master password to protect your secrets?", default=True)
-                            master_key = None
-                            salt = None
-                            if use_pw:
-                                master_pw = Prompt.ask("Enter a strong master password", password=True)
-                                salt = os.urandom(32)
-                                master_key = store.derive_key(master_pw, salt)
-                            else:
-                                master_key = secrets.token_bytes(32)
-                                console.print("✓ Generated a secure random master key.")
-                            store.initialize(master_key, salt=salt)
-                        except Exception as e:
-                            console.print(f"[red][ERROR] Failed to reset secret store: {e}[/red]")
-                            return
-                    else:
-                        console.print("[red][ERROR] Incorrect password. Aborting encryption setup.[/red]")
-                        return
-        else:
-            # Fresh Master Password configuration
-            use_pw = Confirm.ask("Would you like to set a master password to protect your secrets?", default=True)
-            master_key = None
-            salt = None
-            if use_pw:
-                master_pw = Prompt.ask("Enter a strong master password", password=True)
-                # Derive 32-byte key
-                salt = os.urandom(32)
-                master_key = store.derive_key(master_pw, salt)
-            else:
-                # Generate a random master key
-                master_key = secrets.token_bytes(32)
-                console.print("✓ Generated a secure random master key.")
-
-            # Initialize the store
-            store.initialize(master_key, salt=salt)
-
-        # Securely migrate values to secret store
-        store_unlocked = store.is_unlocked
-        if store_unlocked:
-            # Encrypt the freshly-collected values directly. Do NOT read these back via
-            # config.get(key): for sensitive keys it resolves store-first and would echo
-            # a stale/sentinel value instead of what the user just entered.
-            collected = {"SUPABASE_URL": supabase_url, "SUPABASE_KEY": supabase_key}
-            for key in SENSITIVE_KEYS:
-                val = collected.get(key) or config.get(key)
-                if val and val != "encrypted_in_secret_store":
-                    config.set(key, val, encrypt=True)
-
-            # Store in Windows Credential Manager ifNT
-            if os.name == "nt" and store._master_key:
-                save_to_cred_mgr = Confirm.ask(
-                    "Would you like to store the master unlock key in Windows Credential Manager?\n"
-                    "This enables automatic, passwordless config unlocking upon reboots/runs.",
-                    default=True
-                )
-                if save_to_cred_mgr:
-                    try:
-                        WindowsCredentialProvider.store_key(store._master_key)
-                        console.print("[OK] Successfully stored master key in Windows Credential Manager.")
-                    except Exception as e:
-                        console.print(f"[red][ERROR] Failed to save to Windows Credential Manager: {e}[/red]")
-            
-            console.print("[OK] Secrets successfully migrated and encrypted.")
-        else:
-            console.print("[red][ERROR] Secret store initialized but locked. Secrets migration skipped.[/red]")
-    else:
-        console.print("[yellow]Plaintext environment configuration chosen. Secrets are saved in standard .env[/yellow]")
-
-    console.print("\n[bold green][OK] BatonCadence Onboarding & Installation Complete![/bold green]")
+def setup_wizard(
+    guided: bool = typer.Option(False, "--guided", help="Run the full guided walkthrough."),
+    menu: bool = typer.Option(False, "--menu", help="Jump straight to the settings menu."),
+):
+    """Configure BatonCadence - a guided walkthrough or a jump-anywhere settings menu."""
+    from mco.setup_wizard import run_setup
+    run_setup(guided=guided, menu=menu)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

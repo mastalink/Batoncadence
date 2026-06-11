@@ -67,14 +67,19 @@ pip install -e .[dev]
 Once installed, the CLI is available via the `mco` command (or executing `python mco.py`).
 
 ### 1. Interactive Onboarding & Setup
-Initialize the configuration, environment profiles, and AES-256-GCM secure storage using the interactive setup wizard:
 ```bash
-mco setup
+mco setup            # asks: guided walkthrough or settings menu
+mco setup --guided   # hand-held walkthrough; Enter at every prompt = working Local-Only install
+mco setup --menu     # jump straight to one setting and get out
 ```
-This wizard will prompt you to:
-- Choose your **Environment Profile** (Local-Only, Cloud-Heavy, Hybrid).
-- Set up **Supabase database** connection strings to persist the orchestration `agent_jobs` table (required for Cloud-Heavy and Hybrid profiles).
-- Protect credentials using **AES-256-GCM encryption** (with the option to automatically store the master unlock key in Windows Credential Manager for passwordless reboots).
+Setup covers everything in one place — operator name, environment profile
+(Local-Only / Cloud-Heavy / Hybrid), the Supabase database (cloud profiles
+only), your console access token (view / copy / regenerate), enterprise
+connectors (ServiceNow, Dynatrace — with an immediate connection test),
+approval-gate guardrails, ntfy phone notifications, inbound webhooks, and
+AES-256-GCM credential encryption (with passwordless unlock via Windows
+Credential Manager). Sensitive values are encrypted automatically whenever
+the secret store is unlocked.
 
 ### 2. Check System Diagnostics
 Confirm the state of the configuration, active API keys, and secret store lock status:
