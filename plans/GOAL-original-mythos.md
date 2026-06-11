@@ -44,7 +44,6 @@ persistence at once, with no churn in reviewed governance code.
       "custom data source" for enterprises who won't use Supabase
 - [ ] Document the embedded store's limits (single node, no row-level
       security; multi-tenant SaaS still needs Postgres)
-- [ ] LICENSE file (pyproject says MIT but no LICENSE exists — required
-      before this is actually open source; needs a copyright-holder decision)
+- [x] LICENSE file — done 2026-06-10 (MIT, copyright Joe Arroyo)
 - [ ] Optional: `mco export` / `mco import` for moving a local mesh's
       memory into a cloud deployment (local → hybrid upgrade path)

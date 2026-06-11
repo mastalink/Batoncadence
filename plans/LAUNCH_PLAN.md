@@ -36,8 +36,7 @@ replace.
 ## Launch sequence
 
 ### Phase 0 — Pre-flight (this week)
-- [ ] **LICENSE file** (MIT, copyright holder decided) — blocking; "free
-      open source" claims fail scrutiny without it
+- [x] **LICENSE file** — done 2026-06-10: MIT, copyright Joe Arroyo
 - [ ] Register domain (`batoncadence.dev` or `.com`) + set up
       `pilots@` forwarding (the site's enterprise CTA already points there)
 - [ ] Deploy site to Cloudflare Pages, connect repo for auto-deploy
@@ -96,9 +95,9 @@ replace.
 
 ## Risks / honesty checks
 
-- The repo's author field still says "DeepMind team" in pyproject.toml —
-  fix before HN reads the source.
-- No LICENSE file = the #1 HN comment. Fix first.
+- ~~The repo's author field still says "DeepMind team" in pyproject.toml~~
+  fixed 2026-06-10.
+- ~~No LICENSE file~~ fixed 2026-06-10 (MIT, Joe Arroyo).
 - `pilots@batoncadence.dev` must exist before the site ships, or swap the
   mailto for a GitHub Discussions link.
 - Demo video must show real software, no mockups — this crowd checks.
