@@ -127,7 +127,7 @@ class GatewayClient:
             return r.json()
 
     def recall(self, query: str = "", tags: Optional[List[str]] = None, limit: int = 5) -> List[dict]:
-        """Recall the most relevant Mythos shared-context entries."""
+        """Recall the most relevant Drumline shared-context entries."""
         params: dict = {"query": query, "role": self.role, "limit": limit}
         if tags:
             params["tags"] = ",".join(tags)
@@ -139,7 +139,7 @@ class GatewayClient:
     def remember(self, title: str, content: str, kind: str = "fact",
                  tags: Optional[List[str]] = None, role: Optional[str] = None,
                  source_job_id: Optional[str] = None) -> dict:
-        """Append an entry to the Mythos shared context."""
+        """Append an entry to the Drumline shared context."""
         with self._client() as c:
             r = c.post("/api/context", json={
                 "title": title, "content": content, "kind": kind,

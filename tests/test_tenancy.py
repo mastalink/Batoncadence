@@ -87,7 +87,7 @@ class TestOrgIsolation(_TenancyBase):
         names = [a["instance_id"] for a in self.http.get("/api/agents").json()]
         assert "acme-2" in names and "globex-2" not in names
 
-    def test_mythos_memory_isolated_per_org(self):
+    def test_drumline_memory_isolated_per_org(self):
         self.http.post("/api/context", json={"title": "acme secret sauce", "content": "recipe"})
         self._as(GLOBEX)
         hits = self.http.get("/api/context", params={"query": "acme secret sauce"}).json()

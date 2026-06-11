@@ -132,3 +132,6 @@ secrets.enc
 *.swp
 *.swo
 configs/_filled/
+
+# wrangler deploy artifacts
+.wrangler/

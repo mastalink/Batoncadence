@@ -7,7 +7,7 @@
 #      next one. The human-gated 'continue-loop' step is the circuit breaker -
 #      the loop only continues while a human keeps approving it.
 #
-# Every round's outcomes are auto-distilled into Mythos, so each iteration
+# Every round's outcomes are auto-distilled into Drumline, so each iteration
 # starts with the memory of every previous round's failures and fixes.
 name: qa-loop
 steps:
@@ -32,7 +32,7 @@ steps:
 
   - id: digest
     role: claude
-    title: "QA loop: digest round results into Mythos"
+    title: "QA loop: digest round results into Drumline"
     instructions: |
       Summarize this round's QA outcomes in 5 lines max and mco_remember it
       (kind=lesson, tags=qa-loop). Flag regressions vs prior rounds.

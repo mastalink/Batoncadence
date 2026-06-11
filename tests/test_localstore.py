@@ -1,7 +1,7 @@
 """LocalStore: the embedded SQLite data plane for the Local-Only profile.
 
 Covers the PostgREST-dialect builder, defaults, append-only audit
-enforcement, the atomic lease, persistence across reopen, Mythos on the
+enforcement, the atomic lease, persistence across reopen, Drumline on the
 local store, and a full job lifecycle through the real FastAPI app with
 token auth served entirely by the embedded store.
 """
@@ -114,10 +114,10 @@ def test_rows_survive_reopen(tmp_path):
     assert rows.data[0]["title"] == "fact one"
 
 
-# ── Mythos on the local store ─────────────────────────────────────────────────
+# ── Drumline on the local store ─────────────────────────────────────────────────
 
-def test_mythos_remember_and_recall_locally(store):
-    from mco.orchestrator.mythos import remember, recall
+def test_drumline_remember_and_recall_locally(store):
+    from mco.orchestrator.drumline import remember, recall
 
     entry = remember(store, title="Prod DB read-only on Sundays",
                      content="Maintenance window 02:00-06:00 UTC.",
@@ -165,7 +165,7 @@ def test_full_lifecycle_on_local_store(tmp_path, monkeypatch):
                      json={"task_id": job_id, "agent_instance_id": "local-operator"})
     assert resp.status_code == 200 and resp.json()["success"] is True
 
-    # Complete with output -> triggers Mythos distillation
+    # Complete with output -> triggers Drumline distillation
     resp = http.put(f"/api/jobs/{job_id}", headers=auth, json={
         "status": "completed",
         "output_payload": {"result": "Root cause: disk full on web-01."},
@@ -182,7 +182,7 @@ def test_full_lifecycle_on_local_store(tmp_path, monkeypatch):
     assert "leased" in events
     assert "status:completed" in events
 
-    # Mythos distilled the outcome into shared context on the SAME local store
+    # Drumline distilled the outcome into shared context on the SAME local store
     ctx = store.table("agent_context").select("*").execute().data
     assert any("Summarize logs" in (e.get("title") or "") for e in ctx)
 

@@ -2,7 +2,7 @@
 LocalStore - BatonCadence's embedded, zero-dependency persistence engine.
 
 This is what makes the Local-Only profile a *real* edition instead of a demo:
-jobs, the agent registry, the immutable audit trail, and the Mythos shared
+jobs, the agent registry, the immutable audit trail, and the Drumline shared
 context all persist to a single SQLite file (``~/.mco/local.db``) with no
 cloud account, no external database, and no new dependencies (stdlib only).
 
@@ -13,7 +13,7 @@ uses against Supabase/PostgREST::
     store.table("agent_context").insert({...}).execute()
     store.rpc("lease_task", {"p_agent_instance_id": ..., "p_task_id": ...})
 
-so every route, handler, and Mythos call works unchanged. ``get_db_client()``
+so every route, handler, and Drumline call works unchanged. ``get_db_client()``
 returns a LocalStore when no Supabase credentials are configured.
 
 Design notes:

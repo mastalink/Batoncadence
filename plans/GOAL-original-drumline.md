@@ -1,10 +1,10 @@
-# Goal: Mythos is original — first-class in every edition, no rented dependency
+# Goal: Drumline is original — first-class in every edition, no rented dependency
 
 **Status:** Embedded local store shipped 2026-06-10. Pluggable backends open.
 
 ## The decision (2026-06-10)
 
-Mythos is BatonCadence's differentiator and cannot be bent around someone
+Drumline is BatonCadence's differentiator and cannot be bent around someone
 else's database. The free Local-Only edition must have the *full* shared
 memory — auto-distillation, deliberate memory, prompt injection — with zero
 cloud dependencies. We do not ship an edition where the core feature is
@@ -14,12 +14,12 @@ missing.
 
 `src/mco/localstore.py` — an embedded SQLite data plane (stdlib only, no new
 dependencies) that speaks the same PostgREST builder dialect the routes
-already use, so **zero changes to routes/handlers/mythos** were needed:
+already use, so **zero changes to routes/handlers/drumline** were needed:
 
 - `get_db_client()` returns it automatically when no Supabase credentials
   are configured (opt out with `MCO_DISABLE_LOCAL_DB`).
 - Jobs, agent registry, **immutable audit trail** (append-only enforced in
-  code, mirroring the cloud DB trigger), and **Mythos** all persist to
+  code, mirroring the cloud DB trigger), and **Drumline** all persist to
   `~/.mco/local.db`.
 - `lease_task` implemented as an atomic compare-and-set under the store
   lock — same single-winner contract as the Postgres function.
@@ -35,7 +35,7 @@ already use, so **zero changes to routes/handlers/mythos** were needed:
 
 A Supabase-compatible shim instead of a storage-interface refactor: the
 query surface was only ~10 builder methods across 6 files, so mimicking it
-gives every feature (jobs, audit, approvals, Mythos, registry) local
+gives every feature (jobs, audit, approvals, Drumline, registry) local
 persistence at once, with no churn in reviewed governance code.
 
 ## Remaining work

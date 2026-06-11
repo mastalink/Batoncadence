@@ -78,7 +78,7 @@ def get_db_client(force_new: bool = False):
 
     Supabase when credentials are configured; otherwise BatonCadence's
     embedded LocalStore (SQLite) so the Local-Only profile gets real
-    persistence - jobs, audit trail, agent registry, and Mythos shared
+    persistence - jobs, audit trail, agent registry, and Drumline shared
     context all work with zero cloud dependencies. Set MCO_DISABLE_LOCAL_DB
     to opt out of the embedded fallback (returns None, as before).
     """

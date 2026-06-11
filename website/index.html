@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BatonCadence — Every agent. One baton.</title>
-<meta name="description" content="BatonCadence is a self-hosted orchestration hub for AI agents: a governed job board with human approval gates, an immutable audit trail, and Mythos — one shared memory every agent reads and writes. Free, MIT, runs on your machine.">
+<meta name="description" content="BatonCadence is a self-hosted orchestration hub for AI agents: a governed job board with human approval gates, an immutable audit trail, and Drumline — one shared memory every agent reads and writes. Free, MIT, runs on your machine.">
 <meta property="og:title" content="BatonCadence — Every agent. One baton.">
 <meta property="og:description" content="Orchestrate Claude, Codex, Gemini, and your ITSM stack from one governed job board. Approval gates, immutable audit, shared memory. Free and local-first.">
 <meta property="og:type" content="website">
@@ -166,12 +166,12 @@ h2{font-family:var(--serif);font-weight:600;font-size:clamp(1.7rem,3vw,2.4rem);l
 .box.indigo .tag{color:#ffd9b8}
 .box.indigo:hover{box-shadow:6px 6px 0 var(--ink)}
 
-.mini-mythos{
+.mini-drumline{
   margin-top:18px;background:#22211b;border:1px solid #36342b;border-radius:8px;
   font-family:var(--mono);font-size:.7rem;line-height:1.7;padding:14px 16px;color:#c9c5b4;
 }
-.mini-mythos .h{color:#9d9df0}
-.mini-mythos .k{color:#e3c06a}
+.mini-drumline .h{color:#9d9df0}
+.mini-drumline .k{color:#e3c06a}
 .gate{
   margin-top:18px;display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:.72rem;
 }
@@ -265,7 +265,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
       BatonCadence
     </a>
     <nav>
-      <a href="#mythos">Mythos</a>
+      <a href="#drumline">Drumline</a>
       <a href="#features">Features</a>
       <a href="#editions">Editions</a>
       <a href="#install">Install</a>
@@ -284,12 +284,12 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
       <p class="lede rise d3">
         Claude, Codex, Gemini, and your ITSM stack — conducted from one governed
         job board. Human approval gates, an immutable audit trail, and
-        <strong>Mythos</strong>: a shared memory every agent reads and writes,
+        <strong>Drumline</strong>: a shared memory every agent reads and writes,
         so nothing your mesh learns ever dies with the job.
       </p>
       <div class="cta-row rise d4">
         <a class="btn primary" href="#install">Install free →</a>
-        <a class="btn ghost" href="#mythos">Why Mythos?</a>
+        <a class="btn ghost" href="#drumline">Why Drumline?</a>
       </div>
       <div class="hero-note rise d4">
         <b>$ pip install</b> or one double-click on Windows · no cloud account required · 200-test suite
@@ -323,13 +323,13 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
   </div>
 </div>
 
-<!-- ════════ MYTHOS ════════ -->
-<section id="mythos">
+<!-- ════════ DRUMLINE ════════ -->
+<section id="drumline">
   <div class="wrap">
     <div class="sec-head sr">
       <span class="sec-no">No. I</span>
       <div>
-        <h2>Mythos — memory that outlives the job</h2>
+        <h2>Drumline — memory that outlives the job</h2>
         <p class="sec-sub">Most agent fleets have amnesia: every task starts from zero.
         BatonCadence gives the whole mesh one collective memory.</p>
       </div>
@@ -342,8 +342,8 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
         facts, decisions, and lessons deliberately with <code class="inline">mco_remember</code>.
         Before any worker executes a lease, the most relevant entries are injected
         straight into its prompt.</p>
-        <div class="mini-mythos">
-<span class="h">=== SHARED CONTEXT (Mythos) ===</span><br>
+        <div class="mini-drumline">
+<span class="h">=== SHARED CONTEXT (Drumline) ===</span><br>
 - [<span class="k">handoff</span>] Job outcome: Triage P-99 (claude-w1)<br>
 &nbsp;&nbsp;Root cause: runaway cron. Disabled job foo.<br>
 - [<span class="k">fact</span>] Prod DB read-only on Sundays (joe)<br>
@@ -354,7 +354,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
       <div class="box span2 sr">
         <span class="tag">Original by design</span>
         <h3>No rented brain.</h3>
-        <p>Mythos isn't an embeddings bill or a vector-DB subscription. It's a
+        <p>Drumline isn't an embeddings bill or a vector-DB subscription. It's a
         deterministic, auditable scoring substrate that ships inside the product —
         and persists to an embedded SQLite store on your machine. The free edition
         has the <em>full</em> memory. That's the point.</p>
@@ -429,7 +429,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
         <span class="tag">Local-first</span>
         <h3>Yours, entirely</h3>
         <p>No Supabase creds? An embedded SQLite store takes over automatically —
-        jobs, audit, registry, and Mythos persist in <code class="inline">~/.mco/local.db</code>.</p>
+        jobs, audit, registry, and Drumline persist in <code class="inline">~/.mco/local.db</code>.</p>
       </div>
     </div>
   </div>
@@ -456,7 +456,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
       <div class="step sr">
         <h3>The mesh executes — and remembers</h3>
         <p>Workers lease atomically, run through the right vendor CLI, report back.
-        Every outcome is audited, and distilled into Mythos for the next job.</p>
+        Every outcome is audited, and distilled into Drumline for the next job.</p>
       </div>
     </div>
   </div>
@@ -478,7 +478,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
         <div class="name">Local</div>
         <div class="price">Free forever · MIT</div>
         <ul>
-          <li>Full Mythos shared memory</li>
+          <li>Full Drumline shared memory</li>
           <li>Job board, approvals, audit trail</li>
           <li>Console GUI &amp; workflow builder</li>
           <li>Embedded SQLite — zero cloud</li>
@@ -569,7 +569,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
         audit, escalation) those frameworks leave as an exercise for the reader.</p>
       </details>
       <details class="sr">
-        <summary>Does the free local edition really include Mythos?</summary>
+        <summary>Does the free local edition really include Drumline?</summary>
         <p>Yes — that's a product decision, not an accident. Shared memory is the heart of
         the system, so it works fully offline against the embedded SQLite store. Cloud
         databases add multi-machine and multi-tenant reach, not features.</p>
@@ -601,7 +601,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
     <nav>
       <a href="https://github.com/mastalink/Batoncadence">GitHub</a>
       <a href="https://github.com/mastalink/Batoncadence/blob/main/docs/INSTALL.md">Install guide</a>
-      <a href="https://github.com/mastalink/Batoncadence/blob/main/docs/MYTHOS.md">Mythos</a>
+      <a href="https://github.com/mastalink/Batoncadence/blob/main/docs/DRUMLINE.md">Drumline</a>
       <a href="https://github.com/mastalink/Batoncadence/blob/main/docs/GOVERNANCE.md">Governance</a>
     </nav>
   </div>
@@ -615,9 +615,9 @@ const SCRIPT = [
   ["t-ind","▸ job J-2041 created      \"Summarize overnight error logs\"      → role:claude"],
   ["t-dim","  audit: created · by ops-bot"],
   ["t-ok","▸ J-2041 leased by claude-worker-1   (atomic — w2 lost the race)"],
-  ["t-dim","  mythos: 2 relevant memories injected into prompt"],
+  ["t-dim","  drumline: 2 relevant memories injected into prompt"],
   ["t-ok","✓ J-2041 completed   →  \"Root cause: runaway cron on web-01\""],
-  ["t-gold","  mythos: outcome distilled → handoff #h-118 (everyone knows now)"],
+  ["t-gold","  drumline: outcome distilled → handoff #h-118 (everyone knows now)"],
   ["",""],
   ["t-ind","▸ job J-2042 created      \"Close incident INC0010023\"          → role:servicenow"],
   ["t-warn","⏸ J-2042 paused at needs_approval   (servicenow is a gated role)"],

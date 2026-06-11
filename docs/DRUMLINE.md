@@ -1,12 +1,14 @@
-# Mythos - The Shared Context Substrate
+# Drumline - The Shared Context Substrate
 
-Every agent on the mesh - Claude, Codex, Gemini, connector workers - reads
-from and writes to **one collective memory**. Knowledge stops dying with the
-job that produced it: what one agent learns, every agent knows.
+In a marching band, the drumline keeps everyone in step: the beat that
+carries the rest. Here it's the memory that carries the mesh - every agent
+(Claude, Codex, Gemini, connector workers) reads from and writes to **one
+collective memory**. Knowledge stops dying with the job that produced it:
+what one agent learns, every agent marches to.
 
-**Local-Only installs need no setup at all** - Mythos persists to the embedded
+**Local-Only installs need no setup at all** - Drumline persists to the embedded
 SQLite store (`~/.mco/local.db`) automatically. For Supabase-backed deployments,
-apply [`migrations/2026-06_mythos_shared_context.sql`](migrations/2026-06_mythos_shared_context.sql)
+apply [`migrations/2026-06_drumline_shared_context.sql`](migrations/2026-06_drumline_shared_context.sql)
 (idempotent) to enable it.
 
 ---
@@ -18,7 +20,7 @@ When any job completes, its essence - what was asked, what came back - is
 distilled into a `handoff` entry, tagged with the roles and connector
 involved, and recorded in the audit trail as `context_distilled`. The
 *evidence* stays immutable in `agent_job_events`; the *essence* becomes
-recallable context. Opt out with `MCO_MYTHOS_DISTILL=false`.
+recallable context. Opt out with `MCO_DRUMLINE_DISTILL=false`.
 
 **2. Deliberate memory.**
 Agents record durable knowledge - decisions, gotchas, environment facts:
@@ -41,7 +43,7 @@ Before a worker executes a leased job, it recalls the most relevant entries
 prepends them to the prompt:
 
 ```
-=== SHARED CONTEXT (Mythos) ===
+=== SHARED CONTEXT (Drumline) ===
 Collective memory from prior agent work. Use it; correct it via mco_remember if wrong.
 - [handoff] Job outcome: Triage P-99 (claude-worker-1, 2026-06-10)
   Asked: Investigate high CPU on web-01
@@ -53,7 +55,7 @@ Collective memory from prior agent work. Use it; correct it via mco_remember if 
 Task Title: ...
 ```
 
-Opt out with `MCO_MYTHOS_INJECT=false`. Injection is best-effort: if the
+Opt out with `MCO_DRUMLINE_INJECT=false`. Injection is best-effort: if the
 gateway is unreachable, the job still runs.
 
 **2. Explicit recall.**
@@ -73,7 +75,7 @@ REST: `GET /api/context?query=...&role=...&tags=a,b&limit=5`.
   freshest entries.
 - No embeddings, no external model: the substrate stays standalone, cheap,
   explainable in an audit, and testable. The scorer is one function
-  (`mythos.score_entry`) - swap in an embedding back-end later without
+  (`drumline.score_entry`) - swap in an embedding back-end later without
   changing any caller.
 - `weight` (0.1-5.0) lets important entries punch above their age.
 

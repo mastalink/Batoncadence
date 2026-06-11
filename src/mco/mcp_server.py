@@ -95,7 +95,7 @@ def mco_agents() -> List[dict]:
 
 @mcp.tool()
 def mco_recall(query: str = "", tags: str = "", limit: int = 5) -> List[dict]:
-    """Dip into Mythos, the mesh's shared context: recall the most relevant
+    """Dip into Drumline, the mesh's shared context: recall the most relevant
     facts/decisions/lessons/handoffs recorded by any agent or distilled from
     completed jobs. Call this before starting non-trivial work."""
     tag_list = [t for t in tags.split(",") if t.strip()] if tags else None
@@ -104,7 +104,7 @@ def mco_recall(query: str = "", tags: str = "", limit: int = 5) -> List[dict]:
 
 @mcp.tool()
 def mco_remember(title: str, content: str, kind: str = "fact", tags: str = "") -> dict:
-    """Write to Mythos, the mesh's shared context, for every agent downstream.
+    """Write to Drumline, the mesh's shared context, for every agent downstream.
     kind: fact | decision | lesson | handoff | artifact. Record durable
     knowledge (decisions made, gotchas found, environment facts) - not chatter."""
     tag_list = [t for t in tags.split(",") if t.strip()] if tags else []

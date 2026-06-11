@@ -190,19 +190,19 @@ async def handle_job_update(
         if status == JobStatus.COMPLETED.value:
             await _unlock_dependents(db_client, task_id, broadcast_event)
 
-            # Mythos: distill the finished job into shared context (opt-out via
-            # MCO_MYTHOS_DISTILL=false). Best-effort - memory must never break
+            # Drumline: distill the finished job into shared context (opt-out via
+            # MCO_DRUMLINE_DISTILL=false). Best-effort - memory must never break
             # the orchestration path.
             try:
                 from mco.config import get_config
-                if str(get_config().get("MCO_MYTHOS_DISTILL") or "true").lower() != "false":
-                    from mco.orchestrator.mythos import distill_job
+                if str(get_config().get("MCO_DRUMLINE_DISTILL") or "true").lower() != "false":
+                    from mco.orchestrator.drumline import distill_job
                     entry = distill_job(db_client, updated_job)
                     if entry:
-                        record_event(db_client, task_id, "context_distilled", "system", "mythos",
+                        record_event(db_client, task_id, "context_distilled", "system", "drumline",
                                      {"context_id": entry.get("id"), "kind": entry.get("kind")})
             except Exception as e:
-                logger.debug(f"Mythos distillation skipped for {task_id}: {e}")
+                logger.debug(f"Drumline distillation skipped for {task_id}: {e}")
 
         # Retry / escalation paths if failed
         if status == JobStatus.FAILED.value:

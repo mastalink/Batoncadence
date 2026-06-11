@@ -28,16 +28,16 @@ CI builds and tests every push (`.github/workflows/ci.yml`, Python 3.11/3.12 + i
 ## Multi-tenancy (hosted SaaS mode)
 
 Run `docs/migrations/2026-06_multi_tenancy.sql` (idempotent). Every agent,
-job, audit event, and Mythos entry carries an `org_id` (existing rows backfill
+job, audit event, and Drumline entry carries an `org_id` (existing rows backfill
 to `default`, so single-tenant installs are unaffected).
 
 - Register agents into a tenant: `mco register --name x --role codex --org acme`
 - The org boundary is enforced on every read and write: job listings, pending
   polls, leasing, status updates, approvals, retries, audit trails, agent
-  lists, and Mythos recall are all scoped to the caller's org. Cross-org
+  lists, and Drumline recall are all scoped to the caller's org. Cross-org
   access returns 404 - other tenants' resources are invisible, not just
   forbidden.
-- Mythos memory is per-org: tenant knowledge never leaks across the boundary.
+- Drumline memory is per-org: tenant knowledge never leaks across the boundary.
 
 ## Guardrails
 
@@ -46,7 +46,7 @@ to `default`, so single-tenant installs are unaffected).
 | `MCO_POLICY_GATED_ROLES` | Jobs targeting these roles (e.g. `servicenow,dynatrace`) are **always** forced to `needs_approval`, regardless of sender intent - no agent writes to a gated platform without a human. |
 | `MCO_KILL_SWITCH` | `true` = global pause: job creation and leasing return 503; in-flight jobs may still report status; humans can still approve/audit. `/healthz` reports `paused: true`. |
 | `MCO_APPROVER_ROLES` | Who may approve/reject/retry and run direct platform actions (default `human,admin,operator`). |
-| `MCO_MYTHOS_INJECT` / `MCO_MYTHOS_DISTILL` | Shared-context injection/distillation toggles (default on). |
+| `MCO_DRUMLINE_INJECT` / `MCO_DRUMLINE_DISTILL` | Shared-context injection/distillation toggles (default on). |
 | `MCO_SYNC_INTERVAL` | Background connector sync cadence in seconds (0 = off). |
 | `MCO_WEBHOOK_SECRET` | Enables inbound webhook ingestion; unset = endpoint disabled. |
 
@@ -65,4 +65,4 @@ mco workflow configs/workflows/qa_loop.yaml          # self-perpetuating QA loop
 
 The QA loop's final step is approval-gated: each next round needs a human
 click, so the loop is alive but never unsupervised. Round outcomes distill
-into Mythos automatically - every iteration starts smarter than the last.
+into Drumline automatically - every iteration starts smarter than the last.

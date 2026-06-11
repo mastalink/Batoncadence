@@ -1,5 +1,5 @@
 """
-Mythos - the shared context substrate all agents dip into.
+Drumline - the shared context substrate all agents dip into.
 
 Every agent on the mesh (Claude, Codex, Gemini, connector workers) reads from
 and writes to one collective memory, so knowledge survives across jobs, roles,
@@ -26,7 +26,7 @@ import logging
 import re
 from typing import Any, List, Optional
 
-logger = logging.getLogger("mco.mythos")
+logger = logging.getLogger("mco.drumline")
 
 CONTEXT_TABLE = "agent_context"
 KINDS = ("fact", "decision", "lesson", "handoff", "artifact")
@@ -87,7 +87,7 @@ def remember(
         res = db_client.table(CONTEXT_TABLE).insert(data).execute()
         return res.data[0] if res.data else None
     except Exception as e:
-        logger.warning(f"Mythos remember skipped: {e}")
+        logger.warning(f"Drumline remember skipped: {e}")
         return None
 
 
@@ -168,7 +168,7 @@ def recall(
             .execute()
         )
     except Exception as e:
-        logger.warning(f"Mythos recall skipped: {e}")
+        logger.warning(f"Drumline recall skipped: {e}")
         return []
 
     # Tenant isolation: an org only ever recalls its own memory.
@@ -194,7 +194,7 @@ def render_context_block(entries: List[dict]) -> str:
     """Render recalled entries as the SHARED CONTEXT block injected into prompts."""
     if not entries:
         return ""
-    lines = ["=== SHARED CONTEXT (Mythos) ===",
+    lines = ["=== SHARED CONTEXT (Drumline) ===",
              "Collective memory from prior agent work. Use it; correct it via mco_remember if wrong."]
     for e in entries:
         stamp = str(e.get("created_at") or "")[:10]

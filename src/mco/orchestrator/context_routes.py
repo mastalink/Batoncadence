@@ -1,11 +1,11 @@
-"""FastAPI routes for Mythos, the shared agent context (/api/context)."""
+"""FastAPI routes for Drumline, the shared agent context (/api/context)."""
 
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from mco.orchestrator.auth import require_agent
-from mco.orchestrator.mythos import recall, remember
+from mco.orchestrator.drumline import recall, remember
 
 logger = logging.getLogger("mco.orchestrator.context")
 context_router = APIRouter(prefix="/api/context")

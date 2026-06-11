@@ -13,7 +13,7 @@ Codex CLI, Gemini, custom workers — with the three things the December 2025
 Gartner validation said enterprises require before agents touch production:
 **human approval gates, an immutable audit trail, escalation paths.**
 
-**The moat story:** Mythos. Shared memory that makes the whole mesh smarter
+**The moat story:** Drumline. Shared memory that makes the whole mesh smarter
 with every job — original, deterministic, auditable, and fully present in the
 free edition. The pitch writes itself: *"your agent fleet has amnesia."*
 
@@ -24,7 +24,7 @@ replace.
 ## Audiences (in funnel order)
 
 1. **Self-hosters / r/LocalLLaMA crowd** — want local-first, MIT, no cloud
-   account. They generate stars, issues, and credibility. Hook: Mythos +
+   account. They generate stars, issues, and credibility. Hook: Drumline +
    one-click install + "the free edition is the full product."
 2. **Dev-tool power users** — already run 3+ agent CLIs, feel the
    coordination pain daily. Hook: the dropbox model + MCP tools inside
@@ -44,13 +44,13 @@ replace.
       (`agents`, `orchestration`, `mcp`, `self-hosted`, `ai-governance`)
 - [ ] README hero section with a GIF of the console + the hero terminal
 - [ ] 2–3 min demo video: install.bat → console → approve a gated job →
-      audit trail → Mythos recall (screen capture, no narration needed)
+      audit trail → Drumline recall (screen capture, no narration needed)
 
 ### Phase 1 — Community launch (week 2)
 - **Show HN:** "Show HN: BatonCadence — a governed job board for AI agents,
   with shared memory (MIT, local-first)". Post early Tuesday–Thursday ET.
   First comment: the honest architecture story (PostgREST-dialect embedded
-  store, why no embeddings in Mythos, the dad-installer test).
+  store, why no embeddings in Drumline, the dad-installer test).
 - **r/LocalLLaMA + r/selfhosted:** angle = "the free edition is the whole
   product, runs from one double-click, no cloud." These communities punish
   hidden paywalls — our editions story is genuinely clean, lead with it.
@@ -61,7 +61,7 @@ replace.
   recording. LinkedIn version targets the ITSM angle for ops folks.
 
 ### Phase 2 — Content engine (weeks 3–8, one piece/week)
-1. "Your agent fleet has amnesia" — the Mythos design essay (why
+1. "Your agent fleet has amnesia" — the Drumline design essay (why
    deterministic scoring beat embeddings; auditability as a feature)
 2. "The dropbox model" — why agents-as-mail beats agents-as-functions
 3. "An audit trail your auditors will believe" — append-only enforcement
@@ -77,7 +77,7 @@ replace.
   one-pager + demo video; offer white-glove pilots: we run the install call
 - Target 3–5 design partners from ServiceNow/Dynatrace shops in inbound
 - Pilot feedback defines the 1.0 paywall line (likely: multi-tenancy,
-  SSO/RBAC, connectors stay source-available; core + Mythos stay MIT)
+  SSO/RBAC, connectors stay source-available; core + Drumline stay MIT)
 
 ## Pricing hypothesis (validate in pilots, don't publish yet)
 

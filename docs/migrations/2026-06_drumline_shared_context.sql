@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════
--- MCOrchestr8 Mythos Migration (June 2026)
+-- MCOrchestr8 Drumline Migration (June 2026)
 -- Shared context substrate: one collective memory all agents read/write.
 -- Entries come from explicit agent writes (mco_remember) and automatic
 -- distillation of completed jobs (prompt -> outcome handoffs).

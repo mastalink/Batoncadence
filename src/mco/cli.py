@@ -247,7 +247,7 @@ def create_app() -> FastAPI:
     from mco.orchestrator.integration_routes import integrations_router
     app_server.include_router(integrations_router)
 
-    # Mythos shared context (collective agent memory)
+    # Drumline shared context (collective agent memory)
     from mco.orchestrator.context_routes import context_router
     app_server.include_router(context_router)
 

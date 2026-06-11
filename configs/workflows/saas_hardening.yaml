@@ -41,7 +41,7 @@ steps:
     instructions: |
       Recall the shared context (mco_recall 'saas-hardening') for the QA
       outcomes of this workflow, weigh failures, and write a go/no-go
-      recommendation with reasons. Remember your verdict to Mythos
+      recommendation with reasons. Remember your verdict to Drumline
       (kind=decision, tags=release,qa).
     depends_on: [docker-smoke, console-verify]
 

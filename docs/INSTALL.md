@@ -88,7 +88,7 @@ The page changes from *"Demo mode"* to live data. You are done — the console
 remembers these settings and connects automatically next time.
 
 Everything you do now is saved on your computer (in `~/.mco/local.db`):
-jobs, the audit history, and the shared agent memory (Mythos) all work
+jobs, the audit history, and the shared agent memory (Drumline) all work
 without any cloud account.
 
 > **Token forgotten?** Look at the black server window — it always shows the

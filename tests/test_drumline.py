@@ -1,4 +1,4 @@
-"""Mythos shared-context tests: remember/recall, distillation, routes, injection."""
+"""Drumline shared-context tests: remember/recall, distillation, routes, injection."""
 
 import pytest
 from fastapi import FastAPI
@@ -8,7 +8,7 @@ import mco.notifiers.ntfy as ntfy_mod
 import mco.orchestrator.routes as routes_mod
 from mco.orchestrator.auth import require_agent
 from mco.orchestrator.context_routes import context_router
-from mco.orchestrator.mythos import (
+from mco.orchestrator.drumline import (
     distill_job,
     recall,
     remember,
@@ -118,7 +118,7 @@ class TestRendering:
             {"kind": "lesson", "title": "Never deploy Fridays", "content": "Seriously.",
              "created_by": "joe", "created_at": "2026-06-01T00:00:00Z"},
         ])
-        assert block.startswith("=== SHARED CONTEXT (Mythos) ===")
+        assert block.startswith("=== SHARED CONTEXT (Drumline) ===")
         assert block.rstrip().endswith("=== END SHARED CONTEXT ===")
         assert "[lesson] Never deploy Fridays (joe, 2026-06-01)" in block
         assert "Seriously." in block
@@ -156,7 +156,7 @@ class TestContextRoutes:
         assert len(resp.json()) == 1
 
     def test_completed_job_flows_into_shared_context(self):
-        """The full loop: job completes -> distilled into Mythos -> recallable,
+        """The full loop: job completes -> distilled into Drumline -> recallable,
         with a context_distilled audit event."""
         self.db.add_job(id="loop1", title="Patch nginx CVE", status="in_progress",
                         target_agent_role="codex",
