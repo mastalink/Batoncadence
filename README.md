@@ -1,201 +1,152 @@
 # BatonCadence
 
-> Formerly **MCOrchestr8**. The CLI command and Python package remain `mco`.
+**Every agent. One baton.**
 
-BatonCadence is a highly secure, modular, and completely standalone agent orchestration and job board system. It acts as a lightweight coordination hub enabling multiple diverse agents on different platforms or machines to register, lease, and atomically execute tasks.
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](docs/INSTALL.md)
 
----
-
-## Features
-
-- **Decoupled Architecture**: 100% independent from any core platform or framework.
-- **Secure Secret Storage**: Military-grade `AES-256-GCM` encryption for local configuration parameters and API credentials, with automated passwordless unlock via Windows Credential Manager integration.
-- **Dynamic Profiles**: Flexible environment profiles (Local-Only, Cloud-Heavy, Hybrid) tailoring how the system behaves.
-- **Robust Job Board**: High-performance, concurrent WebSocket and REST-based multi-client job dispatch, leasing, execution tracking, and downstream task dependency resolution.
-- **Gateway Security**: REST API endpoints secured using dynamic Bearer-token authentication and dedicated Dropbox authorization scopes.
-- **Role Executors**: Native execution templates for diverse roles (`codex`, `claude`, `gemini`) so leased jobs automatically process through correct interfaces.
-- **Supabase Performance Optimization**: Memoized, pre-warmed Supabase clients preventing polling delays or query timeouts.
-- **`ntfy.sh` centralized hooks**: Integrated central configuration manager notifier wiring process snapshot leak detections, case-insensitive role filtering, and dynamic job lease notifications.
-- **Dropbox MCP Server**: Custom MCP server integrating the dropbox schema and specialized GUI configuration maps (Claude, Codex, Antigravity).
-- **Immutable Audit Trail**: Every job mutation (create, lease, status change, approval decision, retry, escalation) is appended to a tamper-evident `agent_job_events` table protected by a database trigger that rejects UPDATE/DELETE. Inspect with `mco audit <job_id>` or `GET /api/jobs/{id}/events`.
-- **Human-in-the-Loop Approval Gates**: Jobs flagged `requires_approval` pause at `needs_approval` until an approver role (configurable via `MCO_APPROVER_ROLES`, default `human,admin,operator`) approves or rejects them — via REST, CLI (`mco approve` / `mco reject`), MCP tools, or the dashboard.
-- **Escalation Paths**: Failed jobs retry up to `max_retries`, then auto-create an escalation job for `escalate_to_role` instead of dying silently — with ntfy alerts at every step.
-- **Declarative Workflow DSL**: YAML-defined DAGs of multi-agent steps (`mco workflow pipeline.yaml`), with per-step approval gates, retry budgets, and escalation roles. See `configs/workflows/example_release.yaml`.
-- **Enterprise Connectors**: First-class ServiceNow and Dynatrace integrations plus a generic webhook contract - ingest incidents/problems as agent jobs (polled or pushed, idempotent by external id), control the platforms back (create/resolve incidents, comment/close problems) as auditable connector-role jobs or approver-gated direct actions, and mirror terminal job failures into ITSM via the escalation bridge. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
-- **Drumline Shared Context**: One collective memory all agents dip into - completed jobs are auto-distilled into recallable handoffs, agents record facts/decisions/lessons via `mco_remember`/`mco_recall`, and workers inject the most relevant entries into every prompt before execution. See [docs/DRUMLINE.md](docs/DRUMLINE.md).
-- **Embedded Local Store**: zero-dependency SQLite data plane (`~/.mco/local.db`) that kicks in automatically when no Supabase credentials are configured - jobs, agent registry, immutable audit trail, and Drumline all persist locally with no cloud account. The Local-Only profile is a real edition, not a demo.
-- **Control-Plane Dashboard**: Zero-build web UI at `http://host:port/dashboard` — job board, approval queue with approve/reject buttons, agent fleet presence, and per-job audit viewer.
-- **Windows Console Stability**: Pure ASCII console notation (`->`) replacing unicode symbols to avoid legacy terminal encoding crashes on Windows.
-- **CLI-First**: Ergonomic, rich CLI commands `setup`, `serve`, `listen`, `status`, `workflow`, `audit`, `approve`, `reject`, `retry`, `connectors`, `sync`, and `platform`.
+A self-hosted orchestration hub for AI agents: a governed job board with
+human approval gates, an immutable audit trail, and **Drumline** — one shared
+memory every agent reads and writes. Runs entirely on your machine; no cloud
+account required.
 
 ---
 
-## Installation
+## Install
 
-### One-click install (Windows)
-
-Double-click **`install.bat`** in the repo root. It finds (or installs)
-Python, creates the `.venv`, installs BatonCadence, writes a safe Local-Only
-config, and drops a **BatonCadence** shortcut on the Desktop that starts the
-server and opens the console GUI. Full walkthrough and troubleshooting in
-[docs/INSTALL.md](docs/INSTALL.md).
-
-### Manual install
-
-BatonCadence is designed to be installed as a local editable python package.
-
-### Prerequisites
-- Python 3.9 or higher
-- (Recommended) `uv` or `pip`
+### macOS / Linux — one command
 
 ```bash
-# Clone or navigate to the repository
-cd C:/AI/BatonCadence
-
-# Set up virtual environment
-python -m venv .venv
-source .venv/Scripts/activate # On Windows: .venv\Scripts\activate
-
-# Install dependencies in editable mode
-pip install -e .[dev]
+curl -sSf https://batoncadence.com/install.sh | bash
 ```
 
----
+Clones the repo to `~/BatonCadence`, finds/installs Python, creates the venv,
+generates your access token, adds `mco` to your PATH, then asks: demo mode
+or connect now. Takes about two minutes.
 
-## Usage & CLI Commands
-
-Once installed, the CLI is available via the `mco` command (or executing `python mco.py`).
-
-### 1. Interactive Onboarding & Setup
 ```bash
-mco setup            # asks: guided walkthrough or settings menu
-mco setup --guided   # hand-held walkthrough; Enter at every prompt = working Local-Only install
-mco setup --menu     # jump straight to one setting and get out
+# If you already cloned:
+bash scripts/install.sh
 ```
-Setup covers everything in one place — operator name, environment profile
-(Local-Only / Cloud-Heavy / Hybrid), the Supabase database (cloud profiles
-only), your console access token (view / copy / regenerate), enterprise
-connectors (ServiceNow, Dynatrace — with an immediate connection test),
-approval-gate guardrails, ntfy phone notifications, inbound webhooks, and
-AES-256-GCM credential encryption (with passwordless unlock via Windows
-Credential Manager). Sensitive values are encrypted automatically whenever
-the secret store is unlocked.
 
-### 2. Check System Diagnostics
-Confirm the state of the configuration, active API keys, and secret store lock status:
+### Windows — one double-click
+
+Download the ZIP from GitHub, extract it anywhere, then double-click
+**`install.bat`**. It finds (or installs) Python, builds the venv, generates
+your access token, and drops a **BatonCadence** shortcut on the Desktop.
+Your browser opens the console automatically.
+
+```powershell
+# PowerShell one-liner (no ZIP download needed):
+iwr -useb https://batoncadence.com/install.ps1 | iex
+
+# Or headless / CI:
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -NoPrompt
+```
+
+Full walkthrough and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md)
+
+### pip / Docker
+
 ```bash
-mco status
+git clone https://github.com/mastalink/Batoncadence
+pip install -e Batoncadence
+mco setup --guided    # configure in 60 seconds
+mco serve             # console at http://127.0.0.1:18789/console
 ```
 
-### 3. Start the Orchestrator Server
-Spawn the FastAPI server hosting REST jobs endpoints and WebSocket broadcasts:
 ```bash
-mco serve
-```
-
-### 4. Spawn Background Executor Daemon
-Run the background agent client listener to poll the job board, claim/lease tasks, and execute them:
-```bash
-mco listen --role codex --instance local-worker-1
-```
-
-### 5. Governance Commands
-```bash
-# Submit a multi-step, multi-agent workflow (validate first with --dry-run)
-mco workflow configs/workflows/example_release.yaml
-
-# Inspect a job's immutable audit trail
-mco audit <job_id>
-
-# Decide a human-in-the-loop approval gate (requires an approver-role token)
-mco approve <job_id>
-mco reject <job_id> --reason "too risky"
-```
-Or open the control-plane dashboard at `http://127.0.0.1:18789/dashboard` and
-paste an agent token to manage the approval queue visually.
-
-### BatonCadence Console
-A full GUI ships at `http://127.0.0.1:18789/console` - mission-control
-overview, job board with audit drawer, approvals inbox, visual workflow
-builder (no YAML needed), and agent fleet presence. Open it, go to
-Settings -> Connection, and paste an agent token (approver role for
-approve/reject). It starts in a safe demo mode until connected.
-
-Full usage documentation for approval gates, the audit trail, retries/escalation,
-the workflow DSL, and the dashboard lives in [docs/GOVERNANCE.md](docs/GOVERNANCE.md).
-
----
-
-## Advanced Integrations
-
-### ntfy Notification Setup
-BatonCadence supports instant task push alerts over `ntfy.sh` (or any custom ntfy server). Hook up notifications by configuring the following variables in your secure vault:
-*   `NTFY_URL`: The URL to your target ntfy topic (e.g. `https://ntfy.sh/moses_leases`).
-*   `NTFY_TOKEN`: Optional bearer authorization token for secured ntfy topics.
-
-### Dropbox MCP Server configuration
-The custom MCP server can map database schemas and client variables to GUI frontends (like Claude Desktop or Cursor). Add it with the following stdio parameters:
-```json
-{
-  "mco-dropbox": {
-    "command": "python",
-    "args": ["-m", "mco.mcp.dropbox_server"],
-    "env": {
-      "SUPABASE_URL": "${SUPABASE_URL}",
-      "SUPABASE_KEY": "${SUPABASE_KEY}"
-    }
-  }
-}
+# Docker (team / cloud):
+docker compose up     # see docs/DEPLOYMENT.md
 ```
 
 ---
 
-## Technical Security Design (AES-256-GCM)
+## What it does
 
-All sensitive API keys and connection tokens are kept safely out of raw `.env` files. Instead, BatonCadence uses a secure envelope format stored at `~/.mco/secrets.enc`:
+BatonCadence sits between your agents and the work they do. It gives you:
 
-```json
-{
-  "version": 1,
-  "kdf": "pbkdf2-hmac-sha256",
-  "iterations": 600000,
-  "salt": "base64...",
-  "nonce": "base64...",
-  "tag": "base64...",
-  "ciphertext": "base64..."
-}
-```
-
-The master key can be safely auto-loaded upon reboot from:
-1. Windows Credential Manager under the target name `MCO_SECRET_STORE`.
-2. The `MCO_MASTER_PASSWORD` environment variable.
-3. Fallback interactive prompt if running a terminal session.
+| | |
+|---|---|
+| **Job board** | Agents post work, workers lease atomically. Dependencies chain; no race conditions. |
+| **Drumline** | One shared memory across the whole mesh. Completed jobs auto-distill into recallable handoffs. |
+| **Approval gates** | Flag any job — or an entire role — to pause at `needs_approval` until a human decides. |
+| **Immutable audit** | Every mutation appends to `agent_job_events`. UPDATE and DELETE are rejected at the storage layer. |
+| **Embedded store** | No Supabase? An embedded SQLite store (`~/.mco/local.db`) takes over — the free edition is the full product. |
+| **Enterprise connectors** | Ingest ServiceNow incidents and Dynatrace problems as jobs; act back with auditable, gated platform actions. |
+| **Console GUI** | Zero-build web UI at `/console` — job board, approval queue, audit drawer, visual workflow builder. |
 
 ---
 
-## Verification & Testing
+## Quick start
 
-Execute the comprehensive Pytest suite to verify route handlers, secure vault configurations, executors, and database connectors:
 ```bash
-pytest tests/
+mco serve             # start the gateway
+mco status            # config health check
+mco setup             # guided walkthrough or settings menu
+mco setup --guided    # hand-held, Enter at every prompt = working Local-Only install
+mco setup --menu      # jump to one setting and get out
+mco listen --role codex --instance worker-1   # start a worker
+mco audit <job_id>    # inspect a job's full history
+mco approve <job_id>  # approve a gate
 ```
-All 52 unit and E2E test cases must pass cleanly.
+
+Open **http://127.0.0.1:18789/console** in your browser, paste your access
+token (shown at startup, or in `~/.mco/.env`), and click Connect.
 
 ---
 
-## Project Background & Roadmap
+## Drumline — shared memory
 
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - any-cloud container deployment, multi-tenancy, guardrails (gated roles, kill switch), and the farm-out QA workflows.
-- [docs/DRUMLINE.md](docs/DRUMLINE.md) - the shared context substrate: auto-distilled job outcomes, deliberate agent memory, and prompt injection.
-- [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) - enterprise connectors: ServiceNow, Dynatrace, generic webhooks, the sync engine, and the ITSM escalation bridge.
-- [docs/GOVERNANCE.md](docs/GOVERNANCE.md) - usage guide for the governance layer: approval gates, audit trail, retries/escalation, workflow DSL, and the dashboard.
-- [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) - end-to-end setup: Supabase schema, gateway config, agent registration, and GUI/MCP wiring.
-- [docs/VALIDATION_SUMMARY.md](docs/VALIDATION_SUMMARY.md) - the December 2025 market validation (Gartner IT Infrastructure Conference) that launched this project under the "AgentMesh" codename.
-- [docs/ROADMAP.md](docs/ROADMAP.md) - current state vs. the original plan, gap analysis, and the close-out roadmap (audit trail, human-in-the-loop approval gates, escalation paths).
+In a marching band, the drumline keeps everyone in step. Here it does the same
+for agents: what one learns, every agent knows.
+
+```
+=== SHARED CONTEXT (Drumline) ===
+- [handoff] Job outcome: Triage P-99 (claude-w1)
+  Root cause: runaway cron. Disabled job foo.
+- [fact] Prod DB read-only on Sundays (joe)
+  Maintenance window 02:00-06:00 UTC.
+=== END SHARED CONTEXT ===
+```
+
+- `mco_remember` / `mco_recall` — agents write facts and decisions
+- Workers get relevant entries injected into their prompt before execution
+- Works fully offline in the free Local-Only edition (SQLite, no vector DB)
+
+Full spec: [docs/DRUMLINE.md](docs/DRUMLINE.md)
+
+---
+
+## Editions
+
+| | Local | Team | Enterprise |
+|---|---|---|---|
+| Drumline shared memory | ✓ | ✓ | ✓ |
+| Job board, approvals, audit | ✓ | ✓ | ✓ |
+| Console GUI & workflow builder | ✓ | ✓ | ✓ |
+| Embedded SQLite (zero cloud) | ✓ | ✓ | ✓ |
+| Multi-machine / Supabase | — | ✓ | ✓ |
+| Docker + any-cloud deploy | — | ✓ | ✓ |
+| ServiceNow & Dynatrace connectors | — | — | ✓ |
+| Multi-tenant org isolation | — | — | ✓ |
+| Pilot program | — | — | [email us](mailto:pilots@batoncadence.com) |
+
+---
+
+## Docs
+
+- [docs/INSTALL.md](docs/INSTALL.md) — step-by-step install + troubleshooting
+- [docs/DRUMLINE.md](docs/DRUMLINE.md) — shared memory: how it works, how to use it
+- [docs/GOVERNANCE.md](docs/GOVERNANCE.md) — approval gates, audit trail, workflow DSL
+- [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — ServiceNow, Dynatrace, webhooks
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker, any-cloud, multi-tenancy
+- [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) — Supabase schema, agent registration, MCP wiring
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Joe Arroyo.
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Joe Arroyo.  
 Self-host it, fork it, ship it inside your company.

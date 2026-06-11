@@ -212,10 +212,39 @@ code.inline{font-family:var(--mono);font-size:.85em;background:var(--paper-2);bo
 .install{background:#191814;color:#e8e4d8;border-radius:18px;padding:54px;border:1px solid #2e2c25}
 .install h2{color:#faf9f5}
 .install .sec-sub{color:#a8a494}
-.install-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:38px}
-.icard{background:#201f19;border:1px solid #36342b;border-radius:12px;padding:26px}
-.icard h3{font-family:var(--serif);font-size:1.15rem;font-weight:600;margin-bottom:6px}
-.icard .for{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:#9d9df0;margin-bottom:16px}
+
+/* one-liner hero */
+.one-liner{
+  margin-top:36px;background:#12110d;border:1px solid #36342b;border-radius:12px;
+  padding:22px 26px;display:flex;align-items:center;gap:16px;
+}
+.one-liner .prompt{color:#75715e;font-family:var(--mono);font-size:.82rem;user-select:none;flex-shrink:0}
+.one-liner code{
+  font-family:var(--mono);font-size:.88rem;color:#8fc97f;flex:1;
+  word-break:break-all;
+}
+.copy-btn{
+  flex-shrink:0;background:#2e2c25;border:1px solid #36342b;border-radius:6px;
+  padding:6px 14px;font-family:var(--mono);font-size:.72rem;color:#a8a494;
+  cursor:pointer;transition:background .15s,color .15s;white-space:nowrap;
+}
+.copy-btn:hover{background:#36342b;color:#e8e4d8}
+.copy-btn.copied{background:var(--moss);border-color:var(--moss);color:#fff}
+.ol-caption{font-family:var(--mono);font-size:.7rem;color:#75715e;margin-top:10px}
+
+/* platform tabs */
+.ptabs{display:flex;gap:0;margin-top:38px;border:1px solid #36342b;border-radius:12px;overflow:hidden}
+.ptab-btn{
+  flex:1;background:#201f19;border:none;border-right:1px solid #36342b;
+  color:#a8a494;font-family:var(--mono);font-size:.76rem;letter-spacing:.06em;
+  padding:12px 16px;cursor:pointer;transition:background .15s,color .15s;
+  text-align:left;
+}
+.ptab-btn:last-child{border-right:none}
+.ptab-btn.active{background:#2e2c25;color:#e8e4d8}
+.ptab-btn .platform-icon{margin-right:6px}
+.ptab-panel{display:none;padding:26px}
+.ptab-panel.active{display:block}
 pre{
   background:#12110d;border:1px solid #36342b;border-radius:8px;padding:16px 18px;
   font-family:var(--mono);font-size:.78rem;line-height:1.7;overflow-x:auto;color:#c9c5b4;
@@ -223,6 +252,10 @@ pre{
 pre .c{color:#75715e}
 pre .g{color:#8fc97f}
 .copy-note{font-family:var(--mono);font-size:.7rem;color:#75715e;margin-top:10px}
+.install-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:38px}
+.icard{background:#201f19;border:1px solid #36342b;border-radius:12px;padding:26px}
+.icard h3{font-family:var(--serif);font-size:1.15rem;font-weight:600;margin-bottom:6px}
+.icard .for{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:#9d9df0;margin-bottom:16px}
 
 /* ───────── faq ───────── */
 .faq{max-width:760px}
@@ -253,6 +286,11 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
   .span3,.span2,.span4,.span6{grid-column:span 2}
   .how,.eds,.install-cols{grid-template-columns:1fr}
   .install{padding:32px 22px}
+  .ptabs{flex-direction:column}
+  .ptab-btn{border-right:none;border-bottom:1px solid #36342b}
+  .ptab-btn:last-child{border-bottom:none}
+  .one-liner{flex-wrap:wrap;gap:10px}
+  .one-liner code{min-width:0;font-size:.78rem}
 }
 </style>
 </head>
@@ -292,7 +330,7 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
         <a class="btn ghost" href="#drumline">Why Drumline?</a>
       </div>
       <div class="hero-note rise d4">
-        <b>$ pip install</b> or one double-click on Windows · no cloud account required · 200-test suite
+        <b>$ curl -sSf https://batoncadence.com/install.sh | bash</b> &nbsp;·&nbsp; or one double-click on Windows &nbsp;·&nbsp; no cloud account required
       </div>
     </div>
     <div class="rise d5">
@@ -525,30 +563,61 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
           <p class="sec-sub">No cloud account. No API keys. No database to provision.</p>
         </div>
       </div>
-      <div class="install-cols">
-        <div class="icard">
-          <div class="for">Windows · for anyone</div>
-          <h3>One double-click</h3>
-          <pre><span class="c"># 1. Download the ZIP from GitHub, extract anywhere</span>
+
+      <!-- one-liner hero -->
+      <div class="one-liner" id="one-liner-box">
+        <span class="prompt">$</span>
+        <code id="one-liner-cmd">curl -sSf https://batoncadence.com/install.sh | bash</code>
+        <button class="copy-btn" id="copy-one-liner" onclick="copyOneLiner()">Copy</button>
+      </div>
+      <p class="ol-caption">macOS &amp; Linux &nbsp;·&nbsp; <a href="#win-tab" onclick="switchTab('win')" style="color:#9d9df0;text-decoration:none">Windows instructions below</a></p>
+
+      <!-- platform tabs -->
+      <div class="ptabs">
+        <button class="ptab-btn active" id="tab-mac" onclick="switchTab('mac')"><span class="platform-icon">&#xf8ff;</span> macOS / Linux</button>
+        <button class="ptab-btn" id="tab-win" onclick="switchTab('win')">&#9000; Windows</button>
+        <button class="ptab-btn" id="tab-pip" onclick="switchTab('pip')">&#x1F4E6; pip / Docker</button>
+      </div>
+      <div class="ptab-panel active" id="panel-mac" style="background:#201f19;border:1px solid #36342b;border-bottom-left-radius:12px;border-bottom-right-radius:12px">
+        <p style="font-family:var(--mono);font-size:.78rem;color:#a8a494;margin-bottom:14px">One command installs everything and walks you through setup:</p>
+        <pre><span class="c"># Works on macOS and any Linux distro</span>
+<span class="g">curl -sSf https://batoncadence.com/install.sh | bash</span>
+
+<span class="c"># Clones the repo, finds/installs Python, creates the venv,
+# generates your access token, adds 'mco' to your PATH,
+# then asks: demo mode or connect now.</span>
+
+<span class="c"># Or if you already cloned:</span>
+<span class="g">bash scripts/install.sh</span></pre>
+        <p class="copy-note">After install: <span style="color:#8fc97f">mco serve</span> starts the gateway &nbsp;·&nbsp; <span style="color:#8fc97f">mco setup</span> changes any setting</p>
+      </div>
+      <div class="ptab-panel" id="panel-win" style="background:#201f19;border:1px solid #36342b;border-bottom-left-radius:12px;border-bottom-right-radius:12px">
+        <p style="font-family:var(--mono);font-size:.78rem;color:#a8a494;margin-bottom:14px">Double-click installer — no terminal needed:</p>
+        <pre><span class="c"># 1. Download the ZIP from GitHub and extract it anywhere</span>
+<span class="c">#    (e.g. C:\BatonCadence)</span>
+
 <span class="c"># 2. Double-click:</span>
 <span class="g">install.bat</span>
-<span class="c"># Finds/installs Python, builds the venv, generates
-# your access token, puts BatonCadence on the Desktop.
-# Your browser opens the console. That's it.</span></pre>
-          <p class="copy-note">Tested on a parent. Genuinely.</p>
-        </div>
-        <div class="icard">
-          <div class="for">macOS / Linux / Docker · for developers</div>
-          <h3>Three commands</h3>
-          <pre><span class="g">git clone</span> https://github.com/mastalink/Batoncadence
-<span class="g">pip install</span> -e Batoncadence
-<span class="g">mco serve</span>   <span class="c"># console at 127.0.0.1:18789/console</span>
 
-<span class="c"># or the container:</span>
-<span class="g">docker compose up</span></pre>
-          <p class="copy-note">Workers join with <span style="color:#8fc97f">mco listen --role codex</span> from any machine.</p>
-        </div>
+<span class="c"># Finds (or installs) Python, creates .venv, generates your
+# access token, copies a BatonCadence shortcut to the Desktop,
+# then asks: demo or connect now.
+# Your browser opens the console automatically.</span></pre>
+        <p class="copy-note">Or run headless: <span style="color:#8fc97f">powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -NoPrompt</span></p>
       </div>
+      <div class="ptab-panel" id="panel-pip" style="background:#201f19;border:1px solid #36342b;border-bottom-left-radius:12px;border-bottom-right-radius:12px">
+        <p style="font-family:var(--mono);font-size:.78rem;color:#a8a494;margin-bottom:14px">For developers who prefer explicit control:</p>
+        <pre><span class="c"># Clone + pip editable install</span>
+<span class="g">git clone</span> https://github.com/mastalink/Batoncadence
+<span class="g">pip install</span> -e Batoncadence
+<span class="g">mco setup --guided</span>   <span class="c"># configure in 60 seconds</span>
+<span class="g">mco serve</span>             <span class="c"># console at 127.0.0.1:18789/console</span>
+
+<span class="c"># Docker (team / cloud deploy):</span>
+<span class="g">docker compose up</span>     <span class="c"># see docs/DEPLOYMENT.md</span></pre>
+        <p class="copy-note">Workers join from any machine with <span style="color:#8fc97f">mco listen --role codex</span></p>
+      </div>
+
     </div>
   </div>
 </section>
@@ -654,6 +723,41 @@ const io = new IntersectionObserver(es=>{
   es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target);} });
 },{threshold:.12});
 document.querySelectorAll(".sr").forEach(el=>io.observe(el));
+
+/* ── platform tabs ──────────────────────────────────────────────────────── */
+function switchTab(name) {
+  ["mac","win","pip"].forEach(n => {
+    document.getElementById("tab-"+n).classList.toggle("active", n===name);
+    document.getElementById("panel-"+n).classList.toggle("active", n===name);
+  });
+  // update one-liner for Windows
+  const cmd = document.getElementById("one-liner-cmd");
+  const box = document.getElementById("one-liner-box");
+  if(name === "win") {
+    cmd.textContent = 'iwr -useb https://batoncadence.com/install.ps1 | iex';
+    box.style.display = "";
+  } else if(name === "pip") {
+    cmd.textContent = 'pip install batoncadence';
+    box.style.display = "";
+  } else {
+    cmd.textContent = 'curl -sSf https://batoncadence.com/install.sh | bash';
+    box.style.display = "";
+  }
+}
+
+/* ── copy one-liner ─────────────────────────────────────────────────────── */
+function copyOneLiner() {
+  const txt = document.getElementById("one-liner-cmd").textContent;
+  navigator.clipboard.writeText(txt).catch(() => {
+    const ta = document.createElement("textarea");
+    ta.value = txt; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.select(); document.execCommand("copy");
+    document.body.removeChild(ta);
+  });
+  const btn = document.getElementById("copy-one-liner");
+  btn.textContent = "Copied!"; btn.classList.add("copied");
+  setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 2000);
+}
 </script>
 </body>
 </html>
