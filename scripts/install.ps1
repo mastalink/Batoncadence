@@ -262,8 +262,8 @@ if ($NoPrompt) {
     exit 0
 }
 
-# Read the token we just generated/verified (it's in .env)
-$localToken = (Get-Content (Join-Path $root ".env") | Where-Object { $_ -match "^MCO_LOCAL_TOKEN=" }) -replace "^MCO_LOCAL_TOKEN=",""
+# Read the token we just generated/verified (it's in the global config home)
+$localToken = (Get-Content $envPath | Where-Object { $_ -match "^MCO_LOCAL_TOKEN=" }) -replace "^MCO_LOCAL_TOKEN=",""
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "  How do you want to start?" -ForegroundColor Cyan
