@@ -164,19 +164,20 @@ Find the line that starts with `MCO_LOCAL_TOKEN=` — everything after the
 
 ## For developers / power users
 
+The installer puts `mco` on your PATH and keeps configuration in
+`~\.mco\.env`, so the command behaves identically **from any directory in
+any terminal** (open a new terminal after the first install so PATH
+refreshes):
+
 ```powershell
-# Check configuration health
-.venv\Scripts\python.exe -m mco.cli status
-
-# Interactive setup wizard (change profile, add Supabase, encryption)
-.venv\Scripts\python.exe -m mco.cli setup
-
-# Run the gateway in a visible window
-.venv\Scripts\python.exe -m mco.cli serve
-
-# Register a database-backed agent (requires Supabase)
-.venv\Scripts\python.exe -m mco.cli register --name my-agent --role admin
+mco status     # configuration health check
+mco setup      # guided walkthrough or settings menu
+mco serve      # run the gateway in the foreground
+mco register --name my-agent --role admin
 ```
+
+Running multiple installs or want a repo-local config? Point `MCO_ENV_FILE`
+at any config file and it wins over the global one.
 
 Unattended install (CI / scripted):
 ```powershell

@@ -171,31 +171,61 @@ if ($LASTEXITCODE -ne 0) { Fail "Dependency installation failed. Check your inte
 Ok "BatonCadence installed"
 
 # ----------------------------------------------------------------------------
-# 4. Configuration (.env) - safe Local-Only default, no cloud, no secrets
+# 4. Configuration - global home (~\.mco\.env) so mco works from ANY directory
 # ----------------------------------------------------------------------------
-$envPath = Join-Path $root ".env"
+$mcoHome = Join-Path $env:USERPROFILE ".mco"
+if (-not (Test-Path $mcoHome)) { New-Item -ItemType Directory -Path $mcoHome | Out-Null }
+$envPath = Join-Path $mcoHome ".env"
+$repoEnv = Join-Path $root ".env"
+
+if ((Test-Path $repoEnv) -and -not (Test-Path $envPath)) {
+    # Migrate an older install: one source of truth, in the global home.
+    Move-Item $repoEnv $envPath
+    Ok "Moved existing configuration to $envPath (works from any directory now)"
+}
+
 if (-not (Test-Path $envPath)) {
     # Generate a secure local access token (used in place of a database token).
     $localToken = "mco_tok_" + (& $py -c "import secrets; print(secrets.token_hex(24))")
     Set-Content -Path $envPath -Encoding ascii -Value @(
         "# BatonCadence configuration (created by install.ps1)",
         "# Local-Only profile: everything runs on this computer, no database",
-        "# or cloud account needed. Run 'mco setup' later to change profiles.",
+        "# or cloud account needed. Run 'mco setup' later to change anything.",
         "MCO_PROFILE=Local-Only",
         "OPERATOR_NAME=$env:USERNAME",
         "MCO_LOCAL_TOKEN=$localToken"
     )
-    Ok "Created Local-Only configuration (.env) with access token"
+    Ok "Created Local-Only configuration ($envPath) with access token"
 } else {
-    # Add MCO_LOCAL_TOKEN if it is missing from an existing .env
+    # Add MCO_LOCAL_TOKEN if it is missing from an existing config
     $envContent = Get-Content $envPath -Raw
     if ($envContent -notmatch 'MCO_LOCAL_TOKEN') {
         $localToken = "mco_tok_" + (& $py -c "import secrets; print(secrets.token_hex(24))")
         Add-Content -Path $envPath -Encoding ascii -Value "MCO_LOCAL_TOKEN=$localToken"
-        Ok "Added MCO_LOCAL_TOKEN to existing .env"
+        Ok "Added MCO_LOCAL_TOKEN to existing configuration"
     } else {
-        Ok "Configuration (.env) already exists - leaving it untouched"
+        Ok "Configuration already exists at $envPath - leaving it untouched"
     }
+}
+
+# ----------------------------------------------------------------------------
+# 4b. Put 'mco' on the PATH - works in any terminal, any directory
+# ----------------------------------------------------------------------------
+Step "Making the 'mco' command available everywhere..."
+
+$binDir = Join-Path $env:LOCALAPPDATA "BatonCadence\bin"
+if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+$mcoExe = Join-Path $root ".venv\Scripts\mco.exe"
+Set-Content -Path (Join-Path $binDir "mco.cmd") -Encoding ascii -Value @(
+    "@echo off",
+    "`"$mcoExe`" %*"
+)
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*BatonCadence\bin*") {
+    [Environment]::SetEnvironmentVariable("Path", "$userPath;$binDir", "User")
+    Ok "'mco' added to your PATH (open a NEW terminal to use it)"
+} else {
+    Ok "'mco' is already on your PATH"
 }
 
 # ----------------------------------------------------------------------------

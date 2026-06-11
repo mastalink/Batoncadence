@@ -12,11 +12,16 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 REM ------------------------------------------------------------------
-REM Read MCO_LOCAL_TOKEN from .env so we can display it to the user
+REM Read MCO_LOCAL_TOKEN from the global config (~\.mco\.env), falling
+REM back to a repo-local .env from older installs.
 REM ------------------------------------------------------------------
 set MCO_LOCAL_TOKEN=
-for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
-    if "%%A"=="MCO_LOCAL_TOKEN" set MCO_LOCAL_TOKEN=%%B
+set "MCO_ENV=%USERPROFILE%\.mco\.env"
+if not exist "%MCO_ENV%" set "MCO_ENV=.env"
+if exist "%MCO_ENV%" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("%MCO_ENV%") do (
+        if "%%A"=="MCO_LOCAL_TOKEN" set MCO_LOCAL_TOKEN=%%B
+    )
 )
 
 REM If a server is already running, just open the console.

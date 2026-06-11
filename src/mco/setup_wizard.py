@@ -248,6 +248,14 @@ def step_encryption(config) -> None:
             key = store.derive_key(pw, base64.b64decode(env["salt"]), env.get("iterations", 600000))
             if store.unlock(key):
                 console.print("[green][OK][/green] Unlocked.")
+                if os.name == "nt" and Confirm.ask(
+                        "Re-save the key to Windows Credential Manager so it unlocks automatically?",
+                        default=True):
+                    try:
+                        WindowsCredentialProvider.store_key(store._master_key)
+                        console.print("[green][OK][/green] Auto-unlock repaired.")
+                    except Exception as e:
+                        console.print(f"[red][ERROR][/red] Credential Manager: {e}")
                 _reencrypt_sensitive(config)
             else:
                 console.print("[red]Wrong password.[/red]")

@@ -37,6 +37,32 @@ SENSITIVE_KEYS = {
 }
 
 
+# The global config home: works from any directory, any terminal. Lives next
+# to the secret store (secrets.enc) and the embedded database (local.db).
+GLOBAL_ENV_PATH = Path.home() / ".mco" / ".env"
+
+
+def resolve_env_path() -> Path:
+    """Where configuration lives, in precedence order:
+
+    1. MCO_ENV_FILE          - explicit override (CI, repo-local dev runs)
+    2. ~/.mco/.env if it exists - the global home, so `mco` behaves the same
+                               from any directory
+    3. ./.env                - fallback for a fresh checkout that was never
+                               installed (pre-migration installs)
+
+    The global file deliberately outranks the working directory: .env files
+    belonging to OTHER projects are everywhere, and `mco` must not change
+    behavior based on where you happen to be standing.
+    """
+    override = os.environ.get("MCO_ENV_FILE")
+    if override:
+        return Path(override)
+    if GLOBAL_ENV_PATH.is_file():
+        return GLOBAL_ENV_PATH
+    return Path(".env")
+
+
 class ConfigManager:
     """Manages system configuration settings.
 
@@ -45,7 +71,7 @@ class ConfigManager:
     """
 
     def __init__(self, env_path: Optional[Path] = None, store_path: Optional[Path] = None):
-        self._env_path = env_path or Path(".env")
+        self._env_path = env_path or resolve_env_path()
         self._store = get_secret_store(store_path)
         self._cached_config: Dict[str, Any] = {}
         self.load()
