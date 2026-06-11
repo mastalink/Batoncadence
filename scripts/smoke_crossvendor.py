@@ -6,8 +6,12 @@ Proves the marketed claim end-to-end against REAL platform instances:
   Movement I    DETECT      Dynatrace problems ingested as jobs (live sync,
                             or the webhook path if no problem is open)
   Movement II   INVESTIGATE an agent leases the job, recalls Drumline memory,
+                            searches ServiceNow for similar resolved tickets
+                            and KB articles (the buried institutional memory),
                             and completes with a root cause (auto-distilled
-                            back into Drumline)
+                            back into Drumline). With MCO_SMOKE_REAL_AGENT=1
+                            a REAL frontier model (the claude CLI) does the
+                            investigating, fed all of that context.
   Movement III  GOVERN      the ServiceNow write pauses at needs_approval
                             until a human (or the approver token) decides
   Movement IV   EXECUTE     the connector-role worker creates a REAL incident
@@ -15,6 +19,10 @@ Proves the marketed claim end-to-end against REAL platform instances:
                             by reading it back
   Movement V    CLOSE LOOP  the originating Dynatrace problem is commented
                             and closed (live-sync runs only)
+  Movement VI   FLYWHEEL    a second, similar problem arrives - and its
+                            ticket is born already carrying the known fix
+                            (Drumline recall + similar-incident search find
+                            the resolution this very run produced)
   Finale        AUDIT       the immutable event chain for every job, plus the
                             Drumline entries the run produced
 
@@ -30,6 +38,9 @@ Environment:
     MCO_SMOKE_TOKEN           approver-role token (default: MCO_LOCAL_TOKEN)
     MCO_SMOKE_MANUAL_APPROVE  "1" = wait for a human to approve in the console
                               (the money shot when recording a demo)
+    MCO_SMOKE_REAL_AGENT      "1" = investigate with the real claude CLI
+                              (frontier model in the loop); falls back to a
+                              scripted root cause if the CLI is missing
 
 Connector credentials resolve through the normal config stack (.env /
 encrypted secret store): SERVICENOW_INSTANCE_URL + auth, DYNATRACE_BASE_URL +
@@ -51,6 +62,7 @@ import httpx
 
 GATEWAY = os.environ.get("MCO_SMOKE_GATEWAY", "http://127.0.0.1:18789")
 MANUAL_APPROVE = os.environ.get("MCO_SMOKE_MANUAL_APPROVE") == "1"
+REAL_AGENT = os.environ.get("MCO_SMOKE_REAL_AGENT") == "1"
 
 GREEN, RED, YELLOW, DIM, BOLD, END = "\033[92m", "\033[91m", "\033[93m", "\033[2m", "\033[1m", "\033[0m"
 _failures: list = []
@@ -183,6 +195,81 @@ def print_audit(client: httpx.Client, job_id: str, label: str) -> None:
     print(f"  {DIM}{label}: {chain}  (append-only){END}")
 
 
+def gather_investigation_context(client: httpx.Client, job: dict) -> list:
+    """What the agent knows before it starts: Drumline memory + the
+    institutional knowledge buried in ServiceNow (closed tickets + KB)."""
+    title = job.get("title", "")
+    blocks = []
+
+    r = client.get("/api/context", params={"query": title, "limit": 3})
+    prior = r.json() if r.status_code == 200 else []
+    if prior:
+        ok(f"Drumline recalled {len(prior)} memorie(s) from previous runs:")
+        for e in prior:
+            note(f"  - [{e.get('kind')}] {e.get('title')}")
+        blocks.append("DRUMLINE (shared agent memory):\n" + "\n".join(
+            f"- [{e.get('kind')}] {e.get('title')}: {(e.get('content') or '')[:300]}" for e in prior))
+    else:
+        note("Drumline is empty (first run) - the flywheel act will change that")
+
+    from mco.connectors import get_connector
+    snow_conn = get_connector("servicenow")
+    terms = " ".join(re.findall(r"[a-zA-Z][a-zA-Z\-]{3,}", title))[:80] or "incident"
+    try:
+        similar = snow_conn.execute_action("search_similar_incidents", {"query": terms})["matches"]
+        kb = snow_conn.execute_action("search_kb", {"query": terms})["articles"]
+    except Exception as e:
+        fail(f"KEDB search failed: {e}")
+        return blocks
+    if similar:
+        ok(f"found {len(similar)} similar RESOLVED ticket(s) in ServiceNow - prior fixes recovered:")
+        for m in similar[:3]:
+            note(f"  - {m['number']} ({m.get('resolved_at', '?')}): {(m.get('close_notes') or '')[:90]}")
+        blocks.append("SIMILAR RESOLVED INCIDENTS (ServiceNow):\n" + "\n".join(
+            f"- {m['number']}: {m['short_description']} -> fix: {m.get('close_notes') or 'n/a'}" for m in similar))
+    else:
+        note("no similar resolved incidents on this instance yet (fresh PDI)")
+    if kb:
+        ok(f"found {len(kb)} knowledge-base article(s):")
+        for a in kb[:3]:
+            note(f"  - {a['number']}: {a['short_description']}")
+        blocks.append("KNOWLEDGE BASE (ServiceNow):\n" + "\n".join(
+            f"- {a['number']}: {a['short_description']}: {a.get('text') or ''}" for a in kb))
+    return blocks
+
+
+def investigate(job: dict, context_blocks: list) -> str:
+    """Produce the root cause - with a REAL frontier model when asked."""
+    fallback = ("Root cause: deploy 2026-06-11 introduced an unbounded retry loop in "
+                "checkout-service's payment client; error rate spiked 14x. "
+                "Mitigation: roll back to previous build and add a circuit breaker.")
+    if not REAL_AGENT:
+        note("scripted investigation (set MCO_SMOKE_REAL_AGENT=1 to use the real claude CLI)")
+        return fallback
+
+    prompt = (
+        "You are an SRE agent investigating a production incident. Using ONLY the "
+        "context below, state the most likely root cause and a concrete mitigation "
+        "in under 120 words. Cite any prior incident/KB numbers you used.\n\n"
+        f"INCIDENT: {job.get('title')}\n{job.get('description') or ''}\n\n"
+        + "\n\n".join(context_blocks)
+    )
+    from mco.orchestrator.executors import resolve_argv, run_argv, ROLE_COMMANDS
+    argv = resolve_argv(ROLE_COMMANDS["claude"], prompt)
+    if not argv:
+        fail("claude CLI not on PATH - falling back to scripted investigation")
+        return fallback
+    note("frontier model (claude CLI) investigating with the assembled context...")
+    out, err = asyncio.run(run_argv(argv, timeout=240))
+    if err:
+        fail(f"claude CLI failed ({err[:120]}) - falling back to scripted investigation")
+        return fallback
+    ok("root cause produced by a REAL frontier model:")
+    for line in out.splitlines()[:6]:
+        note(f"  {line}")
+    return out[:1500]
+
+
 def main() -> None:
     print(f"\n{BOLD}BatonCadence cross-vendor smoke test{END}")
     print(f"{DIM}Dynatrace -> governed agent + Drumline -> ServiceNow -> audit{END}")
@@ -269,19 +356,10 @@ def main() -> None:
     problem_ref = ((j1.get("input_payload") or {}).get("platform_ref") or {}).get("problemId") \
         or (j1.get("input_payload") or {}).get("external_id", "")
 
-    # ── Movement II: INVESTIGATE (+ Drumline) ───────────────────────────────
-    movement("II", "INVESTIGATE (agent + Drumline memory)")
-    r = investigator.get("/api/context", params={"query": j1.get("title", ""), "limit": 3})
-    prior = r.json() if r.status_code == 200 else []
-    if prior:
-        ok(f"Drumline recalled {len(prior)} relevant memorie(s) from previous runs:")
-        for e in prior:
-            note(f"  - [{e.get('kind')}] {e.get('title')}")
-    else:
-        note("Drumline is empty (first run) - run this script twice to watch the mesh get smarter")
-    root_cause = ("Root cause: deploy 2026-06-11 introduced an unbounded retry loop in "
-                  "checkout-service's payment client; error rate spiked 14x. "
-                  "Mitigation: roll back to previous build and add a circuit breaker.")
+    # ── Movement II: INVESTIGATE (Drumline + buried KEDB + frontier model) ──
+    movement("II", "INVESTIGATE (Drumline memory + ServiceNow history + frontier model)")
+    context_blocks = gather_investigation_context(investigator, j1)
+    root_cause = investigate(j1, context_blocks)
     lease_and_run(investigator, j1, "smoke-investigator", None, scripted_output=root_cause)
     ok("investigation distilled into Drumline (collective memory) automatically")
 
@@ -331,8 +409,52 @@ def main() -> None:
     else:
         sim("webhook-simulated problem - no live Dynatrace problem to close (run with an open problem for the full loop)")
 
+    # ── Movement VI: THE FLYWHEEL (the second incident is the product) ──────
+    movement("VI", "FLYWHEEL (a similar problem strikes again)")
+    flywheel_number = None
+    secret = (config.get("MCO_WEBHOOK_SECRET") or "").strip()
+    if not secret:
+        sim("MCO_WEBHOOK_SECRET unset - skipping the second-incident act")
+    else:
+        r = httpx.post(f"{GATEWAY}/api/integrations/dynatrace/webhook",
+                       headers={"X-MCO-Webhook-Secret": secret},
+                       json={"ProblemID": f"SMOKE2-{int(time.time())}",
+                             "ProblemTitle": "High error rate on checkout-service (recurrence)",
+                             "ProblemDetailsText": "Error-rate spike on checkout-service, "
+                                                   "same signature as before.",
+                             "State": "OPEN"}, timeout=30)
+        created2 = (r.json().get("created") or []) if r.status_code == 200 else []
+        j5_src = created2[0] if created2 else None
+        j5_id = j5_src.get("id") if isinstance(j5_src, dict) else j5_src
+        if not j5_id:
+            sim("recurrence not ingested (duplicate id?) - skipping flywheel act")
+        else:
+            ok(f"recurrence detected and ingested (job {str(j5_id)[:8]})")
+            r = investigator.get("/api/jobs")
+            j5 = next((j for j in r.json() if j.get("id") == j5_id), None)
+            note("this time the agent does NOT start from zero:")
+            gather_investigation_context(investigator, j5)
+            known_fix = (f"KNOWN ERROR - matches {number} (resolved this run). "
+                         f"Prior fix: {root_cause[:300]}")
+            lease_and_run(investigator, j5, "smoke-investigator", None, scripted_output=known_fix)
+            j6 = create_gated_job(
+                operator, "Recurrence: file ticket BORN WITH its known fix", "servicenow",
+                "create_incident",
+                {"short_description": "[BatonCadence] checkout-service error rate (known error)",
+                 "description": f"Recurrence of {number}.\n\n{known_fix}\n\n"
+                                f"Context that found it: Drumline recall + similar-incident search.",
+                 "urgency": "3"})
+            approve(operator, j6)
+            done2 = lease_and_run(snow_worker, j6, "smoke-snow-worker", "servicenow")
+            res2 = json.loads(((done2.get("output_payload") or {}).get("result")) or "{}")
+            flywheel_number = res2.get("number")
+            if flywheel_number:
+                ok(f"{BOLD}{flywheel_number} was BORN with its resolution attached{END} "
+                   f"- matched {number}, fix included, urgency downgraded")
+                note("first incident: hours of investigation. recurrence: seconds. that's the flywheel.")
+
     # ── Finale: AUDIT ────────────────────────────────────────────────────────
-    movement("VI", "AUDIT (the immutable trail)")
+    movement("VII", "AUDIT (the immutable trail)")
     for jid, label in [(j1["id"], "investigate"), (j2["id"], "create-incident"), (j3["id"], "resolve")]:
         print_audit(operator, jid, label)
     r = operator.get("/api/context", params={"query": "checkout error rate root cause", "limit": 3})
@@ -346,8 +468,9 @@ def main() -> None:
             print(f"  - {f_}")
         sys.exit(1)
     print(f"{GREEN}{BOLD}CROSS-VENDOR SMOKE TEST PASSED{END}")
-    print(f"{DIM}Dynatrace detected -> agent investigated with shared memory -> human approved ->")
-    print(f"ServiceNow incident {number} created AND resolved -> every step in the audit trail.{END}\n")
+    print(f"{DIM}Dynatrace detected -> agent investigated with shared memory + buried ticket history ->")
+    print(f"human approved -> ServiceNow incident {number} created AND resolved -> recurrence "
+          f"{flywheel_number or '(skipped)'} born with its fix -> every step in the audit trail.{END}\n")
 
 
 if __name__ == "__main__":

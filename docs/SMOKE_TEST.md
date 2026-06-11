@@ -79,11 +79,20 @@ Useful switches:
 | Env var | Effect |
 |---|---|
 | `MCO_SMOKE_MANUAL_APPROVE=1` | The script pauses at the approval gate until you click **Approve** in the console GUI — the money shot for a recording. |
+| `MCO_SMOKE_REAL_AGENT=1` | Movement II investigation is done by the **real `claude` CLI** (frontier model in the loop), fed the Dynatrace problem + Drumline memory + the similar-tickets/KB findings. Falls back to a scripted root cause if the CLI is missing. |
 | `MCO_SMOKE_TOKEN` | Approver token to use (defaults to `MCO_LOCAL_TOKEN` from `.env`). |
 | `MCO_SMOKE_GATEWAY` | Gateway URL (default `http://127.0.0.1:18789`). |
 
-Run it **twice**: the second run's Movement II shows Drumline recalling the
-first run's distilled root cause — the "mesh gets smarter" moment, on camera.
+**The story the movements tell** is the recurring-incident pain: 60–80% of
+incidents are repeats, and the fixes are buried in closed tickets and KB
+articles nobody re-reads (the Known Error Database nobody maintains).
+Movement II digs that institutional memory up — `search_similar_incidents`
+returns prior close notes, `search_kb` returns published articles, Drumline
+returns what the agents themselves learned. Movement VI is the payoff: a
+recurrence arrives and its ticket is **born with the known fix attached**,
+matched to the incident this very run resolved, urgency already downgraded.
+First incident: hours. Recurrence: seconds. The product gets more valuable
+every week it runs — that's the flywheel a pilot turns into a contract.
 
 What "passed" means: a real incident was created **and resolved** in your
 PDI (the script prints the deep link and verifies `state=6` by reading it

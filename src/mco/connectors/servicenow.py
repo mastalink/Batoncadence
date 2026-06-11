@@ -127,7 +127,8 @@ class ServiceNowConnector(BaseConnector):
         return specs
 
     def actions(self) -> List[str]:
-        return ["create_incident", "update_incident", "add_comment", "resolve_incident", "get_incident"]
+        return ["create_incident", "update_incident", "add_comment", "resolve_incident",
+                "get_incident", "search_similar_incidents", "search_kb"]
 
     def execute_action(self, action: str, params: dict) -> dict:
         if action == "create_incident":
@@ -161,6 +162,40 @@ class ServiceNowConnector(BaseConnector):
             sys_id = self._require(params, "sys_id")
             res = self._request("GET", f"/api/now/table/incident/{sys_id}")
             return res.get("result") or {}
+        if action == "search_similar_incidents":
+            # The institutional memory buried in closed tickets: full-text match
+            # (ServiceNow's 123TEXTQUERY321 keyword operator) over resolved/closed
+            # incidents, returning the close notes - i.e. the prior fixes.
+            query = self._require(params, "query")
+            limit = int(params.get("limit") or 5)
+            res = self._request("GET", "/api/now/table/incident", params={
+                "sysparm_query": f"123TEXTQUERY321={query}^stateIN6,7",
+                "sysparm_limit": limit,
+                "sysparm_fields": "sys_id,number,short_description,close_code,close_notes,resolved_at",
+            })
+            return {"matches": [
+                {"sys_id": r.get("sys_id"), "number": r.get("number"),
+                 "short_description": r.get("short_description"),
+                 "close_code": r.get("close_code"),
+                 "close_notes": (r.get("close_notes") or "")[:600],
+                 "resolved_at": r.get("resolved_at")}
+                for r in (res.get("result") or [])
+            ]}
+        if action == "search_kb":
+            # Published knowledge-base articles matching the problem text.
+            query = self._require(params, "query")
+            limit = int(params.get("limit") or 5)
+            res = self._request("GET", "/api/now/table/kb_knowledge", params={
+                "sysparm_query": f"123TEXTQUERY321={query}^workflow_state=published",
+                "sysparm_limit": limit,
+                "sysparm_fields": "sys_id,number,short_description,text",
+            })
+            return {"articles": [
+                {"sys_id": r.get("sys_id"), "number": r.get("number"),
+                 "short_description": r.get("short_description"),
+                 "text": (r.get("text") or "")[:600]}
+                for r in (res.get("result") or [])
+            ]}
         raise ConnectorError(f"Unknown ServiceNow action: {action}")
 
     def escalate(self, job: dict, error: str) -> dict:

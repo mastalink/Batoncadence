@@ -18,7 +18,23 @@ from tests.test_routes import FakeDB
 def snow_transport(recorder):
     def handler(request: httpx.Request) -> httpx.Response:
         recorder.append(request)
+        if request.method == "GET" and request.url.path == "/api/now/table/kb_knowledge":
+            return httpx.Response(200, json={"result": [{
+                "sys_id": "kb1", "number": "KB0007",
+                "short_description": "Recovering checkout-service after retry storms",
+                "text": "Roll back the payment client and enable the circuit breaker.",
+            }]})
         if request.method == "GET" and request.url.path == "/api/now/table/incident":
+            q = request.url.params.get("sysparm_query") or ""
+            if q.startswith("123TEXTQUERY321="):
+                # similar-incident search: resolved tickets with their fixes
+                return httpx.Response(200, json={"result": [{
+                    "sys_id": "old42", "number": "INC0042",
+                    "short_description": "checkout-service error spike",
+                    "close_code": "Solved (Permanently)",
+                    "close_notes": "Rolled back payment client; added circuit breaker.",
+                    "resolved_at": "2026-02-14 09:00:00",
+                }]})
             return httpx.Response(200, json={"result": [{
                 "sys_id": "abc123", "number": "INC0001",
                 "short_description": "DB latency spike",
@@ -115,6 +131,30 @@ class TestServiceNow:
 
     def test_health_ok(self):
         assert _snow().health()["ok"] is True
+
+    def test_search_similar_incidents_returns_prior_fixes(self):
+        recorder = []
+        res = _snow(recorder).execute_action("search_similar_incidents",
+                                             {"query": "checkout error rate"})
+        match = res["matches"][0]
+        assert match["number"] == "INC0042"
+        assert "circuit breaker" in match["close_notes"]
+        # full-text operator + closed/resolved filter actually sent
+        q = recorder[-1].url.params["sysparm_query"]
+        assert q.startswith("123TEXTQUERY321=checkout error rate")
+        assert "stateIN6,7" in q
+
+    def test_search_kb_returns_published_articles(self):
+        recorder = []
+        res = _snow(recorder).execute_action("search_kb", {"query": "checkout retry"})
+        art = res["articles"][0]
+        assert art["number"] == "KB0007"
+        assert "circuit breaker" in art["text"]
+        assert "workflow_state=published" in recorder[-1].url.params["sysparm_query"]
+
+    def test_search_requires_query(self):
+        with pytest.raises(ConnectorError, match="query"):
+            _snow().execute_action("search_similar_incidents", {})
 
 
 # ── Dynatrace ─────────────────────────────────────────────────────────────────
