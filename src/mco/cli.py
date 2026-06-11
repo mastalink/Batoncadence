@@ -407,6 +407,55 @@ def serve(
     uvicorn.run(app_server, host=host, port=port)
 
 
+@app.command("stop")
+def stop(
+    port: int = typer.Option(18789, help="Port the gateway is running on."),
+    force: bool = typer.Option(False, "--force", "-f", help="Send SIGKILL immediately instead of graceful SIGTERM."),
+):
+    """Stop a running BatonCadence gateway (by port)."""
+    import signal
+    import time
+
+    try:
+        import psutil
+    except ImportError:
+        console.print("[red][ERROR] psutil is required for mco stop. Run: pip install psutil[/red]")
+        raise typer.Exit(code=1)
+
+    targets: list[psutil.Process] = []
+    for conn in psutil.net_connections(kind="tcp"):
+        if conn.laddr.port == port and conn.status == "LISTEN" and conn.pid:
+            try:
+                targets.append(psutil.Process(conn.pid))
+            except psutil.NoSuchProcess:
+                pass
+
+    if not targets:
+        console.print(f"[yellow]No BatonCadence process found listening on port {port}.[/yellow]")
+        raise typer.Exit(code=0)
+
+    for proc in targets:
+        try:
+            name = proc.name()
+            pid = proc.pid
+            console.print(f"[cyan]->  Stopping '{name}' (PID {pid}) on port {port}...[/cyan]")
+            if force:
+                proc.kill()
+                console.print(f"[bold green][OK] PID {pid} killed.[/bold green]")
+            else:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                    console.print(f"[bold green][OK] PID {pid} stopped cleanly.[/bold green]")
+                except psutil.TimeoutExpired:
+                    proc.kill()
+                    console.print(f"[yellow][OK] PID {pid} did not exit in 5 s — sent SIGKILL.[/yellow]")
+        except psutil.NoSuchProcess:
+            console.print(f"[dim]PID {proc.pid} already gone.[/dim]")
+        except psutil.AccessDenied:
+            console.print(f"[red][ERROR] Access denied for PID {proc.pid}. Try running as administrator.[/red]")
+            raise typer.Exit(code=1)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2b. MCP Server (for IDE/agent GUI integration)
