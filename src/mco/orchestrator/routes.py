@@ -74,7 +74,14 @@ _db_client = None
 
 
 def get_db_client(force_new: bool = False):
-    """Return a cached Supabase client (created on first use), or None if unconfigured."""
+    """Return the cached data-plane client (created on first use).
+
+    Supabase when credentials are configured; otherwise BatonCadence's
+    embedded LocalStore (SQLite) so the Local-Only profile gets real
+    persistence - jobs, audit trail, agent registry, and Mythos shared
+    context all work with zero cloud dependencies. Set MCO_DISABLE_LOCAL_DB
+    to opt out of the embedded fallback (returns None, as before).
+    """
     global _db_client
     if _db_client is not None and not force_new:
         return _db_client
@@ -86,7 +93,19 @@ def get_db_client(force_new: bool = False):
         _db_client = create_client(url, key)
         return _db_client
 
-    return None
+    if str(config.get("MCO_DISABLE_LOCAL_DB") or "").lower() in ("1", "true", "on", "yes"):
+        return None
+
+    from mco.localstore import get_local_store, seed_local_operator
+    store = get_local_store()
+    local_token = (config.get("MCO_LOCAL_TOKEN") or "").strip()
+    if local_token:
+        try:
+            seed_local_operator(store, local_token)
+        except Exception as e:
+            logger.warning(f"Could not seed local operator agent: {e}")
+    _db_client = store
+    return _db_client
 
 
 @router.get("")

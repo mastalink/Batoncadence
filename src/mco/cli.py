@@ -256,9 +256,11 @@ def create_app() -> FastAPI:
     @app_server.get("/healthz", include_in_schema=False)
     async def healthz() -> dict:
         from mco.orchestrator.routes import get_db_client, kill_switch_active
+        client = get_db_client()
         return {
             "status": "ok",
-            "database": get_db_client() is not None,
+            "database": client is not None,
+            "backend": getattr(client, "backend", "supabase") if client is not None else None,
             "paused": kill_switch_active(),
         }
 

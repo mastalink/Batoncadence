@@ -4,7 +4,9 @@ Every agent on the mesh - Claude, Codex, Gemini, connector workers - reads
 from and writes to **one collective memory**. Knowledge stops dying with the
 job that produced it: what one agent learns, every agent knows.
 
-Apply [`migrations/2026-06_mythos_shared_context.sql`](migrations/2026-06_mythos_shared_context.sql)
+**Local-Only installs need no setup at all** - Mythos persists to the embedded
+SQLite store (`~/.mco/local.db`) automatically. For Supabase-backed deployments,
+apply [`migrations/2026-06_mythos_shared_context.sql`](migrations/2026-06_mythos_shared_context.sql)
 (idempotent) to enable it.
 
 ---

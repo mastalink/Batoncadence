@@ -87,6 +87,10 @@ to connect it to your live server in three clicks:
 The page changes from *"Demo mode"* to live data. You are done — the console
 remembers these settings and connects automatically next time.
 
+Everything you do now is saved on your computer (in `~/.mco/local.db`):
+jobs, the audit history, and the shared agent memory (Mythos) all work
+without any cloud account.
+
 > **Token forgotten?** Look at the black server window — it always shows the
 > token at startup. Or open `.env` in the BatonCadence folder in Notepad and
 > look for the line that starts with `MCO_LOCAL_TOKEN=`.
