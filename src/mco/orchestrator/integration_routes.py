@@ -8,10 +8,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from mco.config import get_config
 from mco.connectors import get_connector, list_connectors
 from mco.connectors.sync import ingest_specs, normalize_webhook_event, sync_connector
-from mco.orchestrator.auth import require_agent
+from mco.editions import require_feature
+from mco.orchestrator.auth import require_scopes
 
 logger = logging.getLogger("mco.orchestrator.integrations")
-integrations_router = APIRouter(prefix="/api/integrations")
+integrations_router = APIRouter(
+    prefix="/api/integrations",
+    dependencies=[Depends(require_feature("connectors"))],
+)
 
 
 def _db():
@@ -23,7 +27,7 @@ def _db():
 
 
 @integrations_router.get("")
-async def get_integrations(agent: dict = Depends(require_agent)):
+async def get_integrations(agent: dict = Depends(require_scopes("integrations:read"))):
     """List configured connectors with reachability/auth health."""
     out = []
     for conn in list_connectors():
@@ -32,7 +36,7 @@ async def get_integrations(agent: dict = Depends(require_agent)):
 
 
 @integrations_router.post("/{name}/sync")
-async def sync_integration(name: str, agent: dict = Depends(require_agent)):
+async def sync_integration(name: str, agent: dict = Depends(require_scopes("integrations:read", "jobs:write"))):
     """Pull open platform objects into the job board (idempotent by external_id)."""
     conn = get_connector(name)
     if not conn:
@@ -47,7 +51,7 @@ async def sync_integration(name: str, agent: dict = Depends(require_agent)):
 
 
 @integrations_router.post("/{name}/action")
-async def run_integration_action(name: str, payload: dict, agent: dict = Depends(require_agent)):
+async def run_integration_action(name: str, payload: dict, agent: dict = Depends(require_scopes("integrations:manage"))):
     """Run a connector control action directly (approver roles only).
 
     Side effects hit a live enterprise platform, so this is gated like the

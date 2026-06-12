@@ -121,17 +121,22 @@ Full spec: [docs/DRUMLINE.md](docs/DRUMLINE.md)
 
 ## Editions
 
-| | Local | Team | Enterprise |
+| | Community | Team | Enterprise |
 |---|---|---|---|
 | Drumline shared memory | ✓ | ✓ | ✓ |
 | Job board, approvals, audit | ✓ | ✓ | ✓ |
 | Console GUI & workflow builder | ✓ | ✓ | ✓ |
 | Embedded SQLite (zero cloud) | ✓ | ✓ | ✓ |
 | Multi-machine / Supabase | — | ✓ | ✓ |
+| Multi-org isolation + scoped-token RBAC | — | ✓ | ✓ |
 | Docker + any-cloud deploy | — | ✓ | ✓ |
 | ServiceNow & Dynatrace connectors | — | — | ✓ |
-| Multi-tenant org isolation | — | — | ✓ |
+| SSO via your reverse proxy (trusted headers) | — | — | ✓ |
 | Pilot program | — | — | [email us](mailto:pilots@batoncadence.com) |
+
+One codebase, no separate builds: `mco edition` shows the active edition
+(inferred from your config, or pinned with `MCO_EDITION`). Details, scope
+vocabulary, and SSO setup: [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 
 ---
 
@@ -141,6 +146,7 @@ Full spec: [docs/DRUMLINE.md](docs/DRUMLINE.md)
 - [docs/DRUMLINE.md](docs/DRUMLINE.md) — shared memory: how it works, how to use it
 - [docs/GOVERNANCE.md](docs/GOVERNANCE.md) — approval gates, audit trail, workflow DSL
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — ServiceNow, Dynatrace, webhooks
+- [docs/ENTERPRISE.md](docs/ENTERPRISE.md) — editions, scoped-token RBAC, SSO delegation
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker, any-cloud, multi-tenancy
 - [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) — Supabase schema, agent registration, MCP wiring
 

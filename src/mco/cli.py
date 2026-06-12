@@ -561,20 +561,33 @@ def status():
 def register_agent(
     name: str = typer.Option(..., "--name", help="Unique name (instance ID) of the agent."),
     role: str = typer.Option(..., "--role", help="Target role of the agent (e.g. antigravity, codex)."),
-    org: str = typer.Option("default", "--org", help="Tenant org the agent belongs to (multi-tenant installs).")
+    org: str = typer.Option("default", "--org", help="Tenant org the agent belongs to (multi-tenant installs)."),
+    scope: list[str] = typer.Option(
+        None, "--scope",
+        help="Explicit token scope (repeatable, e.g. --scope jobs:read --scope context:read). "
+             "Omit for role-derived defaults; 'admin' grants everything."
+    ),
 ):
     """Register a new client agent, generating a secure access token."""
     console.print(f"[bold cyan]Registering new MCO agent...[/bold cyan]")
-    
+
+    from mco.orchestrator.auth import KNOWN_SCOPES, normalize_scopes
     from mco.orchestrator.routes import get_db_client
     db_client = get_db_client()
     if not db_client:
         console.print("[red][ERROR] Database not configured. Please run 'mco setup' first.[/red]")
         raise typer.Exit(code=1)
-        
+
+    scopes = normalize_scopes(scope or [])
+    unknown = [s for s in scopes if s not in KNOWN_SCOPES]
+    if unknown:
+        console.print(f"[red][ERROR] Unknown scope(s): {', '.join(unknown)}[/red]")
+        console.print(f"Valid scopes: {', '.join(sorted(KNOWN_SCOPES))}")
+        raise typer.Exit(code=1)
+
     token = "mco_tok_" + secrets.token_hex(24)
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    
+
     try:
         data = {
             "instance_id": name,
@@ -584,11 +597,30 @@ def register_agent(
         }
         if org and org != "default":
             data["org_id"] = org
-        res = db_client.table("agent_registry").upsert(data).execute()
+        if scopes:
+            data["scopes"] = scopes
+        try:
+            res = db_client.table("agent_registry").upsert(data).execute()
+        except Exception as first_err:
+            if scopes:
+                # Pre-migration database without the scopes column: register
+                # without explicit scopes (role-derived defaults still apply).
+                data.pop("scopes", None)
+                res = db_client.table("agent_registry").upsert(data).execute()
+                console.print(
+                    "[yellow][!] Database has no 'scopes' column yet - registered with "
+                    "role-derived defaults. Apply docs/migrations/2026-06_scoped_tokens.sql "
+                    "to use explicit scopes.[/yellow]"
+                )
+            else:
+                raise first_err
         if res.data:
+            scope_line = f"Scopes: [cyan]{', '.join(scopes)}[/cyan]\n" if scopes else \
+                "Scopes: [dim]role-derived defaults[/dim]\n"
             console.print(Panel.fit(
                 f"[bold green][OK] Agent '{name}' registered successfully![/bold green]\n\n"
                 f"Role: [cyan]{role}[/cyan]\n"
+                f"{scope_line}"
                 f"Status: [yellow]offline[/yellow]\n\n"
                 f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
                 f"[bold white]{token}[/bold white]",
@@ -598,6 +630,27 @@ def register_agent(
             console.print("[red][ERROR] Database failed to return data on upsert.[/red]")
     except Exception as e:
         console.print(f"[red][ERROR] Failed to register agent in database: {e}[/red]")
+
+
+@app.command("edition")
+def show_edition():
+    """Show the active edition (community/team/enterprise) and feature matrix."""
+    from rich.table import Table
+    from mco.editions import edition_summary
+
+    summary = edition_summary()
+    console.print(
+        f"\n[bold cyan]BatonCadence edition:[/bold cyan] [bold white]{summary['edition']}[/bold white] "
+        f"[dim]({summary['source']}; set MCO_EDITION to pin)[/dim]\n"
+    )
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Feature")
+    table.add_column("Minimum edition")
+    table.add_column("Available")
+    for feature, info in summary["features"].items():
+        mark = "[green]yes[/green]" if info["available"] else "[red]no[/red]"
+        table.add_row(feature, info["minimum_edition"], mark)
+    console.print(table)
 
 
 @app.command("agents")

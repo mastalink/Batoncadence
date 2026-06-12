@@ -4,7 +4,7 @@ import os
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from mco.orchestrator.contracts import JobStatus
-from mco.orchestrator.auth import require_agent
+from mco.orchestrator.auth import require_agent, require_scopes
 from mco.orchestrator.audit import record_event, get_events
 from mco.config import get_config
 from mco.notifiers.ntfy import (
@@ -109,7 +109,7 @@ def get_db_client(force_new: bool = False):
 
 
 @router.get("")
-async def get_jobs(agent: dict = Depends(require_agent)):
+async def get_jobs(agent: dict = Depends(require_scopes("jobs:read"))):
     """Retrieve job list from the Supabase database."""
     db_client = get_db_client()
     if not db_client:
@@ -127,7 +127,7 @@ async def get_jobs(agent: dict = Depends(require_agent)):
 
 
 @router.post("")
-async def create_job(payload: dict, agent: dict = Depends(require_agent)):
+async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
     """Create a job. Any authenticated agent may send to any target ('drop mail')."""
     db_client = get_db_client()
     if not db_client:
@@ -221,7 +221,7 @@ async def create_job(payload: dict, agent: dict = Depends(require_agent)):
 
 
 @router.get("/pending")
-async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Depends(require_agent)):
+async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Depends(require_scopes("jobs:read"))):
     """Retrieve pending jobs for a role. Dropbox rule: you may only poll your own mail."""
     if role.lower() != agent["role"].lower():
         raise HTTPException(status_code=403, detail="Cannot poll jobs for a role you are not registered as")
@@ -253,7 +253,7 @@ async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Dep
 
 
 @router.post("/lease")
-async def lease_job(payload: dict, agent: dict = Depends(require_agent)):
+async def lease_job(payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
     """Atomically lease a job. Dropbox rule: you may only lease as yourself."""
     db_client = get_db_client()
     if not db_client:
@@ -304,7 +304,7 @@ async def lease_job(payload: dict, agent: dict = Depends(require_agent)):
 
 
 @router.put("/{job_id}")
-async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(require_agent)):
+async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
     """Update job status/results. Dropbox rule: you may only update mail addressed to you."""
     db_client = get_db_client()
     if not db_client:
@@ -387,7 +387,7 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
 
 
 @router.get("/{job_id}/events")
-async def get_job_events(job_id: str, agent: dict = Depends(require_agent)):
+async def get_job_events(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
     """Immutable audit trail for one job, oldest event first."""
     db_client = get_db_client()
     if not db_client:
@@ -449,13 +449,13 @@ async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str 
 
 
 @router.post("/{job_id}/approve")
-async def approve_job(job_id: str, agent: dict = Depends(require_agent)):
+async def approve_job(job_id: str, agent: dict = Depends(require_scopes("jobs:approve"))):
     """Approve a NEEDS_APPROVAL job, releasing it to PENDING for execution."""
     return await _decide_approval(job_id, agent, approve=True)
 
 
 @router.post("/{job_id}/retry")
-async def retry_job(job_id: str, agent: dict = Depends(require_agent)):
+async def retry_job(job_id: str, agent: dict = Depends(require_scopes("jobs:approve"))):
     """Re-queue a FAILED or REJECTED job (approver roles only).
 
     Clears the lease and puts the job back to PENDING so a worker can pick it
@@ -498,14 +498,14 @@ async def retry_job(job_id: str, agent: dict = Depends(require_agent)):
 
 
 @router.post("/{job_id}/reject")
-async def reject_job(job_id: str, payload: dict = None, agent: dict = Depends(require_agent)):
+async def reject_job(job_id: str, payload: dict = None, agent: dict = Depends(require_scopes("jobs:approve"))):
     """Reject a NEEDS_APPROVAL job. Terminal: the job moves to REJECTED."""
     reason = (payload or {}).get("reason", "")
     return await _decide_approval(job_id, agent, approve=False, reason=reason)
 
 
 @agents_router.get("")
-async def get_agents(agent: dict = Depends(require_agent)):
+async def get_agents(agent: dict = Depends(require_scopes("agents:read"))):
     """Retrieve registered agents and presence. Excludes the auth_token_hash column."""
     db_client = get_db_client()
     if not db_client:

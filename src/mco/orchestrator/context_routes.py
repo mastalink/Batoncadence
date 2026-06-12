@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from mco.orchestrator.auth import require_agent
+from mco.orchestrator.auth import require_scopes
 from mco.orchestrator.drumline import recall, remember
 
 logger = logging.getLogger("mco.orchestrator.context")
@@ -25,7 +25,7 @@ async def recall_context(
     role: str = "",
     tags: str = "",
     limit: int = 5,
-    agent: dict = Depends(require_agent),
+    agent: dict = Depends(require_scopes("context:read")),
 ):
     """Recall the most relevant shared-context entries (best first)."""
     tag_list = [t for t in (tags or "").split(",") if t.strip()]
@@ -35,7 +35,7 @@ async def recall_context(
 
 
 @context_router.post("")
-async def remember_context(payload: dict, agent: dict = Depends(require_agent)):
+async def remember_context(payload: dict, agent: dict = Depends(require_scopes("context:write"))):
     """Append an entry to the shared context (any authenticated agent)."""
     title = (payload or {}).get("title")
     content = (payload or {}).get("content")

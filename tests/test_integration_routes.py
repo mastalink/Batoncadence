@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import mco.connectors.base as base_mod
+import mco.editions as editions_mod
 import mco.notifiers.ntfy as ntfy_mod
 import mco.orchestrator.integration_routes as integ_mod
 import mco.orchestrator.routes as routes_mod
@@ -68,6 +69,10 @@ def setup(monkeypatch):
     register_connector(self_stub)
     monkeypatch.setattr(routes_mod, "get_db_client", lambda: self_db)
     monkeypatch.setattr(ntfy_mod, "notify", lambda *a, **k: True)
+    # Connectors are an enterprise surface; pin the edition so these tests
+    # exercise the connector logic, not the edition gate (gate tests live in
+    # tests/test_rbac.py).
+    monkeypatch.setattr(editions_mod, "current_edition", lambda: "enterprise")
 
     app = FastAPI()
     app.include_router(jobs_router)
