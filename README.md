@@ -142,7 +142,8 @@ vocabulary, and SSO setup: [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 
 ## Docs
 
-- [docs/INSTALL.md](docs/INSTALL.md) — step-by-step install + troubleshooting
+- [docs/INSTALL.md](docs/INSTALL.md) — easy Windows install + first run + troubleshooting
+- [docs/SETUP.md](docs/SETUP.md) — full multi-agent setup: Supabase schema, agent registration, MCP wiring
 - [docs/DRUMLINE.md](docs/DRUMLINE.md) — shared memory: how it works, how to use it
 - [docs/GOVERNANCE.md](docs/GOVERNANCE.md) — approval gates, audit trail, workflow DSL
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — ServiceNow, Dynatrace, webhooks
@@ -150,7 +151,26 @@ vocabulary, and SSO setup: [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 - [docs/SDK.md](docs/SDK.md) — write a custom agent/worker in fifteen lines
 - [docs/AIRGAP.md](docs/AIRGAP.md) — fully offline install (zero data leaves your network)
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker, any-cloud, multi-tenancy
-- [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) — Supabase schema, agent registration, MCP wiring
+
+---
+
+## Security
+
+BatonCadence binds to **`127.0.0.1` by default** — only your machine can reach
+it. Before exposing it on a network:
+
+- **Set a token.** `mco setup` generates `MCO_LOCAL_TOKEN`; every request and
+  WebSocket must present it. Binding to `0.0.0.0` without a token is unsafe.
+- **Keep the shell executor off.** The standalone worker can run a shell command
+  carried in a job, but only when you opt in with `MCO_ENABLE_SHELL_EXECUTOR=1`.
+  Leave it unset unless you fully trust everyone who can post jobs; prefer typed
+  executors (`register_executor`) instead.
+- **Tokens are bearer credentials** — keep them out of git. `.env` and the
+  encrypted secret store (`~/.mco/secrets.enc`, AES-256-GCM) hold them; never
+  commit real tokens.
+
+Found a vulnerability? Email **security@batoncadence.com** rather than opening a
+public issue.
 
 ---
 
