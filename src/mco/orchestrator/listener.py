@@ -30,6 +30,19 @@ def register_executor(role: str, executor_func: Callable) -> None:
     logger.info(f"Registered custom executor for role: {role}")
 
 
+def _shell_executor_enabled() -> bool:
+    """Whether the opt-in shell-command executor is allowed (default: off).
+
+    The standalone listener can run a raw shell command carried in a job's
+    payload. That is arbitrary code execution driven by whoever can address a
+    job to this worker, so it is disabled unless an operator explicitly opts in
+    with MCO_ENABLE_SHELL_EXECUTOR (config or environment)."""
+    val = get_config().get("MCO_ENABLE_SHELL_EXECUTOR")
+    if val is None:
+        val = os.environ.get("MCO_ENABLE_SHELL_EXECUTOR")
+    return str(val or "").strip().lower() in ("1", "true", "on", "yes")
+
+
 class AgentListener:
     """
     Background worker that registers as an agent instance,
@@ -339,12 +352,29 @@ class AgentListener:
                 logger.info(f"Delegating task execution to registered custom executor for role: {self.role}")
                 return await _executor_registry[self.role](job, prompt)
 
-            # 2. Standalone fallback shell/subprocess command executor
-            # If payload specifies 'cmd' or 'command' or 'script'
+            # 2. Standalone fallback shell command executor.
+            # SECURITY: this runs an arbitrary shell command carried in a job
+            # payload. Any agent that can address a job to this worker's role
+            # could otherwise achieve remote code execution here, so the path
+            # is OPT-IN: it stays dormant unless MCO_ENABLE_SHELL_EXECUTOR is
+            # explicitly truthy. Prefer registering a typed executor
+            # (register_executor) over enabling this.
             cmd = input_payload.get("command") or input_payload.get("cmd")
             if cmd:
+                if not _shell_executor_enabled():
+                    logger.warning(
+                        "Job carries a shell 'command' but the shell executor is "
+                        "disabled. Set MCO_ENABLE_SHELL_EXECUTOR=1 to allow it "
+                        "(understand the RCE risk first), or register a typed "
+                        "executor for role '%s'.", self.role
+                    )
+                    return None, (
+                        "Shell command execution is disabled on this worker. "
+                        "Enable it with MCO_ENABLE_SHELL_EXECUTOR=1 or register a "
+                        "typed executor."
+                    )
                 logger.info(f"Executing local subprocess command: {cmd}")
-                # Run command in shell safely
+                # Run command in shell (gated above).
                 proc = await asyncio.create_subprocess_shell(
                     cmd,
                     stdout=asyncio.subprocess.PIPE,

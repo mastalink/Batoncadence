@@ -97,6 +97,10 @@ class FakeDB:
         self._q_update_data = dict(data)
         return self
 
+    def delete(self):
+        self._q_op = "delete"
+        return self
+
     def rpc(self, _name, _args):
         result = self._rpc_result
 
@@ -117,6 +121,21 @@ class FakeDB:
         op = self._q_op
 
         if t == "agent_registry":
+            if op == "insert":
+                data = dict(self._q_insert_data)
+                self._agents.append(data)
+                return R([{k: v for k, v in data.items() if k != "auth_token_hash"}])
+            if op == "update":
+                matched = [a for a in self._agents
+                           if all(a.get(c) == v for c, v in self._q_conds.items())]
+                for a in matched:
+                    a.update(self._q_update_data)
+                return R([{k: v for k, v in a.items() if k != "auth_token_hash"} for a in matched])
+            if op == "delete":
+                removed = [a for a in self._agents
+                           if all(a.get(c) == v for c, v in self._q_conds.items())]
+                self._agents = [a for a in self._agents if a not in removed]
+                return R([{k: v for k, v in a.items() if k != "auth_token_hash"} for a in removed])
             rows = [dict(a) for a in self._agents]
             for col, val in self._q_conds.items():
                 rows = [r for r in rows if r.get(col) == val]

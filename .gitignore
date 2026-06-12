@@ -141,3 +141,9 @@ configs/_filled/
 
 # Air-gapped wheel cache (created by make-offline-bundle)
 offline/
+
+# Internal / business-only — never published
+plans/
+docs/VALIDATION_SUMMARY.md
+docs/ROADMAP.md
+*-this-session-is-being-continued-*.txt

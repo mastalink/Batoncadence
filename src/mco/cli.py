@@ -12,6 +12,7 @@ import sys
 import asyncio
 import secrets
 import hashlib
+import hmac
 import json
 import logging
 from datetime import datetime, timezone
@@ -108,6 +109,16 @@ def create_app() -> FastAPI:
     from mco.orchestrator.context_routes import context_router
     app_server.include_router(context_router)
 
+    # Admin API: agent management, settings, workflow submission (Control Panel)
+    from mco.orchestrator.admin_routes import (
+        agents_admin_router,
+        settings_router,
+        workflows_router,
+    )
+    app_server.include_router(agents_admin_router)
+    app_server.include_router(settings_router)
+    app_server.include_router(workflows_router)
+
     # Unauthenticated liveness/readiness probe for cloud load balancers and
     # orchestrators (K8s, ECS, Cloud Run). Reports DB wiring, never secrets.
     @app_server.get("/healthz", include_in_schema=False)
@@ -152,10 +163,36 @@ def create_app() -> FastAPI:
         db_client = get_db_client()
         
         if not db_client:
-            # If DB is not configured, bypass authentication with a warning (local-only compatibility)
-            logger.warning("Database not configured. Bypassing WebSocket authentication for incoming connection.")
-            authenticated = True
-            ws_manager.active_connections.append(websocket)
+            # Local-Only mode (no DB). Mirror the HTTP auth path (auth.py):
+            # if MCO_LOCAL_TOKEN is set, the WebSocket must present it too;
+            # only with no token configured do we fall back to the zero-config
+            # loopback bypass. This closes the gap where a token-protected
+            # gateway bound to 0.0.0.0 still accepted unauthenticated sockets.
+            local_token = (get_config().get("MCO_LOCAL_TOKEN") or "").strip()
+            if local_token:
+                try:
+                    auth_data_str = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=5.0)
+                    auth_msg = json.loads(auth_data_str)
+                    supplied = (auth_msg.get("payload") or {}).get("token", "")
+                except Exception:
+                    supplied = ""
+                if not hmac.compare_digest(str(supplied), local_token):
+                    logger.warning("WebSocket rejected: bad/missing MCO_LOCAL_TOKEN.")
+                    try:
+                        await websocket.send_json({"type": "authenticated",
+                            "payload": {"success": False, "error": "Authentication failed"}})
+                        await websocket.close()
+                    except Exception:
+                        pass
+                    return
+                authenticated = True
+                ws_manager.active_connections.append(websocket)
+            else:
+                # No token configured: zero-config local use (loopback default).
+                logger.warning("No MCO_LOCAL_TOKEN set — accepting local WebSocket without auth.")
+                authenticated = True
+                ws_manager.active_connections.append(websocket)
         else:
             try:
                 # 1. Read first message (should be authenticate)

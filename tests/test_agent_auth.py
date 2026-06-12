@@ -52,11 +52,14 @@ class MockDBClient:
 
 
 def test_websocket_bypass_auth():
-    """Verify that when database client is not configured, WebSocket connects successfully by bypassing auth."""
+    """No database AND no MCO_LOCAL_TOKEN configured: the zero-config loopback
+    bypass admits the socket. (With a token configured, auth is required -
+    covered in test_security_hardening.py.)"""
     app = create_app()
     client = TestClient(app)
-    
-    with mock.patch("mco.orchestrator.routes.get_db_client", return_value=None):
+
+    with mock.patch("mco.orchestrator.routes.get_db_client", return_value=None), \
+         mock.patch("mco.cli.get_config", return_value={}):
         with client.websocket_connect("/ws/broadcast") as websocket:
             # Should connect successfully
             websocket.send_text("ping")

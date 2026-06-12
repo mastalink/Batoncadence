@@ -60,6 +60,13 @@ from its `agent_registry` row; rows without explicit scopes get
 
 ### Issuing scoped tokens
 
+CLI or Control Panel — both speak the same contract (tokens generated
+server-side, shown exactly once, stored only as hashes). In the dashboard
+(`/dashboard` → **Agents & Tokens**) you can register, rotate, edit scopes,
+and delete point-and-click; **Settings** exposes governance, security/SSO,
+Drumline, notification, and edition controls with the same whitelist the
+API enforces.
+
 ```bash
 # A read-only observer for a wallboard or reporting job:
 mco register --name wallboard --role viewer --scope jobs:read --scope agents:read
