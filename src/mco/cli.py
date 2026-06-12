@@ -798,24 +798,48 @@ def list_agents():
             console.print("[yellow]No agents registered. Use 'mco register' to onboard an agent.[/yellow]")
             return
             
+        from mco.orchestrator.routes import decorate_presence, get_offline_after_seconds
+
+        threshold = get_offline_after_seconds()
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Agent ID (Instance ID)", style="cyan")
         table.add_column("Role", style="green")
+        table.add_column("Org", style="white")
         table.add_column("Status", style="bold")
-        table.add_column("Last Seen At", style="white")
-        
+        table.add_column("Last Seen", style="white")
+
+        def _ago(secs):
+            if secs is None:
+                return "never"
+            if secs < 90:
+                return f"{secs}s ago"
+            if secs < 5400:
+                return f"{round(secs / 60)}m ago"
+            if secs < 129600:
+                return f"{round(secs / 3600)}h ago"
+            return f"{round(secs / 86400)}d ago"
+
         for agent in agents:
-            status = agent.get("status", "offline")
-            status_style = "[green]online[/green]" if status == "online" else "[red]offline[/red]"
-            
+            agent = decorate_presence(dict(agent), threshold)
+            status = agent.get("effective_status", "offline")
+            if status == "online":
+                status_style = "[green]online[/green]"
+            elif status == "disabled":
+                status_style = "[yellow]disabled[/yellow]"
+            else:
+                status_style = "[red]offline[/red]"
+
             table.add_row(
                 agent.get("instance_id", ""),
                 agent.get("role", ""),
+                agent.get("org_id") or "default",
                 status_style,
-                agent.get("last_seen_at", "")
+                _ago(agent.get("last_seen_seconds")),
             )
-            
+
         console.print(table)
+        console.print(f"[dim]Online means heard from within the last {threshold}s "
+                      f"(MCO_AGENT_OFFLINE_AFTER).[/dim]")
     except Exception as e:
         console.print(f"[red][ERROR] Failed to query agent registry: {e}[/red]")
 

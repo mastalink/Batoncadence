@@ -52,6 +52,62 @@ def kill_switch_active() -> bool:
     """
     return str(get_config().get("MCO_KILL_SWITCH") or "").lower() in ("1", "true", "on", "yes")
 
+
+def get_offline_after_seconds() -> int:
+    """Health-check threshold: an 'online' agent that hasn't been heard from
+    in this many seconds is reported offline (MCO_AGENT_OFFLINE_AFTER)."""
+    try:
+        return max(30, int(get_config().get("MCO_AGENT_OFFLINE_AFTER") or 300))
+    except (TypeError, ValueError):
+        return 300
+
+
+def decorate_presence(row: dict, threshold: int) -> dict:
+    """Add derived liveness to a registry row.
+
+    - last_seen_seconds: age of the last heartbeat (None if never seen)
+    - effective_status: the stored status, demoted to 'offline' when an
+      'online' agent has been silent past the threshold. The stored status
+      is never rewritten - liveness is derived at read time, so there is
+      no background sweeper to run or to fail.
+    """
+    from datetime import datetime, timezone
+
+    secs = None
+    last = row.get("last_seen_at")
+    if last:
+        try:
+            ts = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            secs = max(0, int((datetime.now(timezone.utc) - ts).total_seconds()))
+        except (ValueError, TypeError):
+            pass
+    effective = row.get("status") or "offline"
+    if effective == "online" and secs is not None and secs > threshold:
+        effective = "offline"
+    row["last_seen_seconds"] = secs
+    row["effective_status"] = effective
+    return row
+
+
+def touch_agent_presence(db_client, agent: dict) -> None:
+    """Heartbeat: polling IS the liveness signal for HTTP/MCP workers.
+
+    Stamps last_seen_at (and flips to online) for the calling agent.
+    Best-effort - presence must never break the job path."""
+    instance_id = agent.get("instance_id")
+    if not instance_id or instance_id == "local" or agent.get("status") == "disabled":
+        return
+    try:
+        from datetime import datetime, timezone
+        db_client.table("agent_registry").update({
+            "status": "online",
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("instance_id", instance_id).execute()
+    except Exception as e:
+        logger.debug(f"Presence heartbeat skipped for {instance_id}: {e}")
+
 logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
 agents_router = APIRouter(prefix="/api/agents")
@@ -230,6 +286,7 @@ async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Dep
     db_client = get_db_client()
     if not db_client:
         return []
+    touch_agent_presence(db_client, agent)
     try:
         res = db_client.table("agent_jobs")\
             .select("*")\
@@ -506,20 +563,28 @@ async def reject_job(job_id: str, payload: dict = None, agent: dict = Depends(re
 
 @agents_router.get("")
 async def get_agents(agent: dict = Depends(require_scopes("agents:read"))):
-    """Retrieve registered agents and presence. Excludes the auth_token_hash column."""
+    """Registered agents with derived presence (effective_status,
+    last_seen_seconds). Excludes the auth_token_hash column.
+
+    Visibility: callers in the default org are the host operator and see
+    every org's agents (matching `mco agents`); org-scoped callers see only
+    their own fleet.
+    """
     db_client = get_db_client()
     if not db_client:
         return []
     try:
         res = db_client.table("agent_registry").select("*").order("instance_id").execute()
         org = agent_org(agent)
+        threshold = get_offline_after_seconds()
         out = []
         for r in (res.data or []):
             # Tenant isolation (app-side so pre-migration schemas keep working).
-            if (r.get("org_id") or "default") != org:
+            if org != "default" and (r.get("org_id") or "default") != org:
                 continue
             # Never expose auth_token_hash over the API.
-            out.append({k: v for k, v in r.items() if k != "auth_token_hash"})
+            row = {k: v for k, v in r.items() if k != "auth_token_hash"}
+            out.append(decorate_presence(row, threshold))
         return out
     except Exception as e:
         logger.error(f"Error fetching registered agents: {e}")

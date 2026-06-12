@@ -145,8 +145,8 @@ DASHBOARD_HTML = r'''<!DOCTYPE html>
     <section id="view-agents" class="view">
       <div class="topbar"><h1>Agents &amp; Tokens</h1>
         <button class="primary" onclick="openRegister()">+ Register agent</button></div>
-      <p class="muted" style="font-size:.83rem">Tokens are shown exactly once at creation or reset, and stored only as hashes - same contract as <code>mco register</code>.</p>
-      <table><thead><tr><th>Instance</th><th>Role</th><th>Scopes</th><th>Status</th><th>Last Seen</th><th>Actions</th></tr></thead>
+      <p class="muted" style="font-size:.83rem">Tokens are shown exactly once at creation or reset, and stored only as hashes - same contract as <code>mco register</code>. Workers heartbeat every time they poll; an online agent silent past the threshold (Settings &rarr; Presence) shows offline.</p>
+      <table><thead><tr><th>Instance</th><th>Role</th><th>Org</th><th>Scopes</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="agents"><tr><td colspan="6" class="muted">-</td></tr></tbody></table>
       <p id="agents-msg" class="err"></p>
     </section>
@@ -292,6 +292,32 @@ async function showAudit(jobId) {
 /* ── modal helpers ───────────────────────────────────────────── */
 function openModal(html) { $("modal").innerHTML = html; $("modal-bg").classList.add("on"); }
 function closeModal() { $("modal-bg").classList.remove("on"); }
+
+function connectHelp(instance, role, tok) {
+  const origin = location.origin;
+  const mcp = JSON.stringify({ mcpServers: { mco: {
+    command: "mco", args: ["mcp"],
+    env: { MCO_GATEWAY_URL: origin, MCO_AGENT_TOKEN: tok,
+           AGENT_ROLE: role, AGENT_INSTANCE_ID: instance } } } }, null, 2);
+  const worker =
+`# PowerShell:
+$env:MCO_AGENT_TOKEN = "${tok}"
+mco listen --role ${role} --instance ${instance}
+
+# bash/zsh:
+MCO_AGENT_TOKEN="${tok}" mco listen --role ${role} --instance ${instance}`;
+  return `
+  <details style="margin-top:.9rem"><summary style="cursor:pointer"><b>Run it as a worker</b> (polls the job board)</summary>
+    <pre class="token-box" style="border-style:solid;border-color:#30363d" id="hlp-worker">${esc(worker)}</pre>
+    <button onclick="navigator.clipboard.writeText($('hlp-worker').textContent).then(()=>this.textContent='Copied!')">Copy</button>
+  </details>
+  <details style="margin-top:.6rem"><summary style="cursor:pointer"><b>Wire it into Claude Desktop / Codex / Antigravity</b> (MCP)</summary>
+    <p class="muted" style="font-size:.78rem">Add to the agent's MCP config (e.g. <code>claude_desktop_config.json</code> &rarr; <code>mcpServers</code>; templates in <code>configs/</code>). The agent gets mco_inbox / mco_lease / mco_complete / mco_remember / mco_recall as native tools.</p>
+    <pre class="token-box" style="border-style:solid;border-color:#30363d" id="hlp-mcp">${esc(mcp)}</pre>
+    <button onclick="navigator.clipboard.writeText($('hlp-mcp').textContent).then(()=>this.textContent='Copied!')">Copy</button>
+  </details>`;
+}
+
 function tokenModal(title, tok, extra) {
   openModal(`<h3>${esc(title)}</h3>
     <p>Copy this token now - <b>it will not be shown again.</b></p>
@@ -301,6 +327,14 @@ function tokenModal(title, tok, extra) {
     ${extra || ""}`);
 }
 
+function ago(secs) {
+  if (secs === null || secs === undefined) return "never";
+  if (secs < 90) return secs + "s ago";
+  if (secs < 5400) return Math.round(secs / 60) + "m ago";
+  if (secs < 129600) return Math.round(secs / 3600) + "h ago";
+  return Math.round(secs / 86400) + "d ago";
+}
+
 /* ── agents ──────────────────────────────────────────────────── */
 async function loadAgents() {
   try {
@@ -308,10 +342,12 @@ async function loadAgents() {
     $("agents-msg").textContent = "";
     $("agents").innerHTML = agents.length ? agents.map(a => `
       <tr><td>${esc(a.instance_id)}</td><td>${esc(a.role)}</td>
+      <td class="muted">${esc(a.org_id || "default")}</td>
       <td class="muted">${(a.scopes || []).map(esc).join(", ") || "role defaults"}</td>
-      <td>${badge(a.status)}</td><td>${esc((a.last_seen_at || "").slice(0, 19))}</td>
+      <td>${badge(a.effective_status || a.status)}<br>
+          <span class="muted" style="font-size:.72rem">seen ${ago(a.last_seen_seconds)}</span></td>
       <td><button onclick='openEdit(${JSON.stringify(JSON.stringify(a))})'>Edit</button>
-          <button onclick="resetToken('${esc(a.instance_id)}')">Reset token</button>
+          <button onclick="resetToken('${esc(a.instance_id)}','${esc(a.role)}')">Reset token</button>
           <button class="no" onclick="deleteAgent('${esc(a.instance_id)}')">Delete</button></td></tr>`).join("")
       : '<tr><td colspan="6" class="muted">No agents registered yet.</td></tr>';
   } catch (e) { $("agents-msg").textContent = e.message; }
@@ -330,8 +366,9 @@ function openRegister() {
     <div class="formgrid">
       <label>Name</label><input id="reg-name" placeholder="codex-worker-2">
       <label>Role</label><input id="reg-role" placeholder="codex">
-      <label>Org</label><input id="reg-org" placeholder="default">
+      <label>Org</label><input id="reg-org" placeholder="default" value="default">
     </div>
+    <p class="muted" style="font-size:.78rem;margin:.2rem 0 .6rem">Org is the <b>tenant boundary</b>, not a label: agents only see jobs and memory inside their own org. Leave it <code>default</code> unless you run isolated tenants.</p>
     <b style="font-size:.85rem">Scopes</b> <span class="muted" style="font-size:.78rem">(none checked = role-derived defaults)</span>
     ${scopeChecks([])}
     <button class="primary" onclick="registerAgent()">Register &amp; generate token</button>
@@ -344,7 +381,8 @@ async function registerAgent() {
       instance_id: $("reg-name").value.trim(), role: $("reg-role").value.trim(),
       org: $("reg-org").value.trim() || "default", scopes: pickedScopes(),
     })});
-    tokenModal(`Agent '${res.agent.instance_id}' registered`, res.token);
+    tokenModal(`Agent '${res.agent.instance_id}' registered`, res.token,
+               connectHelp(res.agent.instance_id, res.agent.role, res.token));
     loadAgents();
   } catch (e) { $("reg-msg").textContent = e.message; }
 }
@@ -372,11 +410,11 @@ async function saveEdit(id) {
     closeModal(); loadAgents();
   } catch (e) { $("ed-msg").textContent = e.message; }
 }
-async function resetToken(id) {
+async function resetToken(id, role) {
   if (!confirm(`Rotate the token for '${id}'? The old token stops working immediately.`)) return;
   try {
     const res = await api(`/api/agents/${encodeURIComponent(id)}/reset-token`, { method: "POST" });
-    tokenModal(`New token for '${id}'`, res.token);
+    tokenModal(`New token for '${id}'`, res.token, connectHelp(id, role || "codex", res.token));
   } catch (e) { alert("reset failed: " + e.message); }
 }
 async function deleteAgent(id) {
@@ -428,7 +466,8 @@ function renderEdition(ed) {
 }
 
 const GROUP_TITLES = { governance: "Governance", memory: "Drumline (shared memory)",
-                       edition: "Edition", security: "Security & SSO", notifications: "Notifications" };
+                       presence: "Presence & health", edition: "Edition",
+                       security: "Security & SSO", notifications: "Notifications" };
 
 function renderGroups(groups) {
   $("settings-groups").innerHTML = Object.entries(groups).map(([gname, items]) => {

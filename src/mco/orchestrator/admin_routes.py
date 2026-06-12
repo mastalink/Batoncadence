@@ -187,6 +187,11 @@ SETTING_GROUPS = {
         "MCO_DRUMLINE_DISTILL": {"type": "bool", "label": "Distill completed jobs into shared memory", "default": True},
         "MCO_DRUMLINE_INJECT": {"type": "bool", "label": "Inject shared memory into worker prompts", "default": True},
     },
+    "presence": {
+        "MCO_AGENT_OFFLINE_AFTER": {"type": "text",
+                                    "label": "Mark an agent offline after no contact for (seconds)",
+                                    "placeholder": "300"},
+    },
     "edition": {
         "MCO_EDITION": {"type": "choice", "label": "Edition (blank = infer from configuration)",
                         "choices": ["", "community", "team", "enterprise"]},

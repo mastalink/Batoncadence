@@ -14,7 +14,11 @@ from mco.orchestrator.admin_routes import (
     settings_router,
     workflows_router,
 )
-from mco.orchestrator.routes import router as jobs_router
+from mco.orchestrator.routes import (
+    agents_router,
+    decorate_presence,
+    router as jobs_router,
+)
 
 from tests.test_routes import FakeDB
 
@@ -52,6 +56,7 @@ def setup(monkeypatch):
 
     app = FastAPI()
     app.include_router(jobs_router)
+    app.include_router(agents_router)
     app.include_router(agents_admin_router)
     app.include_router(settings_router)
     app.include_router(workflows_router)
@@ -176,7 +181,7 @@ class TestSettings:
         resp = _ctx().http.get("/api/settings")
         assert resp.status_code == 200
         body = resp.json()
-        assert set(body["groups"]) == {"governance", "memory", "edition", "security", "notifications"}
+        assert set(body["groups"]) == {"governance", "memory", "presence", "edition", "security", "notifications"}
         assert body["edition"]["edition"] == "community"
         assert "jobs:approve" in body["known_scopes"]
 
@@ -212,6 +217,62 @@ class TestSettings:
         _as(WORKER)
         assert _ctx().http.get("/api/settings").status_code == 403
         assert _ctx().http.put("/api/settings", json={"MCO_KILL_SWITCH": True}).status_code == 403
+
+
+# ── Presence / health checks ─────────────────────────────────────────────────
+
+class TestPresence:
+    def test_decorate_marks_stale_online_agent_offline(self):
+        row = {"status": "online", "last_seen_at": "2026-01-01T00:00:00Z"}
+        out = decorate_presence(row, threshold=300)
+        assert out["effective_status"] == "offline"
+        assert out["last_seen_seconds"] > 300
+
+    def test_decorate_keeps_fresh_agent_online(self):
+        from datetime import datetime, timezone
+        row = {"status": "online",
+               "last_seen_at": datetime.now(timezone.utc).isoformat()}
+        out = decorate_presence(row, threshold=300)
+        assert out["effective_status"] == "online"
+        assert out["last_seen_seconds"] <= 5
+
+    def test_decorate_never_seen_keeps_stored_status(self):
+        out = decorate_presence({"status": "online"}, threshold=300)
+        assert out["effective_status"] == "online"   # no heartbeat data: don't guess
+        assert out["last_seen_seconds"] is None
+        assert decorate_presence({"status": "offline"}, 300)["effective_status"] == "offline"
+
+    def test_polling_is_the_heartbeat(self):
+        """GET /api/jobs/pending stamps last_seen_at and flips the poller online."""
+        _ctx().db.add_agent("w1", "codex", "tok-w1", status="offline")
+        _as({"instance_id": "w1", "role": "codex", "status": "offline", "org_id": "default"})
+        resp = _ctx().http.get("/api/jobs/pending", params={"role": "codex", "instance_id": "w1"})
+        assert resp.status_code == 200
+        row = _ctx().db._agents[0]
+        assert row["status"] == "online"
+        assert row["last_seen_at"] != "2026-01-01T00:00:00Z"  # stamped fresh
+
+    def test_agents_endpoint_returns_derived_presence(self):
+        _ctx().db.add_agent("stale", "codex", "tok-s", status="online")  # last seen 2026-01-01
+        resp = _ctx().http.get("/api/agents")
+        assert resp.status_code == 200
+        agent = resp.json()[0]
+        assert agent["status"] == "online"              # stored value untouched
+        assert agent["effective_status"] == "offline"   # derived: silent too long
+        assert agent["last_seen_seconds"] > 300
+
+    def test_host_operator_sees_all_orgs_org_admin_sees_own(self):
+        _ctx().db.add_agent("default-w", "codex", "t1")
+        _ctx().db._agents.append({"instance_id": "acme-w", "role": "codex",
+                                  "status": "online", "org_id": "acme",
+                                  "auth_token_hash": "x"})
+        # Host operator (default org): everything, with org visible.
+        names = {a["instance_id"] for a in _ctx().http.get("/api/agents").json()}
+        assert names == {"default-w", "acme-w"}
+        # Org admin: own fleet only.
+        _as(ORG_ADMIN)
+        names = {a["instance_id"] for a in _ctx().http.get("/api/agents").json()}
+        assert names == {"acme-w"}
 
 
 # ── Workflows ────────────────────────────────────────────────────────────────
