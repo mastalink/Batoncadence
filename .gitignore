@@ -135,3 +135,6 @@ configs/_filled/
 
 # wrangler deploy artifacts
 .wrangler/
+
+# Local session transcripts / scratch
+*-this-session-is-being-continued-*.txt
