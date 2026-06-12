@@ -334,10 +334,14 @@ def serve(
 
     app_server = create_app()
 
-    # Pre-warm the (now memoized) Supabase client so the first request isn't slow.
+    # Pre-warm the (now memoized) data-plane client so the first request isn't slow.
     from mco.orchestrator.routes import get_db_client
-    if get_db_client() is not None:
-        console.print("[dim]Supabase client pre-warmed.[/dim]")
+    db = get_db_client()
+    if db is not None:
+        if getattr(db, "backend", "supabase") == "local":
+            console.print("[dim]Embedded LocalStore ready (~/.mco/local.db).[/dim]")
+        else:
+            console.print("[dim]Supabase client pre-warmed.[/dim]")
 
     # Initialize ntfy webhook addon if env vars are present
     ntfy_cfg = get_ntfy_config()

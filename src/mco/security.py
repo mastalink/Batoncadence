@@ -224,7 +224,9 @@ class SecretStore:
                 aesgcm = AESGCM(master_key)
                 plaintext = aesgcm.decrypt(nonce, ciphertext + tag, None)
             except Exception:
-                logger.warning("Failed to decrypt secret store — wrong master key?")
+                # Debug, not warning: auto_unlock tries multiple key sources
+                # and emits ONE actionable warning if none of them work.
+                logger.debug("Key did not decrypt the secret store at {}", self._path)
                 return False
 
             try:
@@ -287,6 +289,17 @@ class SecretStore:
             except Exception as e:
                 logger.debug(f"Failed to auto-unlock via Windows Credential Manager: {e}")
 
+        # Every key source failed. Say so once, with the path and the remedy -
+        # this is the message an operator actually sees at startup.
+        logger.warning(
+            "Secret store at {} exists but no available key unlocks it "
+            "(tried MCO_MASTER_PASSWORD and Windows Credential Manager). "
+            "Configuration still loads from .env. To fix: run 'mco setup --menu' "
+            "-> security and unlock with your master password, or - if the store "
+            "is from an interrupted setup and holds nothing - delete the file and "
+            "re-enable encryption.",
+            self._path,
+        )
         return False
 
     def get(self, key: str) -> Optional[str]:

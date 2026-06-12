@@ -265,21 +265,38 @@ def step_encryption(config) -> None:
         return
     use_pw = Confirm.ask("Protect it with a master password? (No = a random key is generated)", default=False)
     if use_pw:
+        # A password can always re-derive the key, so the store can never be
+        # orphaned on this path. Saving to Credential Manager is convenience.
         pw = Prompt.ask("Choose a master password", password=True)
         salt = os.urandom(32)
         master_key = store.derive_key(pw, salt)
         store.initialize(master_key, salt=salt)
+        console.print("[green][OK][/green] Encryption on.")
+        if os.name == "nt" and Confirm.ask(
+                "Remember the key in Windows Credential Manager so it unlocks automatically?", default=True):
+            try:
+                WindowsCredentialProvider.store_key(master_key)
+                console.print("[green][OK][/green] It will unlock by itself from now on.")
+            except Exception as e:
+                console.print(f"[red][ERROR][/red] Credential Manager: {e}")
+                console.print("[yellow]No problem - your master password still unlocks it.[/yellow]")
     else:
+        # A random key the user never sees MUST be persisted before the store
+        # exists - otherwise an interrupt right here orphans the store and
+        # every later command warns "wrong master key?".
+        if os.name != "nt":
+            console.print("[yellow]Without Windows Credential Manager, a random key would have no saved copy.[/yellow]")
+            console.print("[yellow]Use a master password instead (set MCO_MASTER_PASSWORD for auto-unlock).[/yellow]")
+            return
         master_key = _secrets.token_bytes(32)
-        store.initialize(master_key)
-    console.print("[green][OK][/green] Encryption on.")
-    if os.name == "nt" and Confirm.ask(
-            "Remember the key in Windows Credential Manager so it unlocks automatically?", default=True):
         try:
-            WindowsCredentialProvider.store_key(store._master_key)
-            console.print("[green][OK][/green] It will unlock by itself from now on.")
+            WindowsCredentialProvider.store_key(master_key)
         except Exception as e:
-            console.print(f"[red][ERROR][/red] Credential Manager: {e}")
+            console.print(f"[red][ERROR][/red] Could not save the key to Windows Credential Manager: {e}")
+            console.print("[yellow]Encryption NOT enabled - a random key with no saved copy would lock you out.[/yellow]")
+            return
+        store.initialize(master_key)
+        console.print("[green][OK][/green] Encryption on. It will unlock by itself from now on.")
     _reencrypt_sensitive(config)
 
 
