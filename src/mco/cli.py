@@ -697,11 +697,20 @@ def register_agent(
     """Register a new client agent, generating a secure access token."""
     console.print(f"[bold cyan]Registering new MCO agent...[/bold cyan]")
 
+    from mco.orchestrator.admin_routes import allowed_orgs
     from mco.orchestrator.auth import KNOWN_SCOPES, normalize_scopes
     from mco.orchestrator.routes import get_db_client
     db_client = get_db_client()
     if not db_client:
         console.print("[red][ERROR] Database not configured. Please run 'mco setup' first.[/red]")
+        raise typer.Exit(code=1)
+
+    # Orgs are isolation boundaries, minted deliberately - never by typo.
+    if org and org not in allowed_orgs():
+        console.print(f"[red][ERROR] Org '{org}' is not configured.[/red]")
+        console.print(f"Allowed orgs: {', '.join(allowed_orgs())}")
+        console.print("Add it first: Control Panel -> Settings -> Tenancy, or set "
+                      "MCO_ORGS=acme,beta in ~/.mco/.env")
         raise typer.Exit(code=1)
 
     scopes = normalize_scopes(scope or [])

@@ -46,6 +46,18 @@ def _caller_org(agent: dict) -> str:
     return agent.get("org_id") or "default"
 
 
+def allowed_orgs() -> list:
+    """The configured org allowlist: 'default' plus MCO_ORGS (comma-separated).
+
+    Orgs are tenant boundaries, so they are minted deliberately by an admin
+    in Settings - never implicitly by whatever string arrives at
+    registration (that is how a typo becomes an isolated tenant)."""
+    raw = get_config().get("MCO_ORGS") or ""
+    orgs = {"default"}
+    orgs.update(o.strip() for o in str(raw).split(",") if o.strip())
+    return sorted(orgs)
+
+
 def _generate_token() -> tuple:
     token = "mco_tok_" + _secrets.token_hex(24)
     return token, hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -64,6 +76,29 @@ def _public(row: dict) -> dict:
 
 
 # ── Agent management ─────────────────────────────────────────────────────────
+
+@agents_admin_router.get("/orgs")
+async def list_orgs(caller: dict = Depends(require_scopes("agents:read"))):
+    """Orgs available for registration (powers the Control Panel dropdown).
+
+    Host operators see the configured allowlist plus any orgs already in use
+    (so grandfathered tenants stay visible); org-scoped callers see only
+    their own org - it is the only one they may register into anyway."""
+    org = _caller_org(caller)
+    if org != "default":
+        return {"orgs": [org], "host_operator": False}
+    in_use = set()
+    try:
+        res = _db().table("agent_registry").select("*").execute()
+        in_use = {r.get("org_id") or "default" for r in (res.data or [])}
+    except Exception as e:
+        logger.debug(f"Org in-use scan skipped: {e}")
+    return {
+        "orgs": allowed_orgs(),
+        "in_use": sorted(in_use),
+        "host_operator": True,
+    }
+
 
 @agents_admin_router.post("")
 async def register_agent(payload: dict, caller: dict = Depends(require_scopes("agents:manage"))):
@@ -90,10 +125,18 @@ async def register_agent(payload: dict, caller: dict = Depends(require_scopes("a
         raise HTTPException(status_code=409,
                             detail=f"Agent '{instance_id}' already exists. Use reset-token to rotate its token.")
 
-    # Host operators (default org) may stamp any org; org admins stay home.
+    # Host operators (default org) may stamp any ALLOWED org; org admins stay
+    # home. Unknown orgs are rejected, not silently created.
     org = _caller_org(caller)
     if org == "default":
         org = (payload.get("org") or "default").strip() or "default"
+        if org not in allowed_orgs():
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Org '{org}' is not configured. Allowed: "
+                        f"{', '.join(allowed_orgs())}. Add it in Settings -> "
+                        f"Tenancy (MCO_ORGS) first - orgs are isolation "
+                        f"boundaries, minted deliberately."))
 
     token, token_hash = _generate_token()
     data = {"instance_id": instance_id, "role": role, "status": "offline",
@@ -191,6 +234,13 @@ SETTING_GROUPS = {
         "MCO_AGENT_OFFLINE_AFTER": {"type": "text",
                                     "label": "Mark an agent offline after no contact for (seconds)",
                                     "placeholder": "300"},
+    },
+    "tenancy": {
+        "MCO_ORGS": {"type": "text",
+                     "label": "Allowed orgs (comma-separated; 'default' always exists). "
+                              "Orgs are isolation boundaries - agents only see jobs and "
+                              "memory inside their own org.",
+                     "placeholder": "acme, beta-team"},
     },
     "edition": {
         "MCO_EDITION": {"type": "choice", "label": "Edition (blank = infer from configuration)",

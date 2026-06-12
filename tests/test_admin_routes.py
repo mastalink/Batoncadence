@@ -126,6 +126,44 @@ class TestRegisterAgent:
         assert resp.json()["agent"]["org_id"] == "acme"
 
 
+class TestOrgAllowlist:
+    def test_unknown_org_is_rejected_not_minted(self):
+        """The Baton-worker accident: a typo'd org must never create a tenant."""
+        resp = _ctx().http.post("/api/agents", json={
+            "instance_id": "oops", "role": "codex", "org": "Baton-worker"})
+        assert resp.status_code == 400
+        assert "not configured" in resp.json()["detail"]
+        assert "Settings" in resp.json()["detail"]
+        assert _ctx().db._agents == []  # nothing created
+
+    def test_configured_org_is_accepted(self):
+        _ctx().cfg.values["MCO_ORGS"] = "acme, beta-team"
+        resp = _ctx().http.post("/api/agents", json={
+            "instance_id": "acme-w", "role": "codex", "org": "acme"})
+        assert resp.status_code == 200
+        assert resp.json()["agent"]["org_id"] == "acme"
+
+    def test_default_always_allowed(self):
+        resp = _ctx().http.post("/api/agents", json={
+            "instance_id": "plain", "role": "codex"})
+        assert resp.status_code == 200
+
+    def test_orgs_endpoint_host_view(self):
+        _ctx().cfg.values["MCO_ORGS"] = "acme"
+        _ctx().db._agents.append({"instance_id": "legacy", "role": "codex",
+                                  "status": "offline", "org_id": "grandfathered",
+                                  "auth_token_hash": "x"})
+        body = _ctx().http.get("/api/agents/orgs").json()
+        assert body["host_operator"] is True
+        assert body["orgs"] == ["acme", "default"]
+        assert "grandfathered" in body["in_use"]  # existing tenants stay visible
+
+    def test_orgs_endpoint_org_admin_sees_only_home(self):
+        _as(ORG_ADMIN)
+        body = _ctx().http.get("/api/agents/orgs").json()
+        assert body == {"orgs": ["acme"], "host_operator": False}
+
+
 class TestTokenLifecycle:
     def test_reset_rotates_token(self):
         old = _ctx().http.post("/api/agents", json={"instance_id": "rot", "role": "codex"}).json()
@@ -181,7 +219,8 @@ class TestSettings:
         resp = _ctx().http.get("/api/settings")
         assert resp.status_code == 200
         body = resp.json()
-        assert set(body["groups"]) == {"governance", "memory", "presence", "edition", "security", "notifications"}
+        assert set(body["groups"]) == {"governance", "memory", "presence", "tenancy",
+                                       "edition", "security", "notifications"}
         assert body["edition"]["edition"] == "community"
         assert "jobs:approve" in body["known_scopes"]
 

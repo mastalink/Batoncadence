@@ -361,14 +361,19 @@ function pickedScopes() {
   return [...document.querySelectorAll(".scope-cb:checked")].map(cb => cb.value);
 }
 
-function openRegister() {
+async function openRegister() {
+  let orgs = ["default"];
+  try { orgs = (await api("/api/agents/orgs")).orgs || ["default"]; } catch (e) { }
+  const orgCtl = orgs.length > 1
+    ? `<select id="reg-org">` + orgs.map(o => `<option ${o === "default" ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`
+    : `<input id="reg-org" value="default" disabled title="Add orgs in Settings -> Tenancy">`;
   openModal(`<h3>Register a new agent</h3>
     <div class="formgrid">
       <label>Name</label><input id="reg-name" placeholder="codex-worker-2">
       <label>Role</label><input id="reg-role" placeholder="codex">
-      <label>Org</label><input id="reg-org" placeholder="default" value="default">
+      <label>Org</label>${orgCtl}
     </div>
-    <p class="muted" style="font-size:.78rem;margin:.2rem 0 .6rem">Org is the <b>tenant boundary</b>, not a label: agents only see jobs and memory inside their own org. Leave it <code>default</code> unless you run isolated tenants.</p>
+    <p class="muted" style="font-size:.78rem;margin:.2rem 0 .6rem">Org is the <b>tenant boundary</b>, not a label: agents only see jobs and memory inside their own org. New orgs are added in Settings &rarr; Tenancy by an admin - never minted here.</p>
     <b style="font-size:.85rem">Scopes</b> <span class="muted" style="font-size:.78rem">(none checked = role-derived defaults)</span>
     ${scopeChecks([])}
     <button class="primary" onclick="registerAgent()">Register &amp; generate token</button>
@@ -466,8 +471,9 @@ function renderEdition(ed) {
 }
 
 const GROUP_TITLES = { governance: "Governance", memory: "Drumline (shared memory)",
-                       presence: "Presence & health", edition: "Edition",
-                       security: "Security & SSO", notifications: "Notifications" };
+                       presence: "Presence & health", tenancy: "Tenancy (orgs)",
+                       edition: "Edition", security: "Security & SSO",
+                       notifications: "Notifications" };
 
 function renderGroups(groups) {
   $("settings-groups").innerHTML = Object.entries(groups).map(([gname, items]) => {
