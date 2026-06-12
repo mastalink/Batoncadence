@@ -168,8 +168,19 @@ PY="$VENV/bin/python"
 # ----------------------------------------------------------------------------
 step "Installing BatonCadence and its dependencies..."
 
-"$PY" -m pip install --upgrade pip --quiet
-"$PY" -m pip install -e "$ROOT" --quiet || fail "Installation failed. Check your internet connection and retry."
+# Air-gapped install: an offline/wheels folder (created by
+# scripts/make-offline-bundle.sh on a connected machine) means we install
+# entirely from local wheels - no internet required, nothing leaves the host.
+WHEEL_DIR="$ROOT/offline/wheels"
+if [ -d "$WHEEL_DIR" ]; then
+    echo "     Offline wheel bundle detected - installing without network access."
+    "$PY" -m pip install --no-index --find-links "$WHEEL_DIR" --upgrade pip --quiet
+    "$PY" -m pip install --no-index --find-links "$WHEEL_DIR" -e "$ROOT" --quiet || \
+        fail "Offline installation failed. Rebuild the bundle with make-offline-bundle.sh on a machine with the same OS/Python."
+else
+    "$PY" -m pip install --upgrade pip --quiet
+    "$PY" -m pip install -e "$ROOT" --quiet || fail "Installation failed. Check your internet connection and retry."
+fi
 ok "BatonCadence installed"
 
 # ----------------------------------------------------------------------------

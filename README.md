@@ -148,6 +148,7 @@ vocabulary, and SSO setup: [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — ServiceNow, Dynatrace, webhooks
 - [docs/ENTERPRISE.md](docs/ENTERPRISE.md) — editions, scoped-token RBAC, SSO delegation
 - [docs/SDK.md](docs/SDK.md) — write a custom agent/worker in fifteen lines
+- [docs/AIRGAP.md](docs/AIRGAP.md) — fully offline install (zero data leaves your network)
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker, any-cloud, multi-tenancy
 - [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) — Supabase schema, agent registration, MCP wiring
 

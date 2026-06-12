@@ -138,3 +138,6 @@ configs/_filled/
 
 # Local session transcripts / scratch
 *-this-session-is-being-continued-*.txt
+
+# Air-gapped wheel cache (created by make-offline-bundle)
+offline/
