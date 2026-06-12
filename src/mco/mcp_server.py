@@ -35,9 +35,22 @@ def mco_lease(task_id: str) -> dict:
 
 
 @mcp.tool()
-def mco_complete(task_id: str, output: str) -> dict:
-    """Mark a leased job completed and attach its result text."""
-    return _client().complete(task_id, output)
+def mco_complete(task_id: str, output: str, summary: str = "",
+                 decisions: str = "", files: str = "", gotchas: str = "",
+                 follow_ups: str = "") -> dict:
+    """Mark a leased job completed and attach its result text.
+
+    The optional fields are the structured handoff for the next agent
+    (Context Exchange): summary (one paragraph), decisions / files /
+    gotchas / follow_ups (newline-separated lists). Fill them in - a
+    deliberate handoff beats heuristic extraction and is what downstream
+    workflow steps (any vendor) receive as their WORKFLOW THREAD context."""
+    handoff = {
+        "summary": summary, "decisions": decisions, "files": files,
+        "gotchas": gotchas, "follow_ups": follow_ups,
+    }
+    handoff = {k: v for k, v in handoff.items() if v and v.strip()}
+    return _client().complete(task_id, output, handoff=handoff or None)
 
 
 @mcp.tool()

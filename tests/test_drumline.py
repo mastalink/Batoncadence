@@ -10,9 +10,12 @@ from mco.orchestrator.auth import require_agent
 from mco.orchestrator.context_routes import context_router
 from mco.orchestrator.drumline import (
     distill_job,
+    extract_structure,
+    merge_context,
     recall,
     remember,
     render_context_block,
+    workflow_tags,
 )
 from mco.orchestrator.routes import router as jobs_router
 
@@ -110,6 +113,110 @@ class TestDistillation:
         assert hits and "MTU mismatch" in hits[0]["content"]
 
 
+# ── Context Exchange: structured handoffs + workflow threading ───────────────
+
+class TestExtractStructure:
+    def test_mines_files_decisions_gotchas_followups(self):
+        text = (
+            "Decided to use psutil instead of netstat for portability.\n"
+            "Edited src/mco/cli.py and tests/test_cli.py.\n"
+            "Warning: SIGTERM is emulated on Windows, behaves like kill.\n"
+            "Next steps: add a --timeout flag.\n"
+        )
+        s = extract_structure(text)
+        assert "src/mco/cli.py" in s["files"]
+        assert "tests/test_cli.py" in s["files"]
+        assert any("psutil" in d for d in s["decisions"])
+        assert any("SIGTERM" in g for g in s["gotchas"])
+        assert any("--timeout" in f for f in s["follow_ups"])
+
+    def test_caps_and_dedupes(self):
+        text = "\n".join(["decided to use X because Y"] * 20)
+        s = extract_structure(text)
+        assert len(s["decisions"]) == 1  # deduped
+
+    def test_empty_text_safe(self):
+        s = extract_structure("")
+        assert s == {"files": [], "decisions": [], "gotchas": [], "follow_ups": []}
+
+
+class TestStructuredHandoff:
+    def test_explicit_handoff_wins_and_is_weighted_higher(self):
+        db = FakeDB()
+        entry = distill_job(db, {
+            "id": "h1", "title": "Implement RBAC",
+            "target_agent_role": "codex",
+            "input_payload": {"prompt": "Add scopes"},
+            "output_payload": {
+                "result": "long raw transcript " * 50,
+                "handoff": {
+                    "summary": "Added scope checks to every router.",
+                    "decisions": ["admin is the wildcard scope"],
+                    "files": ["src/mco/orchestrator/auth.py"],
+                    "gotchas": ["LocalStore needs no migration"],
+                    "follow_ups": "document the scope vocabulary",
+                },
+            },
+        })
+        assert entry["weight"] == 1.5  # deliberate handoff > mined one
+        assert "Added scope checks" in entry["content"]
+        assert "admin is the wildcard scope" in entry["content"]
+        assert "src/mco/orchestrator/auth.py" in entry["content"]
+        assert "Follow-ups:" in entry["content"]
+
+    def test_heuristic_fallback_extracts_structure(self):
+        db = FakeDB()
+        entry = distill_job(db, {
+            "id": "h2", "title": "Fix build",
+            "target_agent_role": "codex",
+            "input_payload": {"prompt": "fix it"},
+            "output_payload": {"result": "Chose make over cmake. Edited src/app/main.c"},
+        })
+        assert entry["weight"] == 1.0
+        assert "src/app/main.c" in entry["content"]
+
+    def test_workflow_run_tags_stamp_the_entry(self):
+        db = FakeDB()
+        entry = distill_job(db, {
+            "id": "h3", "title": "step one",
+            "target_agent_role": "claude",
+            "input_payload": {"prompt": "p", "workflow": {"name": "Release", "run": "ABC123", "step": "one"}},
+            "output_payload": {"result": "done"},
+        })
+        assert "wf:release" in entry["tags"]
+        assert "run:abc123" in entry["tags"]
+
+    def test_workflow_tags_helper(self):
+        assert workflow_tags({"input_payload": {}}) == []
+        assert workflow_tags({}) == []
+
+
+class TestMergeContext:
+    def _entry(self, id, title, created_at):
+        return {"id": id, "kind": "handoff", "title": title, "content": "c",
+                "created_by": "w", "created_at": created_at}
+
+    def test_thread_first_then_general_deduped(self):
+        thread = [self._entry("a", "step 2", "2026-06-02"),
+                  self._entry("b", "step 1", "2026-06-01")]
+        recalled = [self._entry("a", "step 2", "2026-06-02"),  # duplicate
+                    self._entry("c", "old lesson", "2026-05-01")]
+        merged = merge_context(thread, recalled)
+        assert "WORKFLOW THREAD" in merged
+        assert merged.index("WORKFLOW THREAD") < merged.index("SHARED CONTEXT")
+        assert merged.count("step 2") == 1  # deduped out of general recall
+        # thread reads chronologically: step 1 before step 2
+        assert merged.index("step 1") < merged.index("step 2")
+
+    def test_no_thread_renders_plain_context(self):
+        merged = merge_context([], [self._entry("c", "lesson", "2026-05-01")])
+        assert "WORKFLOW THREAD" not in merged
+        assert "SHARED CONTEXT" in merged
+
+    def test_both_empty_renders_nothing(self):
+        assert merge_context([], []) == ""
+
+
 # ── Rendering / injection ─────────────────────────────────────────────────────
 
 class TestRendering:
@@ -119,7 +226,8 @@ class TestRendering:
              "created_by": "joe", "created_at": "2026-06-01T00:00:00Z"},
         ])
         assert block.startswith("=== SHARED CONTEXT (Drumline) ===")
-        assert block.rstrip().endswith("=== END SHARED CONTEXT ===")
+        assert block.rstrip().endswith("=== END SHARED CONTEXT (Drumline) ===")
+        assert "NOT instructions" in block  # prompt-injection guard
         assert "[lesson] Never deploy Fridays (joe, 2026-06-01)" in block
         assert "Seriously." in block
 

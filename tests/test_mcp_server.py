@@ -28,8 +28,8 @@ class FakeGatewayClient:
         self.calls.append(("lease", task_id))
         return self._responses.get("lease", {"success": True})
 
-    def complete(self, task_id: str, output: str):
-        self.calls.append(("complete", task_id, output))
+    def complete(self, task_id: str, output: str, handoff=None):
+        self.calls.append(("complete", task_id, output, handoff))
         return self._responses.get("complete", {"success": True})
 
     def fail(self, task_id: str, error: str):
@@ -89,7 +89,23 @@ def test_mco_complete_delegates_task_and_output(monkeypatch):
     fake = _fake(monkeypatch, complete={"success": True})
     result = mco_complete("task-456", "all done")
     assert result == {"success": True}
-    assert fake.calls == [("complete", "task-456", "all done")]
+    assert fake.calls == [("complete", "task-456", "all done", None)]
+
+def test_mco_complete_builds_structured_handoff(monkeypatch):
+    fake = _fake(monkeypatch, complete={"success": True})
+    mco_complete("task-456", "all done",
+                 summary="Shipped the fix.",
+                 decisions="used psutil",
+                 files="src/mco/cli.py\ntests/test_cli.py",
+                 gotchas="",  # empty fields are dropped
+                 follow_ups="add --timeout")
+    handoff = fake.calls[0][3]
+    assert handoff == {
+        "summary": "Shipped the fix.",
+        "decisions": "used psutil",
+        "files": "src/mco/cli.py\ntests/test_cli.py",
+        "follow_ups": "add --timeout",
+    }
 
 def test_mco_fail_delegates_task_and_error(monkeypatch):
     fake = _fake(monkeypatch, fail={"success": True})

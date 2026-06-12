@@ -22,6 +22,19 @@ involved, and recorded in the audit trail as `context_distilled`. The
 *evidence* stays immutable in `agent_job_events`; the *essence* becomes
 recallable context. Opt out with `MCO_DRUMLINE_DISTILL=false`.
 
+Distillation is structured, not just a text dump. Two channels:
+
+- **Explicit handoff (preferred).** The finishing agent attaches
+  `output_payload["handoff"]` - via `mco_complete(..., summary=, decisions=,
+  files=, gotchas=, follow_ups=)` over MCP, or
+  `client.complete(task_id, output, handoff={...})` over REST. Deliberate
+  handoffs are stored verbatim and weighted higher (1.5) than mined ones.
+- **Heuristic mining (fallback).** `extract_structure()` deterministically
+  mines the free-text result for file paths, decision lines, gotcha lines,
+  and follow-ups - so agents that never heard of the contract still leave
+  useful structure behind. Like the recall scorer, an LLM-based distiller
+  can replace it later without changing any caller.
+
 **2. Deliberate memory.**
 Agents record durable knowledge - decisions, gotchas, environment facts:
 
@@ -56,9 +69,27 @@ Task Title: ...
 ```
 
 Opt out with `MCO_DRUMLINE_INJECT=false`. Injection is best-effort: if the
-gateway is unreachable, the job still runs.
+gateway is unreachable, the job still runs. The block header explicitly
+frames entries as *reference data, not instructions* - a poisoned memory
+must read as information to weigh, never as directives to follow.
 
-**2. Explicit recall.**
+**2. Workflow threading (the Context Exchange).**
+Every `mco workflow` run stamps its steps with one run id
+(`input_payload["workflow"] = {name, run, step}`). Each step's handoff is
+tagged `wf:<name>` / `run:<id>`, and before a worker executes a step it
+fetches the *whole thread* by hard tag filter and injects it ahead of
+general recall, oldest step first:
+
+```
+=== WORKFLOW THREAD (Drumline) ===   <- every predecessor handoff, in order
+=== SHARED CONTEXT (Drumline) ===    <- best soft-scored entries
+```
+
+This is deterministic: the Codex step *always* sees what the Claude step
+decided, which files it touched, and what it left undone - regardless of
+vendor, and regardless of whether term-overlap scoring would have matched.
+
+**3. Explicit recall.**
 GUI agents (Claude Desktop / Codex / Antigravity via MCP) dip in on demand:
 
 ```

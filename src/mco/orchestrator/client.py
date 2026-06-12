@@ -56,9 +56,15 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
-    def complete(self, task_id: str, output: str) -> dict:
+    def complete(self, task_id: str, output: str, handoff: Optional[dict] = None) -> dict:
+        """Mark a job completed. `handoff` is the structured Context Exchange
+        channel ({summary, decisions, files, gotchas, follow_ups}) - Drumline
+        stores it verbatim for the next agent instead of mining the text."""
+        output_payload: dict = {"result": output}
+        if handoff:
+            output_payload["handoff"] = handoff
         with self._client() as c:
-            r = c.put(f"/api/jobs/{task_id}", json={"status": "completed", "output_payload": {"result": output}})
+            r = c.put(f"/api/jobs/{task_id}", json={"status": "completed", "output_payload": output_payload})
             r.raise_for_status()
             return r.json()
 
@@ -70,14 +76,21 @@ class GatewayClient:
 
     def send(self, to_role: str, title: str, instructions: str, to_instance: Optional[str] = None,
              depends_on: Optional[List[str]] = None, requires_approval: bool = False,
-             max_retries: int = 0, escalate_to_role: Optional[str] = None) -> dict:
-        """Drop a task/message into another agent's dropbox."""
+             max_retries: int = 0, escalate_to_role: Optional[str] = None,
+             extra_payload: Optional[dict] = None) -> dict:
+        """Drop a task/message into another agent's dropbox.
+
+        `extra_payload` is merged into input_payload (e.g. the workflow
+        thread stamp {"workflow": {"name", "run", "step"}})."""
+        input_payload: dict[str, Any] = {"prompt": instructions}
+        if extra_payload:
+            input_payload.update(extra_payload)
         payload: dict[str, Any] = {
             "title": title,
             "description": instructions,
             "target_agent_role": to_role,
             "target_agent_id": to_instance,
-            "input_payload": {"prompt": instructions},
+            "input_payload": input_payload,
             "depends_on": depends_on or [],
         }
         if requires_approval:

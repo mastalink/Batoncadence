@@ -116,11 +116,20 @@ def topo_order(steps: List[dict]) -> List[dict]:
 def submit_workflow(client: GatewayClient, workflow: dict) -> Dict[str, str]:
     """Submit every step as a job (in dependency order) and return {step_id: job_id}.
 
+    Every step is stamped with the same workflow run id
+    (input_payload["workflow"] = {name, run, step}). Drumline tags each
+    step's handoff with that run, and workers inject the whole thread into
+    downstream steps - the Context Exchange that lets a Codex step pick up
+    exactly where a Claude step left off.
+
     Raises WorkflowError if any step fails to create, listing the jobs already
     created so the caller can clean up or resume.
     """
+    import uuid
+
     workflow = load_workflow(workflow)
     name = workflow["name"]
+    run_id = uuid.uuid4().hex[:12]
     job_ids: Dict[str, str] = {}
 
     for step in topo_order(workflow["steps"]):
@@ -135,6 +144,7 @@ def submit_workflow(client: GatewayClient, workflow: dict) -> Dict[str, str]:
             requires_approval=bool(step.get("requires_approval")),
             max_retries=int(step.get("max_retries") or 0),
             escalate_to_role=step.get("escalate_to_role"),
+            extra_payload={"workflow": {"name": name, "run": run_id, "step": step_id}},
         )
         job = (res or {}).get("job") or {}
         job_id = job.get("id")

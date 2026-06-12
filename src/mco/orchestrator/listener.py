@@ -274,23 +274,43 @@ class AgentListener:
             logger.error(f"Error processing job {job_id}: {e}")
 
     async def _fetch_shared_context(self, job: Dict[str, Any]) -> str:
-        """Drumline tap: recall relevant shared context for this job from the
-        gateway and render it as an injectable block. Never raises."""
+        """Drumline tap: build the context to prepend to this job's prompt.
+
+        Two sources, composed by merge_context():
+        1. The workflow thread - when the job carries a run stamp
+           (input_payload["workflow"]["run"]), every predecessor handoff in
+           that run is fetched by hard tag filter. Deterministic: the next
+           step ALWAYS sees what the previous steps did, regardless of
+           vendor, not merely when term-overlap scoring happens to match.
+        2. General recall - the soft-scored best entries for this job.
+
+        Never raises."""
         inject = get_config().get("MCO_DRUMLINE_INJECT") or os.environ.get("MCO_DRUMLINE_INJECT") or "true"
         if str(inject).lower() == "false":
             return ""
         try:
             import httpx
-            from mco.orchestrator.drumline import render_context_block
+            from mco.orchestrator.drumline import merge_context
             query = f"{job.get('title', '')} {job.get('description', '')[:200]}"
+            wf = ((job.get("input_payload") or {}).get("workflow")) or {}
+            run_id = str(wf.get("run") or "").strip().lower()
             async with httpx.AsyncClient() as client:
+                thread = []
+                if run_id:
+                    thread_res = await client.get(
+                        f"{self.gateway_http_url}/api/context",
+                        params={"tags": f"run:{run_id}", "limit": 10},
+                        headers=self._auth_headers(), timeout=10.0,
+                    )
+                    if thread_res.status_code == 200:
+                        thread = thread_res.json()
                 res = await client.get(
                     f"{self.gateway_http_url}/api/context",
                     params={"query": query, "role": self.role, "limit": 5},
                     headers=self._auth_headers(), timeout=10.0,
                 )
-                if res.status_code == 200:
-                    return render_context_block(res.json())
+                recalled = res.json() if res.status_code == 200 else []
+                return merge_context(thread, recalled)
         except Exception as e:
             logger.debug(f"Drumline context fetch skipped: {e}")
         return ""

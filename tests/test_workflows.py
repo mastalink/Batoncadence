@@ -42,11 +42,12 @@ class FakeClient:
         self._fail_on_title = fail_on_title
 
     def send(self, to_role, title, instructions, to_instance=None, depends_on=None,
-             requires_approval=False, max_retries=0, escalate_to_role=None):
+             requires_approval=False, max_retries=0, escalate_to_role=None,
+             extra_payload=None):
         self.calls.append({
             "to_role": to_role, "title": title, "depends_on": depends_on or [],
             "requires_approval": requires_approval, "max_retries": max_retries,
-            "escalate_to_role": escalate_to_role,
+            "escalate_to_role": escalate_to_role, "extra_payload": extra_payload,
         })
         if self._fail_on_title and self._fail_on_title in title:
             return {"success": False}
@@ -114,6 +115,17 @@ class TestSubmitWorkflow:
         ship_call = next(c for c in client.calls if c["title"] == "Ship")
         assert ship_call["depends_on"] == [job_ids["build"]]
         assert ship_call["requires_approval"] is True
+
+    def test_every_step_stamped_with_one_workflow_run(self):
+        """Context Exchange threading: all steps share a run id so each
+        downstream step deterministically receives its predecessors' handoffs."""
+        client = FakeClient()
+        submit_workflow(client, load_workflow(VALID_YAML))
+        stamps = [c["extra_payload"]["workflow"] for c in client.calls]
+        assert all(s["name"] == "release-pipeline" for s in stamps)
+        run_ids = {s["run"] for s in stamps}
+        assert len(run_ids) == 1 and run_ids != {None}
+        assert {s["step"] for s in stamps} == {"research", "build", "ship"}
 
     def test_failed_step_raises_with_progress(self):
         client = FakeClient(fail_on_title="Build")
