@@ -444,6 +444,91 @@ def serve(
     uvicorn.run(app_server, host=host, port=port)
 
 
+@app.command("start")
+def start(
+    host: str = typer.Option("127.0.0.1", help="The host to bind to."),
+    port: int = typer.Option(18789, help="The port to bind to."),
+):
+    """Start the gateway in the background (the pair of 'mco stop').
+
+    Unlike 'mco serve' (foreground, for terminals/systemd/Docker), this
+    detaches: your terminal stays free, output goes to ~/.mco/gateway.log,
+    and 'mco stop' shuts it down.
+    """
+    import subprocess
+    import time
+
+    import psutil
+    import requests
+
+    # Refuse to double-start: is something already listening on the port?
+    for conn in psutil.net_connections(kind="tcp"):
+        if conn.laddr.port == port and conn.status == "LISTEN" and conn.pid:
+            console.print(f"[yellow][!] A gateway is already running on port {port} "
+                          f"(PID {conn.pid}).[/yellow]")
+            console.print(f"    Console: [cyan]http://{host}:{port}/console[/cyan]   "
+                          f"Stop it with: [cyan]mco stop --port {port}[/cyan]")
+            raise typer.Exit(code=1)
+
+    log_path = Path.home() / ".mco" / "gateway.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_path, "a", encoding="utf-8", errors="replace")
+
+    cmd = [sys.executable, "-m", "mco.cli", "serve", "--host", host, "--port", str(port)]
+    kwargs: dict = {"stdout": log_file, "stderr": subprocess.STDOUT,
+                    "stdin": subprocess.DEVNULL}
+    if os.name == "nt":
+        # Detach fully so closing this terminal doesn't kill the gateway.
+        kwargs["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
+                                   | getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+    else:
+        kwargs["start_new_session"] = True
+
+    proc = subprocess.Popen(cmd, **kwargs)
+    console.print(f"->  Starting gateway in the background (PID {proc.pid})...")
+
+    # Wait for /healthz so "started" means "answering", not "spawned".
+    deadline = time.monotonic() + 20
+    healthy = False
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            break  # process died during startup
+        try:
+            if requests.get(f"http://{host}:{port}/healthz", timeout=1).ok:
+                healthy = True
+                break
+        except Exception:
+            time.sleep(0.5)
+
+    if not healthy:
+        console.print(f"[red][X] Gateway did not become healthy. "
+                      f"See the log: {log_path}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(Panel.fit(
+        f"[bold green]BatonCadence is running[/bold green]\n"
+        f"Console:   http://{host}:{port}/console\n"
+        f"Dashboard: http://{host}:{port}/dashboard\n"
+        f"Log:       {log_path}\n\n"
+        f"Stop it any time with: [bold]mco stop[/bold]",
+        border_style="green"
+    ))
+
+
+@app.command("restart")
+def restart(
+    host: str = typer.Option("127.0.0.1", help="The host to bind to."),
+    port: int = typer.Option(18789, help="The port the gateway runs on."),
+):
+    """Restart the background gateway (stop if running, then start)."""
+    import psutil
+    running = any(c.laddr.port == port and c.status == "LISTEN" and c.pid
+                  for c in psutil.net_connections(kind="tcp"))
+    if running:
+        stop(port=port, force=False)
+    start(host=host, port=port)
+
+
 @app.command("stop")
 def stop(
     port: int = typer.Option(18789, help="Port the gateway is running on."),
