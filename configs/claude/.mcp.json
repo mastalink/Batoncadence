@@ -1,13 +1,13 @@
 {
   "mcpServers": {
     "mco": {
-      "command": "C:\\AI\\MCOrchestr8\\.venv\\Scripts\\mco.exe",
+      "command": "mco",
       "args": ["mcp"],
       "env": {
         "MCO_GATEWAY_URL": "http://127.0.0.1:18789",
         "MCO_AGENT_TOKEN": "mco_tok_REPLACE_WITH_CLAUDE_TOKEN",
         "AGENT_ROLE": "claude",
-        "AGENT_INSTANCE_ID": "coding-beast-claude"
+        "AGENT_INSTANCE_ID": "claude-desktop-1"
       }
     }
   }

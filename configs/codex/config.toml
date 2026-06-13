@@ -1,5 +1,7 @@
-# Append to ~/.codex/config.toml
+﻿# Append to ~/.codex/config.toml
+# The installer puts `mco` on your PATH; if Codex can't find it, use the
+# full path to <repo>\.venv\Scripts\mco.exe (Windows) or <repo>/.venv/bin/mco.
 [mcp_servers.mco]
-command = "C:\\AI\\BatonCadence\\.venv\\Scripts\\mco.exe"
+command = "mco"
 args = ["mcp"]
-env = { MCO_GATEWAY_URL = "http://127.0.0.1:18789", MCO_AGENT_TOKEN = "mco_tok_REPLACE_WITH_CODEX_TOKEN", AGENT_ROLE = "codex", AGENT_INSTANCE_ID = "coding-beast-codex" }
+env = { MCO_GATEWAY_URL = "http://127.0.0.1:18789", MCO_AGENT_TOKEN = "mco_tok_REPLACE_WITH_CODEX_TOKEN", AGENT_ROLE = "codex", AGENT_INSTANCE_ID = "codex-worker-1" }

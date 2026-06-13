@@ -1030,6 +1030,45 @@ def _gateway_client():
     )
 
 
+@app.command("send")
+def send_job(
+    to_role: str = typer.Argument(..., help="Target role's dropbox (e.g. codex, claude)."),
+    title: str = typer.Option(..., "--title", "-t", help="Short job title."),
+    message: str = typer.Option("", "--message", "-m", help="Instructions (defaults to the title)."),
+    instance: str = typer.Option("", "--instance", help="Address one specific instance instead of the whole role."),
+    approve: bool = typer.Option(False, "--approve", help="Pause at the human approval gate before execution."),
+    retries: int = typer.Option(0, "--retries", help="Retry budget on failure."),
+    escalate: str = typer.Option("", "--escalate", help="Role to escalate to after retries are exhausted."),
+):
+    """Drop a job into an agent's dropbox from the terminal."""
+    try:
+        res = _gateway_client().send(
+            to_role=to_role,
+            title=title,
+            instructions=message or title,
+            to_instance=instance or None,
+            requires_approval=approve,
+            max_retries=retries,
+            escalate_to_role=escalate or None,
+        )
+        job = (res or {}).get("job") or {}
+        if res.get("success") and job.get("id"):
+            console.print(f"[green][OK][/green] Job [bold]{job['id']}[/bold] -> {to_role}"
+                          f"{' / ' + instance if instance else ''} "
+                          f"(status: {job.get('status')})")
+            if job.get("status") == "needs_approval":
+                console.print(f"[dim]Approve it with: mco approve {job['id']}[/dim]")
+        else:
+            console.print(f"[red][ERROR] Send failed: {res}[/red]")
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[red][ERROR] {e}[/red]")
+        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
+        raise typer.Exit(code=1)
+
+
 @app.command("workflow")
 def run_workflow(
     file: str = typer.Argument(..., help="Path to a workflow YAML file."),
