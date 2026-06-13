@@ -90,10 +90,14 @@ mco start             # start the gateway in the background (logs to ~/.mco/gate
 mco stop              # stop it
 mco restart           # stop + start
 mco serve             # foreground alternative (terminals, systemd, Docker)
+mco service install   # run as a boot-persistent OS service (Task Scheduler / systemd / launchd)
+mco doctor            # end-to-end install diagnosis
+mco upgrade           # apply schema migrations (LocalStore needs none)
 mco status            # config health check
 mco setup             # guided walkthrough or settings menu
 mco setup --guided    # hand-held, Enter at every prompt = working Local-Only install
 mco setup --menu      # jump to one setting and get out
+mco send codex -t "Summarize repo" -m "..."   # drop a job into a dropbox
 mco listen --role codex --instance worker-1   # start a worker
 mco audit <job_id>    # inspect a job's full history
 mco approve <job_id>  # approve a gate
@@ -158,6 +162,18 @@ vocabulary, and SSO setup: [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 - [docs/SDK.md](docs/SDK.md) — write a custom agent/worker in fifteen lines
 - [docs/AIRGAP.md](docs/AIRGAP.md) — fully offline install (zero data leaves your network)
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker, any-cloud, multi-tenancy
+
+---
+
+## Observability
+
+- **`/metrics`** — Prometheus exposition: jobs by status, approval queue depth,
+  agents registered/online, kill-switch and database state. Open like
+  `/healthz` by default; set `MCO_METRICS_TOKEN` to require a bearer token when
+  the gateway is network-exposed.
+- **`/healthz`** — unauthenticated liveness/readiness for load balancers.
+- **`MCO_LOG_JSON=true`** — one JSON object per log line for Loki / Datadog /
+  CloudWatch ingestion.
 
 ---
 

@@ -2,6 +2,19 @@
 
 All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); versioning: semver.
 
+## [Unreleased]
+
+### Added
+- **`/metrics`** Prometheus endpoint (jobs by status, approval queue depth,
+  agents registered/online, kill-switch, database state); optional
+  `MCO_METRICS_TOKEN`. `MCO_LOG_JSON` for structured JSON logs.
+- **`mco service install/uninstall/status`**: boot-persistent gateway via
+  Windows Task Scheduler, Linux systemd --user, or macOS launchd.
+- **`mco upgrade`**: schema migration runner - LocalStore needs none;
+  Postgres auto-applies via DATABASE_URL + psycopg (recorded in
+  schema_migrations) or emits a combined script for the Supabase SQL editor.
+  Migrations now ship as package data.
+
 ## [0.2.0] - 2026-06-12
 
 The enterprise-suite release: RBAC, SSO delegation, editions, the Context

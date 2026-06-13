@@ -472,8 +472,8 @@ function renderEdition(ed) {
 
 const GROUP_TITLES = { governance: "Governance", memory: "Drumline (shared memory)",
                        presence: "Presence & health", tenancy: "Tenancy (orgs)",
-                       edition: "Edition", security: "Security & SSO",
-                       notifications: "Notifications" };
+                       observability: "Observability", edition: "Edition",
+                       security: "Security & SSO", notifications: "Notifications" };
 
 function renderGroups(groups) {
   $("settings-groups").innerHTML = Object.entries(groups).map(([gname, items]) => {

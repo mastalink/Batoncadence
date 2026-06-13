@@ -145,6 +145,10 @@ def create_app() -> FastAPI:
     app_server.include_router(settings_router)
     app_server.include_router(workflows_router)
 
+    # Prometheus metrics (/metrics)
+    from mco.orchestrator.metrics_routes import metrics_router
+    app_server.include_router(metrics_router)
+
     # Unauthenticated liveness/readiness probe for cloud load balancers and
     # orchestrators (K8s, ECS, Cloud Run). Reports DB wiring, never secrets.
     @app_server.get("/healthz", include_in_schema=False)
@@ -347,6 +351,8 @@ def serve(
     port: int = typer.Option(18789, help="The port to bind to.")
 ):
     """Start the BatonCadence FastAPI WebSocket/REST API Server."""
+    from mco.logging_setup import configure_logging
+    configure_logging()
     console.print(Panel.fit(
         f"[bold green]Starting BatonCadence Server[/bold green]\n"
         f"Host: http://{host}:{port}\n"
@@ -559,6 +565,46 @@ def restart(
     start(host=host, port=port)
 
 
+service_app = typer.Typer(help="Run the gateway as a boot-persistent OS service.")
+app.add_typer(service_app, name="service")
+
+
+@service_app.command("install")
+def service_install(
+    host: str = typer.Option("127.0.0.1", help="Host the service binds to."),
+    port: int = typer.Option(18789, help="Port the service binds to."),
+):
+    """Install the gateway as an OS service that starts on boot/login."""
+    from mco import service
+    console.print(f"[cyan]Installing via {service.backend_name()}...[/cyan]")
+    ok_flag, detail = service.install(host, port)
+    if ok_flag:
+        console.print(f"[green][OK][/green] {detail}")
+        console.print(f"[dim]Console: http://{host}:{port}/console   "
+                      f"Remove with: mco service uninstall[/dim]")
+    else:
+        console.print(f"[red][X] Service install failed:[/red] {detail}")
+        raise typer.Exit(code=1)
+
+
+@service_app.command("uninstall")
+def service_uninstall():
+    """Remove the boot-persistent service (does not stop a running gateway)."""
+    from mco import service
+    ok_flag, detail = service.uninstall()
+    color = "green" if ok_flag else "yellow"
+    console.print(f"[{color}][OK][/{color}] {detail}")
+
+
+@service_app.command("status")
+def service_status():
+    """Show whether the boot-persistent service is installed."""
+    from mco import service
+    state = service.status()
+    color = "green" if state == "installed" else "yellow"
+    console.print(f"Service ({service.backend_name()}): [{color}]{state}[/{color}]")
+
+
 @app.command("stop")
 def stop(
     port: int = typer.Option(18789, help="Port the gateway is running on."),
@@ -707,6 +753,66 @@ def status():
         table.add_row(k, v)
 
     console.print(table)
+
+
+@app.command("upgrade")
+def upgrade(
+    apply: bool = typer.Option(False, "--apply", help="Actually apply (default: dry-run / show pending)."),
+):
+    """Apply schema migrations to the configured backend.
+
+    LocalStore needs none. Postgres/Supabase auto-applies when DATABASE_URL
+    and a psycopg driver are present; otherwise a combined script is written
+    for the Supabase SQL editor.
+    """
+    from mco import migrations_runner as mig
+
+    all_migs = [n for n, _ in mig.discover()]
+    console.print(f"[bold cyan]=== BatonCadence Upgrade ===[/bold cyan]")
+    console.print(f"Migrations found: {len(all_migs)}\n")
+
+    kind = mig.backend_kind()
+    if kind == "none":
+        console.print("[yellow]No database configured.[/yellow] Run 'mco setup' first.")
+        raise typer.Exit(code=1)
+    if kind == "local":
+        console.print("[green][OK][/green] Backend is the embedded LocalStore - "
+                      "no migrations needed (JSON rows pick up new fields automatically).")
+        return
+
+    # Postgres / Supabase
+    database_url = (get_config().get("DATABASE_URL") or os.environ.get("DATABASE_URL") or "").strip()
+    if database_url and apply:
+        try:
+            result = mig.apply_postgres(database_url)
+        except Exception as e:
+            console.print(f"[red][X] Migration failed:[/red] {e}")
+            raise typer.Exit(code=1)
+        if result["applied"]:
+            for n in result["applied"]:
+                console.print(f"[green][OK][/green] applied {n}")
+            console.print(f"\n[green]Applied {len(result['applied'])} migration(s) "
+                          f"via {result['driver']}.[/green]")
+        else:
+            console.print("[green][OK][/green] Already up to date - nothing to apply.")
+        return
+
+    # No direct connection (or dry-run): emit the pending script.
+    _, pending = mig.write_combined_script()
+    if not pending:
+        console.print("[green][OK][/green] No pending migrations detected.")
+        return
+    out = Path.home() / ".mco" / "pending_migrations.sql"
+    console.print(f"[yellow]{len(pending)} migration(s) pending:[/yellow]")
+    for n in pending:
+        console.print(f"  - {n}")
+    console.print()
+    if database_url:
+        console.print("Re-run with [bold]--apply[/bold] to apply via DATABASE_URL.")
+    else:
+        console.print(f"Combined script written to: [bold]{out}[/bold]")
+        console.print("[dim]Apply it in the Supabase SQL editor, or set DATABASE_URL "
+                      "and run 'mco upgrade --apply'.[/dim]")
 
 
 @app.command("doctor")

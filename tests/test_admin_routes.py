@@ -220,7 +220,7 @@ class TestSettings:
         assert resp.status_code == 200
         body = resp.json()
         assert set(body["groups"]) == {"governance", "memory", "presence", "tenancy",
-                                       "edition", "security", "notifications"}
+                                       "observability", "edition", "security", "notifications"}
         assert body["edition"]["edition"] == "community"
         assert "jobs:approve" in body["known_scopes"]
 

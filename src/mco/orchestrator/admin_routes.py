@@ -235,6 +235,12 @@ SETTING_GROUPS = {
                                     "label": "Mark an agent offline after no contact for (seconds)",
                                     "placeholder": "300"},
     },
+    "observability": {
+        "MCO_METRICS_TOKEN": {"type": "secret",
+                              "label": "Protect /metrics with a bearer token (blank = open, like /healthz)"},
+        "MCO_LOG_JSON": {"type": "bool",
+                         "label": "Structured JSON logs (restart to apply)"},
+    },
     "tenancy": {
         "MCO_ORGS": {"type": "text",
                      "label": "Allowed orgs (comma-separated; 'default' always exists). "

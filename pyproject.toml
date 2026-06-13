@@ -59,7 +59,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mco = ["static/*.html"]
+mco = ["static/*.html", "migrations/*.sql"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
