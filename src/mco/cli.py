@@ -39,6 +39,32 @@ from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline
 app = typer.Typer(help="BatonCadence: Multi-Client Agent Orchestrator.")
 console = Console()
 
+
+def get_version() -> str:
+    """Installed distribution version (single source of truth: pyproject)."""
+    from importlib.metadata import version as _dist_version
+    for dist in ("batoncadence", "mco"):  # 'mco' = pre-0.2 editable installs
+        try:
+            return _dist_version(dist)
+        except Exception:
+            continue
+    return "unknown"
+
+
+def _version_callback(value: bool):
+    if value:
+        console.print(f"BatonCadence {get_version()}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=_version_callback, is_eager=True,
+        help="Show the version and exit."),
+):
+    """BatonCadence: Multi-Client Agent Orchestrator."""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Onboarding Setup Wizard
 # ─────────────────────────────────────────────────────────────────────────────
@@ -679,8 +705,138 @@ def status():
     masked = config.get_masked_config()
     for k, v in masked.items():
         table.add_row(k, v)
-        
+
     console.print(table)
+
+
+@app.command("doctor")
+def doctor(
+    port: int = typer.Option(18789, help="Gateway port to probe."),
+):
+    """Diagnose an install end to end: Python, config, secret store, database,
+    gateway, agents, vendor CLIs. Exit code 1 if anything is broken."""
+    import shutil
+
+    warnings_n = 0
+    errors_n = 0
+
+    def ok(label, detail=""):
+        console.print(f"[green][OK][/green] {label}" + (f" - {detail}" if detail else ""))
+
+    def warn(label, remedy=""):
+        nonlocal warnings_n
+        warnings_n += 1
+        console.print(f"[yellow][!][/yellow]  {label}")
+        if remedy:
+            console.print(f"     [dim]{remedy}[/dim]")
+
+    def bad(label, remedy=""):
+        nonlocal errors_n
+        errors_n += 1
+        console.print(f"[red][X][/red]  {label}")
+        if remedy:
+            console.print(f"     [dim]{remedy}[/dim]")
+
+    console.print("[bold cyan]=== BatonCadence Doctor ===[/bold cyan]\n")
+
+    # 1. Python
+    v = sys.version_info
+    if v >= (3, 9):
+        ok(f"Python {v.major}.{v.minor}.{v.micro}")
+    else:
+        bad(f"Python {v.major}.{v.minor} is too old (3.9+ required)",
+            "Re-run the installer; it finds or installs a supported Python.")
+
+    # 2. Config home
+    from mco.config import resolve_env_path
+    env_path = resolve_env_path()
+    config = get_config()
+    if env_path.is_file():
+        token = (config.get("MCO_LOCAL_TOKEN") or "").strip()
+        ok(f"Config: {env_path}",
+           "MCO_LOCAL_TOKEN set" if token else "no MCO_LOCAL_TOKEN")
+        if not token:
+            warn("No MCO_LOCAL_TOKEN - the console cannot authenticate in Local-Only mode",
+                 "Run the installer or 'mco setup' to generate one.")
+    else:
+        warn(f"No config file at {env_path}", "Run 'mco setup' to create one.")
+
+    # 3. Secret store
+    store = get_secret_store()
+    if not store.is_initialized():
+        ok("Secret store: off (plaintext .env mode)")
+    elif store.is_unlocked or store.auto_unlock():
+        ok("Secret store: unlocked")
+    else:
+        warn(f"Secret store at {store._path} is locked (no working key)",
+             "Run 'mco setup --menu' -> security to unlock or recreate it. "
+             "Config still loads from .env meanwhile.")
+
+    # 4. Edition
+    from mco.editions import current_edition
+    ok(f"Edition: {current_edition()}", "see 'mco edition' for the feature matrix")
+
+    # 5. Database
+    from mco.orchestrator.routes import get_db_client, decorate_presence, get_offline_after_seconds
+    db = get_db_client()
+    if db is None:
+        warn("No database (MCO_DISABLE_LOCAL_DB is set?)",
+             "Unset MCO_DISABLE_LOCAL_DB or configure Supabase via 'mco setup'.")
+    else:
+        backend = getattr(db, "backend", "supabase")
+        try:
+            res = db.table("agent_registry").select("*").execute()
+            agents = res.data or []
+            if backend == "local":
+                ok("Database: embedded LocalStore (~/.mco/local.db)")
+            else:
+                ok("Database: Supabase reachable")
+            threshold = get_offline_after_seconds()
+            online = sum(1 for a in agents
+                         if decorate_presence(dict(a), threshold)["effective_status"] == "online")
+            ok(f"Agents: {len(agents)} registered, {online} online",
+               f"threshold {threshold}s")
+        except Exception as e:
+            bad(f"Database query failed ({backend}): {e}",
+                "Check SUPABASE_URL/SUPABASE_KEY, or file permissions on ~/.mco/local.db.")
+
+    # 6. Gateway
+    try:
+        import requests
+        r = requests.get(f"http://127.0.0.1:{port}/healthz", timeout=3)
+        if r.ok:
+            paused = (r.json() or {}).get("paused")
+            ok(f"Gateway: answering on port {port}" + (" (PAUSED by kill switch)" if paused else ""))
+            if paused:
+                warn("Kill switch is active - no new jobs or leases",
+                     "Turn it off in the Control Panel -> Settings -> Governance.")
+        else:
+            warn(f"Gateway on port {port} answered HTTP {r.status_code}")
+    except Exception:
+        warn(f"Gateway not running on port {port}",
+             "Start it with 'mco start' (background) or 'mco serve' (foreground).")
+
+    # 7. Vendor CLIs (informational - only matters for the roles you use)
+    found = []
+    for cli_name in ("claude", "codex", "gemini", "git", "docker"):
+        found.append(f"{cli_name} [{'green]yes[/green' if shutil.which(cli_name) else 'dim]no[/dim'}]")
+    console.print("     Vendor CLIs: " + "  ".join(found))
+
+    # 8. Notifications
+    ntfy_cfg = get_ntfy_config()
+    if ntfy_cfg.get("server") and ntfy_cfg.get("topic"):
+        ok(f"Notifications: ntfy -> {ntfy_cfg['server']}/{ntfy_cfg['topic']}")
+    else:
+        console.print("     [dim]Notifications: off (set NTFY_TOPIC to enable push alerts)[/dim]")
+
+    console.print()
+    if errors_n:
+        console.print(f"[red]Result: {errors_n} error(s), {warnings_n} warning(s).[/red]")
+        raise typer.Exit(code=1)
+    if warnings_n:
+        console.print(f"[yellow]Result: {warnings_n} warning(s), no errors.[/yellow]")
+    else:
+        console.print("[green]Result: everything checks out.[/green]")
 
 
 @app.command("register")
