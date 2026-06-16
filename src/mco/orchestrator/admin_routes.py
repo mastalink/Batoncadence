@@ -19,6 +19,7 @@ Design rules:
 
 import hashlib
 import logging
+import re
 import secrets as _secrets
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,6 +29,11 @@ from mco.editions import edition_summary
 from mco.orchestrator.auth import KNOWN_SCOPES, normalize_scopes, require_scopes
 
 logger = logging.getLogger("mco.orchestrator.admin")
+
+# instance_id / role are rendered into the dashboard (and into shell-free
+# argv elsewhere); constrain them to a safe identifier charset so a crafted
+# value can never break out of an HTML/JS context in the Control Panel.
+_IDENT_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 agents_admin_router = APIRouter(prefix="/api/agents")
 settings_router = APIRouter(prefix="/api/settings")
@@ -112,6 +118,11 @@ async def register_agent(payload: dict, caller: dict = Depends(require_scopes("a
     role = (payload.get("role") or "").strip()
     if not instance_id or not role:
         raise HTTPException(status_code=400, detail="instance_id and role are required")
+    if not _IDENT_RE.match(instance_id) or not _IDENT_RE.match(role):
+        raise HTTPException(
+            status_code=400,
+            detail="instance_id and role may contain only letters, digits, and . _ : - (max 64 chars)",
+        )
 
     scopes = normalize_scopes(payload.get("scopes"))
     unknown = [s for s in scopes if s not in KNOWN_SCOPES]

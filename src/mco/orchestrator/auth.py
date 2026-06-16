@@ -227,7 +227,7 @@ async def require_agent(
         local_token = (get_config().get("MCO_LOCAL_TOKEN") or "").strip()
         bearer = extract_bearer(authorization)
         if local_token:
-            if bearer != local_token:
+            if not hmac.compare_digest(bearer or "", local_token):
                 raise HTTPException(
                     status_code=401,
                     detail="Invalid token. Paste the MCO_LOCAL_TOKEN shown in your server window.",

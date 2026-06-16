@@ -11,6 +11,7 @@ localhost by default). Set MCO_METRICS_TOKEN to require `Authorization: Bearer
 <token>` - use it whenever the gateway is network-exposed.
 """
 
+import hmac
 import logging
 
 from fastapi import APIRouter, Header, HTTPException, Response
@@ -111,7 +112,7 @@ async def metrics(authorization: str = Header(default="")):
     token = (get_config().get("MCO_METRICS_TOKEN") or "").strip()
     if token:
         from mco.orchestrator.auth import extract_bearer
-        if extract_bearer(authorization) != token:
+        if not hmac.compare_digest(extract_bearer(authorization) or "", token):
             raise HTTPException(status_code=401, detail="Invalid or missing metrics token")
     body = render_metrics()
     return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")

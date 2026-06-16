@@ -188,7 +188,7 @@ let SCOPES = ["admin","agents:manage","agents:read","context:read","context:writ
 let opsTimer = null;
 
 function esc(s) {
-  return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+  return String(s ?? "").replace(/[&<>"'/]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;","/":"&#47;"}[c]));
 }
 function short(id) { return String(id ?? "").slice(0, 8); }
 function badge(s) { return `<span class="badge s-${esc(s)}">${esc(s)}</span>`; }
@@ -346,7 +346,7 @@ async function loadAgents() {
       <td class="muted">${(a.scopes || []).map(esc).join(", ") || "role defaults"}</td>
       <td>${badge(a.effective_status || a.status)}<br>
           <span class="muted" style="font-size:.72rem">seen ${ago(a.last_seen_seconds)}</span></td>
-      <td><button onclick='openEdit(${JSON.stringify(JSON.stringify(a))})'>Edit</button>
+      <td><button onclick="openEdit(${esc(JSON.stringify(a))})">Edit</button>
           <button onclick="resetToken('${esc(a.instance_id)}','${esc(a.role)}')">Reset token</button>
           <button class="no" onclick="deleteAgent('${esc(a.instance_id)}')">Delete</button></td></tr>`).join("")
       : '<tr><td colspan="6" class="muted">No agents registered yet.</td></tr>';
@@ -392,8 +392,7 @@ async function registerAgent() {
   } catch (e) { $("reg-msg").textContent = e.message; }
 }
 
-function openEdit(json) {
-  const a = JSON.parse(json);
+function openEdit(a) {
   openModal(`<h3>Edit '${esc(a.instance_id)}'</h3>
     <div class="formgrid">
       <label>Role</label><input id="ed-role" value="${esc(a.role)}">
