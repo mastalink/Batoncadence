@@ -1,3 +1,6 @@
+# Personal / local-only docs (kept out of the repo deliberately)
+docs/TEST_PLAN.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
