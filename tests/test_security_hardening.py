@@ -119,3 +119,92 @@ def test_ws_local_only_no_token_allows_loopback(monkeypatch):
     client = TestClient(app)
     with client.websocket_connect("/ws/broadcast") as ws:
         ws.send_json({"type": "ping", "payload": {}})
+
+
+# ── Constant-time token comparison (no `!=` timing oracle) ───────────────────
+# Local-Only HTTP auth and /metrics both compare a caller-supplied token to a
+# server secret. They must use hmac.compare_digest so a network attacker can't
+# recover the token byte-by-byte from response timing (security findings #2/#3).
+
+def _http_local_app(monkeypatch, local_token):
+    """Minimal app whose one route depends on the real require_agent, in
+    Local-Only mode (no DB) with a given MCO_LOCAL_TOKEN."""
+    from fastapi import Depends, FastAPI
+    import mco.orchestrator.auth as auth_mod
+    import mco.orchestrator.routes as routes
+    from mco.orchestrator.auth import require_agent
+
+    monkeypatch.setattr(routes, "get_db_client", lambda: None, raising=True)
+    monkeypatch.setattr(auth_mod, "get_config",
+                        lambda: {"MCO_LOCAL_TOKEN": local_token}, raising=True)
+
+    app = FastAPI()
+
+    @app.get("/whoami")
+    def whoami(agent: dict = Depends(require_agent)):
+        return agent
+
+    return app
+
+
+def test_http_local_token_rejects_wrong(monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(_http_local_app(monkeypatch, "s3cret"))
+    assert client.get("/whoami", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    # a right-length-wrong-value token is rejected the same way (no oracle)
+    assert client.get("/whoami", headers={"Authorization": "Bearer s3creT"}).status_code == 401
+
+
+def test_http_local_token_accepts_right(monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(_http_local_app(monkeypatch, "s3cret"))
+    assert client.get("/whoami", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+def _metrics_app(monkeypatch, token):
+    from fastapi import FastAPI
+    import mco.orchestrator.metrics_routes as metrics_mod
+
+    monkeypatch.setattr(metrics_mod, "get_config",
+                        lambda: {"MCO_METRICS_TOKEN": token}, raising=True)
+    # Keep it unit-level: don't hit the real board/fleet to render.
+    monkeypatch.setattr(metrics_mod, "render_metrics", lambda: "# ok\n", raising=True)
+
+    app = FastAPI()
+    app.include_router(metrics_mod.metrics_router)
+    return app
+
+
+def test_metrics_rejects_wrong_token(monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(_metrics_app(monkeypatch, "metpass"))
+    assert client.get("/metrics", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_metrics_accepts_right_token(monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(_metrics_app(monkeypatch, "metpass"))
+    assert client.get("/metrics", headers={"Authorization": "Bearer metpass"}).status_code == 200
+
+
+def test_metrics_open_without_token(monkeypatch):
+    """No MCO_METRICS_TOKEN => open like /healthz (loopback bind)."""
+    from fastapi.testclient import TestClient
+    client = TestClient(_metrics_app(monkeypatch, ""))
+    assert client.get("/metrics").status_code == 200
+
+
+def test_token_compares_stay_constant_time_in_source():
+    """Lock the fix: the timing-unsafe `!=` forms must never come back, and
+    hmac.compare_digest must remain the comparison primitive."""
+    import pathlib
+    import mco
+    root = pathlib.Path(mco.__file__).parent
+    auth_src = (root / "orchestrator" / "auth.py").read_text(encoding="utf-8")
+    metrics_src = (root / "orchestrator" / "metrics_routes.py").read_text(encoding="utf-8")
+
+    assert "hmac.compare_digest(bearer" in auth_src
+    assert "bearer != local_token" not in auth_src
+
+    assert "hmac.compare_digest(extract_bearer" in metrics_src
+    assert "extract_bearer(authorization) != token" not in metrics_src

@@ -126,6 +126,37 @@ class TestRegisterAgent:
         assert resp.json()["agent"]["org_id"] == "acme"
 
 
+class TestInstanceIdValidation:
+    """Stored-XSS defense-in-depth: instance_id/role are rendered into the
+    Control Panel, so the register endpoint must reject anything outside a safe
+    identifier charset before it can reach an HTML/JS sink (security finding #1).
+    """
+
+    @pytest.mark.parametrize("bad", [
+        "x' onmouseover='alert(1)",          # single-quote attribute breakout
+        'x"><script>alert(1)</script>',      # tag injection
+        "a/b",                                # path-ish / slash
+        "has space",                          # whitespace
+        "x" * 65,                             # over the 64-char bound
+    ])
+    def test_unsafe_instance_id_rejected(self, bad):
+        resp = _ctx().http.post("/api/agents", json={"instance_id": bad, "role": "codex"})
+        assert resp.status_code == 400
+        assert _ctx().db._agents == []        # nothing persisted
+
+    def test_unsafe_role_rejected(self):
+        resp = _ctx().http.post("/api/agents", json={
+            "instance_id": "ok-worker", "role": "co'dex"})
+        assert resp.status_code == 400
+        assert _ctx().db._agents == []
+
+    @pytest.mark.parametrize("good", ["codex-worker-2", "claude.research_01", "sso:joe", "A1"])
+    def test_safe_identifiers_accepted(self, good):
+        resp = _ctx().http.post("/api/agents", json={"instance_id": good, "role": "codex"})
+        assert resp.status_code == 200
+        assert resp.json()["agent"]["instance_id"] == good
+
+
 class TestOrgAllowlist:
     def test_unknown_org_is_rejected_not_minted(self):
         """The Baton-worker accident: a typo'd org must never create a tenant."""
