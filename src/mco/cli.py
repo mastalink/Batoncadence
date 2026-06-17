@@ -1125,12 +1125,19 @@ def _gateway_client():
     from get_config() (which layers .env + the AES-256-GCM secret store over
     the OS environment), so `mco workflow|approve|sync|...` work from any shell
     once the token is in .env or the vault - no per-shell `set` required.
+
+    Local-Only zero-config: the gateway seeds its operator agent from
+    MCO_LOCAL_TOKEN, so when no explicit MCO_AGENT_TOKEN is configured we fall
+    back to it. Without this, the operator commands (send/approve/workflow/
+    sync/audit) return 401 on a fresh Local-Only install whose .env only has
+    MCO_LOCAL_TOKEN - the exact papercut a non-technical user hits first.
     """
     from mco.orchestrator.client import GatewayClient
     config = get_config()
+    token = config.get("MCO_AGENT_TOKEN") or config.get("MCO_LOCAL_TOKEN") or None
     return GatewayClient(
         base_url=config.get("MCO_GATEWAY_URL") or None,
-        token=config.get("MCO_AGENT_TOKEN") or None,
+        token=token,
         role=config.get("AGENT_ROLE") or None,
         instance_id=config.get("AGENT_INSTANCE_ID") or None,
     )
