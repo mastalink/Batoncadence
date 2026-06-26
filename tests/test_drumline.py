@@ -118,6 +118,47 @@ class TestRememberRecall:
         assert "\x00" not in entry["content"]
         assert len(entry["content"]) == MAX_CONTENT_CHARS
 
+    # ── Deduplication ─────────────────────────────────────────────────────
+
+    def test_duplicate_remember_does_not_create_second_row(self):
+        """Calling remember() twice with identical (title, kind, content, org_id)
+        must store exactly one entry — the second call is a no-op."""
+        db = FakeDB()
+        first = remember(db, title="Cache hit rate dropped",
+                         content="p99 latency up 40ms after deploy.",
+                         kind="fact", org_id="default")
+        assert first is not None
+        second = remember(db, title="Cache hit rate dropped",
+                          content="p99 latency up 40ms after deploy.",
+                          kind="fact", org_id="default")
+        assert second is None, "duplicate remember() should return None"
+        assert len(db._context) == 1, "only one row should be stored"
+
+    def test_duplicate_different_org_is_allowed(self):
+        """Same content in different orgs must be stored independently."""
+        db = FakeDB()
+        e1 = remember(db, title="Key fact", content="body", kind="fact", org_id="org-a")
+        e2 = remember(db, title="Key fact", content="body", kind="fact", org_id="org-b")
+        assert e1 is not None
+        assert e2 is not None
+        assert len(db._context) == 2
+
+    def test_duplicate_different_kind_is_allowed(self):
+        """Same title+content with a different kind is a distinct entry."""
+        db = FakeDB()
+        e1 = remember(db, title="Deploy step", content="restart nginx", kind="fact")
+        e2 = remember(db, title="Deploy step", content="restart nginx", kind="decision")
+        assert e1 is not None
+        assert e2 is not None
+        assert len(db._context) == 2
+
+    def test_remember_stores_content_hash(self):
+        """Each stored entry carries a content_hash field for future dedup queries."""
+        db = FakeDB()
+        entry = remember(db, title="t", content="c", kind="fact")
+        assert "content_hash" in entry
+        assert len(entry["content_hash"]) == 64  # SHA-256 hex digest
+
 
 # ── Distillation ──────────────────────────────────────────────────────────────
 

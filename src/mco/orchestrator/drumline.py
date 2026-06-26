@@ -22,6 +22,7 @@ changing any caller.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from typing import Any, List, Optional
@@ -30,6 +31,9 @@ logger = logging.getLogger("mco.drumline")
 
 CONTEXT_TABLE = "agent_context"
 KINDS = ("fact", "decision", "lesson", "handoff", "artifact")
+
+# Maximum number of existing rows scanned for duplicate detection.
+_DEDUP_SCAN_LIMIT = 500
 FETCH_WINDOW = 200          # newest entries considered per recall
 MAX_CONTENT_CHARS = 2000    # stored content cap
 DISTILL_PROMPT_CHARS = 280  # how much of the ask survives distillation
@@ -62,6 +66,45 @@ def _strip_control_chars(text: str) -> str:
     return _CONTROL_CHARS_RE.sub("", text or "")
 
 
+def _content_hash(title: str, kind: str, content: str, org_id: str, role: str = "") -> str:
+    """SHA-256 fingerprint of the logical identity of a context entry.
+
+    The hash covers (title, kind, content, org_id, role) — the full logical
+    identity of an entry — using post-sanitisation, post-truncation values so
+    two calls with identical effective content always produce the same hash.
+    Role is included so the same fact written for different agent roles is
+    stored as separate, independently recallable entries.
+    """
+    key = "\x00".join([title[:300], kind, content[:MAX_CONTENT_CHARS], org_id or "default", role or ""])
+    return hashlib.sha256(key.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _is_duplicate(db_client: Any, content_hash: str, org_id: str) -> bool:
+    """Return True if an entry with this content_hash already exists in the DB.
+
+    Fetches a bounded window of recent rows and checks in Python so the same
+    logic works across LocalStore (SQLite) and Supabase without schema changes
+    — neither backend needs a content_hash index to be correct, only fast.
+    """
+    try:
+        res = (
+            db_client.table(CONTEXT_TABLE)
+            .select("content_hash")
+            .order("created_at", desc=True)
+            .limit(_DEDUP_SCAN_LIMIT)
+            .execute()
+        )
+    except Exception:
+        return False  # on error, allow the write rather than silently swallow
+    effective_org = org_id or "default"
+    for row in (res.data or []):
+        if (row.get("org_id") or "default") != effective_org:
+            continue
+        if row.get("content_hash") == content_hash:
+            return True
+    return False
+
+
 # ── Writing memory ────────────────────────────────────────────────────────────
 
 def remember(
@@ -90,16 +133,27 @@ def remember(
     content = _strip_control_chars(content)
     if not title or not content:
         return None
+    title_stored = title[:300]
+    content_stored = content[:MAX_CONTENT_CHARS]
+    effective_org = org_id or "default"
+    chash = _content_hash(title_stored, kind, content_stored, effective_org, role or "")
+
+    # Deduplication: skip the write if an identical entry already exists.
+    if _is_duplicate(db_client, chash, effective_org):
+        logger.debug("Drumline remember: duplicate skipped (hash=%s)", chash[:12])
+        return None
+
     data = {
         "scope": scope,
         "role": (role or None),
         "kind": kind,
-        "title": title[:300],
-        "content": content[:MAX_CONTENT_CHARS],
+        "title": title_stored,
+        "content": content_stored,
         "tags": [t.strip().lower() for t in (tags or []) if t and t.strip()],
         "created_by": created_by,
         "source_job_id": source_job_id,
         "weight": max(0.1, min(float(weight), 5.0)),
+        "content_hash": chash,
     }
     # Tenant stamp (omitted for the default org so pre-migration DBs keep working).
     if org_id and org_id != "default":
