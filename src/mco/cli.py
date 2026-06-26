@@ -126,6 +126,13 @@ def create_app() -> FastAPI:
         description="FastAPI WebSocket and REST Hub for Agent Job Coordination."
     )
 
+    # Per-token (fallback per-IP) rate limiting — exempt /healthz, configurable
+    # via MCO_RATE_LIMIT (requests/min); defaults to 120; set to 0 to disable.
+    from mco.ratelimit import build_rate_limit_store, RateLimitMiddleware
+    _rl_store = build_rate_limit_store()
+    if _rl_store is not None:
+        app_server.add_middleware(RateLimitMiddleware, store=_rl_store)
+
     # Mount REST routing
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
