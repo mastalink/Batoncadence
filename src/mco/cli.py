@@ -1268,9 +1268,61 @@ def run_workflow(
         console.print(f"  {step_id} -> {job_id}")
 
 
+def _audit_verify(job_id: str) -> None:
+    """Walk a job's audit hash chain locally and print the verdict.
+
+    Verification reads the data plane directly (LocalStore or Supabase) rather
+    than going through the gateway, because integrity is a property of the
+    stored chain itself, not of any single API response.
+    """
+    from mco.orchestrator.audit import verify_chain
+    from mco.orchestrator.routes import get_db_client
+
+    db_client = get_db_client()
+    if db_client is None:
+        console.print("[red][ERROR] No data plane configured; cannot verify audit chain.[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        report = verify_chain(db_client, job_id)
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to verify audit chain: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    signed = " (HMAC-signed)" if report.get("signed") else ""
+    if report["ok"]:
+        console.print(
+            f"[bold green][OK][/bold green] Audit chain for job {job_id} is intact: "
+            f"{report['count']} event(s) verified{signed}."
+        )
+        return
+
+    console.print(
+        f"[bold red][TAMPERED][/bold red] Audit chain for job {job_id} is BROKEN "
+        f"at event #{report['broken_at']} of {report['count']}{signed}."
+    )
+    if report.get("reason"):
+        console.print(f"[red]  {report['reason']}[/red]")
+    raise typer.Exit(code=1)
+
+
 @app.command("audit")
-def audit_trail(job_id: str = typer.Argument(..., help="Job ID to inspect.")):
-    """Print a job's immutable audit trail (oldest event first)."""
+def audit_trail(
+    job_id: str = typer.Argument(..., help="Job ID to inspect."),
+    verify: bool = typer.Option(
+        False, "--verify",
+        help="Walk the hash chain and report OK or the first broken link.",
+    ),
+):
+    """Print a job's immutable audit trail (oldest event first).
+
+    With --verify, instead of printing the trail, walk the tamper-evident hash
+    chain end-to-end and report whether it is intact. Exits non-zero if any
+    link is broken, so it can gate CI / compliance checks.
+    """
+    if verify:
+        _audit_verify(job_id)
+        return
     try:
         events = _gateway_client().events(job_id)
     except Exception as e:
