@@ -194,6 +194,36 @@ def test_metrics_open_without_token(monkeypatch):
     assert client.get("/metrics").status_code == 200
 
 
+# ── Bind-safety guard: don't expose the gateway on a network interface ───────
+# (audit findings C-01 / H-01: zero-config Local-Only auth grants admin, which
+# is only dangerous when the gateway is reachable off-loopback.)
+
+def test_bind_guard_blocks_exposed_without_auth():
+    import typer
+    import mco.cli as cli
+    for host in ("0.0.0.0", "10.0.0.5", "::"):
+        with pytest.raises(typer.Exit):
+            cli._assert_safe_bind(host, {})
+
+
+def test_bind_guard_allows_loopback():
+    import mco.cli as cli
+    for host in ("127.0.0.1", "localhost", "::1", "127.0.1.1", ""):
+        cli._assert_safe_bind(host, {})  # must not raise
+
+
+def test_bind_guard_allows_exposed_with_token_or_db():
+    import mco.cli as cli
+    cli._assert_safe_bind("0.0.0.0", {"MCO_LOCAL_TOKEN": "s3cret"})  # token set
+    cli._assert_safe_bind("0.0.0.0", {"SUPABASE_URL": "https://x.supabase.co",
+                                      "SUPABASE_KEY": "anon-key"})    # cloud DB
+    # placeholder URL is not a real DB -> still blocked
+    import typer
+    with pytest.raises(typer.Exit):
+        cli._assert_safe_bind("0.0.0.0", {"SUPABASE_URL": "encrypted_in_secret_store",
+                                          "SUPABASE_KEY": "x"})
+
+
 def test_token_compares_stay_constant_time_in_source():
     """Lock the fix: the timing-unsafe `!=` forms must never come back, and
     hmac.compare_digest must remain the comparison primitive."""

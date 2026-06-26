@@ -345,6 +345,41 @@ def create_app() -> FastAPI:
     return app_server
 
 
+def _is_loopback_host(host: str) -> bool:
+    h = (host or "").strip().lower()
+    return h in ("127.0.0.1", "::1", "localhost", "") or h.startswith("127.")
+
+
+def _assert_safe_bind(host: str, config) -> None:
+    """Refuse to expose the gateway on a network interface without auth.
+
+    A non-loopback bind is reachable from the network. In zero-config mode (no
+    MCO_LOCAL_TOKEN and no cloud database) the Local-Only auth fallback would
+    grant admin to any caller, so we hard-stop and tell the operator to set a
+    token. Localhost (the default) is unaffected — the zero-config experience
+    stays intact.
+    """
+    if _is_loopback_host(host):
+        return
+    has_token = bool((config.get("MCO_LOCAL_TOKEN") or "").strip())
+    url = config.get("SUPABASE_URL")
+    key = config.get("SUPABASE_KEY")
+    has_cloud_db = bool(url and key and url != "encrypted_in_secret_store")
+    if has_token or has_cloud_db:
+        return
+    console.print(Panel.fit(
+        f"[bold red]Refusing to bind to {host} without authentication.[/bold red]\n"
+        f"A non-loopback bind is reachable from the network, and no MCO_LOCAL_TOKEN\n"
+        f"(or cloud database) is configured — anyone who can reach this port would\n"
+        f"get admin access.\n\n"
+        f"[bold]Fix one of:[/bold]\n"
+        f"  - Set MCO_LOCAL_TOKEN (run 'mco setup'), or\n"
+        f"  - Bind to localhost: --host 127.0.0.1 (the default), or\n"
+        f"  - Configure a cloud database (Supabase).",
+        border_style="red"))
+    raise typer.Exit(code=1)
+
+
 @app.command("serve")
 def serve(
     host: str = typer.Option("127.0.0.1", help="The host to bind to."),
@@ -353,6 +388,11 @@ def serve(
     """Start the BatonCadence FastAPI WebSocket/REST API Server."""
     from mco.logging_setup import configure_logging
     configure_logging()
+
+    # Trigger dynamic decrypt/load, then refuse unsafe network exposure.
+    config = get_config()
+    _assert_safe_bind(host, config)
+
     console.print(Panel.fit(
         f"[bold green]Starting BatonCadence Server[/bold green]\n"
         f"Host: http://{host}:{port}\n"
@@ -360,9 +400,6 @@ def serve(
         f"WebSocket: ws://{host}:{port}/ws/broadcast",
         border_style="green"
     ))
-
-    # Trigger dynamic decrypt/load
-    config = get_config()
 
     app_server = create_app()
 
@@ -496,6 +533,10 @@ def start(
 
     import psutil
     import requests
+
+    # Refuse unsafe network exposure before backgrounding (visible feedback;
+    # serve enforces it too).
+    _assert_safe_bind(host, get_config())
 
     # Refuse to double-start: is something already listening on the port?
     for conn in psutil.net_connections(kind="tcp"):
