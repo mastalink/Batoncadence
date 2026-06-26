@@ -92,7 +92,10 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        try:
+            self.active_connections.remove(websocket)
+        except ValueError:
+            pass  # already removed (concurrent disconnect)
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
@@ -322,8 +325,7 @@ def create_app() -> FastAPI:
                 except Exception:
                     pass
         except WebSocketDisconnect:
-            if websocket in ws_manager.active_connections:
-                ws_manager.disconnect(websocket)
+            ws_manager.disconnect(websocket)
             
             # Set agent to offline on disconnect + ntfy notification
             if authenticated_instance_id and db_client:

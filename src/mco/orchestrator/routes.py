@@ -229,7 +229,7 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
         # Governance columns are only sent when used (pre-migration DB compatibility).
         if requires_approval:
             data["requires_approval"] = True
-        if max_retries:
+        if max_retries is not None:
             data["max_retries"] = max_retries
         if escalate_to_role:
             data["escalate_to_role"] = escalate_to_role
