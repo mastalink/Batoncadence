@@ -1,0 +1,9 @@
+# Shell scripts are served to macOS/Linux (curl | bash) and run directly —
+# they must always check out with LF endings, even on Windows dev machines.
+*.sh   text eol=lf
+*.bash text eol=lf
+install.sh text eol=lf
+
+# Keep batch/PowerShell installers as CRLF (Windows).
+*.bat  text eol=crlf
+*.ps1  text eol=crlf

@@ -18,15 +18,21 @@ GRN='\033[0;32m'; CYN='\033[0;36m'; YLW='\033[0;33m'; RED='\033[0;31m'; NC='\033
 
 REPO="https://github.com/mastalink/Batoncadence"
 
+# If we're being piped (curl | bash), bash reads THIS script from stdin — so a
+# later `exec </dev/tty` (needed for interactive prompts) hijacks bash's command
+# stream and drops the user into a shell instead of installing. Re-exec from a
+# real file with the terminal as stdin so `curl | bash` and `bash <(curl ...)`
+# behave identically.
+if [ ! -t 0 ]; then
+    _self="$(mktemp)"
+    curl -fsSL "https://batoncadence.com/install.sh" > "$_self"
+    exec bash "$_self" </dev/tty
+fi
+
 echo ""
 echo -e "${CYN}  BatonCadence installer${NC}"
 echo -e "${CYN}  =======================${NC}"
 echo ""
-
-# Restore terminal stdin if we were piped through curl
-if [ ! -t 0 ]; then
-    exec </dev/tty
-fi
 
 # ── 1. Locate an existing install ──────────────────────────────────────────
 find_existing() {
