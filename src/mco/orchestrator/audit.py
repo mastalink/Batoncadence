@@ -97,7 +97,7 @@ def _resolve_audit_hmac_key() -> Optional[bytes]:
             return None
         return raw.encode("utf-8")
     except Exception as e:  # pragma: no cover - defensive
-        logger.debug(f"Audit HMAC key unavailable: {e}")
+        logger.debug(f"Audit HMAC key unavailable: {type(e).__name__}")
         return None
 
 
@@ -129,7 +129,7 @@ def _last_event(db_client: Any, job_id: str) -> Optional[dict]:
         rows = res.data or []
         return rows[-1] if rows else None
     except Exception as e:
-        logger.warning(f"Could not read prior audit event for job {job_id}: {e}")
+        logger.warning(f"Could not read prior audit event for job {job_id}: {type(e).__name__}")
         return None
 
 
@@ -173,7 +173,7 @@ def record_event(
         db_client.table(EVENTS_TABLE).insert(record).execute()
         return True
     except Exception as e:
-        logger.warning(f"Audit write skipped for job {job_id} ({event}): {e}")
+        logger.warning(f"Audit write skipped for job {job_id} ({event}): {type(e).__name__}")
         return False
 
 
@@ -191,7 +191,7 @@ def get_events(db_client: Any, job_id: str) -> list:
         )
         return res.data or []
     except Exception as e:
-        logger.error(f"Error fetching audit events for job {job_id}: {e}")
+        logger.error(f"Error fetching audit events for job {job_id}: {type(e).__name__}")
         return []
 
 
