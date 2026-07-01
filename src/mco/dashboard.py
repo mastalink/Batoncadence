@@ -5,18 +5,28 @@ Single static HTML page, no build step - a System-Settings-style control
 panel with full CLI parity:
 
 - Lock screen: nothing renders until a bearer token authenticates.
-- Operations: approval queue (approve/reject), job board (+retry), audit viewer.
+- Operations: approval queue (approve/reject), job board (+retry), audit
+  viewer, "+ New job" (`mco send` parity).
 - Agents: register (token shown once), reset token, edit role/scopes/status,
   delete - the `mco register` surface, point-and-click.
+- Model Connections: add/edit/delete/test named connections to LLM providers
+  (Anthropic, OpenAI, Gemini, or a custom OpenAI-compatible endpoint) for
+  custom workers that need one. Not a chat gateway - BatonCadence orchestrates
+  agents, it doesn't call a model on their behalf. Keys are write-only,
+  mirroring every other secret in the Control Panel.
 - Workflows: paste YAML, submit a governed DAG (`mco workflow` parity).
+- Diagnostics: health checks for the machine running this gateway
+  (`mco doctor` / `mco status` parity) plus schema-migration status and an
+  Apply action (`mco upgrade` parity).
 - Settings: server-driven groups (governance, memory, edition, security,
   notifications) rendered from /api/settings metadata - the whitelist on the
   server is the single source of truth. Plus the edition matrix and
-  connector health/sync.
+  connector health/sync/"Run action..." (`mco platform` parity).
 
 Auth model: the operator pastes a token once (kept in localStorage). Every
 panel degrades by scope - a jobs:read token sees operations; agents:manage
-unlocks the agent panel; settings require admin.
+unlocks the agent panel; settings, model connections, and diagnostics
+require admin.
 """
 
 DASHBOARD_HTML = r'''<!DOCTYPE html>
@@ -115,7 +125,9 @@ DASHBOARD_HTML = r'''<!DOCTYPE html>
     <div class="brand">&#129345; BatonCadence</div>
     <button id="nav-ops" class="active" onclick="nav('ops')">Operations</button>
     <button id="nav-agents" onclick="nav('agents')">Agents &amp; Tokens</button>
+    <button id="nav-models" onclick="nav('models')">Model Connections</button>
     <button id="nav-workflows" onclick="nav('workflows')">Workflows</button>
+    <button id="nav-diag" onclick="nav('diag')">Diagnostics</button>
     <button id="nav-settings" onclick="nav('settings')">Settings</button>
     <div style="margin-top:1.2rem; padding:0 .8rem">
       <span id="conn" class="muted" style="font-size:.75rem"></span><br>
@@ -126,7 +138,8 @@ DASHBOARD_HTML = r'''<!DOCTYPE html>
   <main>
     <!-- ── Operations ─────────────────────────────────────────── -->
     <section id="view-ops" class="view on">
-      <div class="topbar"><h1>Operations</h1></div>
+      <div class="topbar"><h1>Operations</h1>
+        <button class="primary" onclick="openNewJob()">+ New job</button></div>
       <h2>Approval Queue</h2>
       <table><thead><tr><th>Job</th><th>Title</th><th>Target</th><th>From</th><th>Decide</th></tr></thead>
       <tbody id="approvals"><tr><td colspan="5" class="muted">-</td></tr></tbody></table>
@@ -151,6 +164,16 @@ DASHBOARD_HTML = r'''<!DOCTYPE html>
       <p id="agents-msg" class="err"></p>
     </section>
 
+    <!-- ── Model Connections ──────────────────────────────────── -->
+    <section id="view-models" class="view">
+      <div class="topbar"><h1>Model Connections</h1>
+        <button class="primary" onclick="openAddModel()">+ Add connection</button></div>
+      <p class="muted" style="font-size:.83rem">Named, testable connections to LLM providers, for custom workers/executors that need one. BatonCadence itself orchestrates agents (Claude, Codex, Gemini, ...) rather than calling a model directly - this is credential management, not a chat gateway. Keys are never shown again after saving.</p>
+      <table><thead><tr><th>Name</th><th>Provider</th><th>Model</th><th>Key</th><th>Actions</th></tr></thead>
+      <tbody id="models"><tr><td colspan="5" class="muted">-</td></tr></tbody></table>
+      <p id="models-msg" class="err"></p>
+    </section>
+
     <!-- ── Workflows ──────────────────────────────────────────── -->
     <section id="view-workflows" class="view">
       <div class="topbar"><h1>Workflows</h1></div>
@@ -159,6 +182,17 @@ DASHBOARD_HTML = r'''<!DOCTYPE html>
       <div style="margin-top:.6rem"><button class="primary" onclick="submitWorkflow()">Submit workflow</button>
       <span id="wf-msg" style="margin-left:.8rem"></span></div>
       <pre id="wf-result" style="margin-top:.8rem"></pre>
+    </section>
+
+    <!-- ── Diagnostics ────────────────────────────────────────── -->
+    <section id="view-diag" class="view">
+      <div class="topbar"><h1>Diagnostics</h1>
+        <button onclick="loadDiagnostics()">Re-run</button></div>
+      <p class="muted" style="font-size:.83rem">Health checks for the machine running this gateway - the <code>mco doctor</code> / <code>mco status</code> surface, over HTTP.</p>
+      <div id="doctor-card" class="card"><h3>Health checks</h3>
+        <table><tbody id="doctor-checks"><tr><td class="muted">-</td></tr></tbody></table></div>
+      <div id="migrations-card" class="card"><h3>Schema migrations</h3>
+        <div id="migrations-body" class="muted">-</div></div>
     </section>
 
     <!-- ── Settings ───────────────────────────────────────────── -->
@@ -228,11 +262,13 @@ function lockUp() {
 
 /* ── navigation ──────────────────────────────────────────────── */
 function nav(view) {
-  for (const v of ["ops","agents","workflows","settings"]) {
+  for (const v of ["ops","agents","models","workflows","diag","settings"]) {
     $("view-" + v).classList.toggle("on", v === view);
     $("nav-" + v).classList.toggle("active", v === view);
   }
   if (view === "agents") loadAgents();
+  if (view === "models") loadModels();
+  if (view === "diag") loadDiagnostics();
   if (view === "settings") loadSettings();
 }
 
@@ -287,6 +323,41 @@ async function showAudit(jobId) {
       : "No audit events.";
     $("audit-panel").style.display = "block";
   } catch (e) { alert("audit fetch failed: " + e.message); }
+}
+
+/* ── new job (mco send parity) ──────────────────────────────────── */
+function openNewJob() {
+  openModal(`<h3>New job</h3>
+    <div class="formgrid">
+      <label>To role</label><input id="nj-role" placeholder="codex">
+      <label>Title</label><input id="nj-title" placeholder="Investigate the checkout 503s">
+      <label>Instructions</label><textarea id="nj-msg" style="min-height:5rem"></textarea>
+      <label>To instance</label><input id="nj-instance" placeholder="(optional - one specific worker)">
+      <label>Require approval</label><label class="switch"><input type="checkbox" id="nj-approve"><span class="slider"></span></label>
+      <label>Max retries</label><input id="nj-retries" type="text" value="0" style="width:5rem">
+      <label>Escalate to role</label><input id="nj-escalate" placeholder="(optional)">
+    </div>
+    <button class="primary" onclick="submitNewJob()">Send</button>
+    <button onclick="closeModal()">Cancel</button>
+    <p id="nj-msg" class="err"></p>`);
+}
+async function submitNewJob() {
+  const role = $("nj-role").value.trim();
+  const title = $("nj-title").value.trim();
+  if (!role || !title) { $("nj-msg").textContent = "Role and title are required."; return; }
+  const retries = parseInt($("nj-retries").value, 10);
+  try {
+    await api("/api/jobs", { method: "POST", body: JSON.stringify({
+      target_agent_role: role,
+      target_agent_id: $("nj-instance").value.trim() || null,
+      title, description: $("nj-msg").value.trim() || title,
+      input_payload: { prompt: $("nj-msg").value.trim() || title },
+      requires_approval: $("nj-approve").checked,
+      max_retries: Number.isFinite(retries) ? retries : 0,
+      escalate_to_role: $("nj-escalate").value.trim() || null,
+    })});
+    closeModal(); refreshOps();
+  } catch (e) { $("nj-msg").textContent = e.message; }
 }
 
 /* ── modal helpers ───────────────────────────────────────────── */
@@ -427,6 +498,101 @@ async function deleteAgent(id) {
   catch (e) { alert("delete failed: " + e.message); }
 }
 
+/* ── model connections ──────────────────────────────────────── */
+let MODEL_PROVIDERS = {};
+
+async function loadModels() {
+  try {
+    const [conns, providers] = await Promise.all([
+      api("/api/llm-connections"), api("/api/llm-connections/providers"),
+    ]);
+    MODEL_PROVIDERS = providers;
+    $("models-msg").textContent = "";
+    $("models").innerHTML = conns.length ? conns.map(c => `
+      <tr><td>${esc(c.name)}</td>
+      <td class="muted">${esc((providers[c.provider] || {}).label || c.provider)}</td>
+      <td class="muted">${esc(c.model || "-")}</td>
+      <td>${c.key_set ? '<span class="good">set</span>' : '<span class="err">not set</span>'}</td>
+      <td><button onclick="testModelConn('${esc(c.id)}')">Test</button>
+          <button onclick="openEditModel(${esc(JSON.stringify(c))})">Edit</button>
+          <button class="no" onclick="deleteModelConn('${esc(c.id)}')">Delete</button></td></tr>`).join("")
+      : '<tr><td colspan="5" class="muted">No model connections yet.</td></tr>';
+  } catch (e) { $("models-msg").textContent = e.message; }
+}
+
+function providerOptions(selected) {
+  return Object.entries(MODEL_PROVIDERS).map(([key, meta]) =>
+    `<option value="${esc(key)}" ${key === selected ? "selected" : ""}>${esc(meta.label)}</option>`).join("");
+}
+
+async function openAddModel() {
+  try { MODEL_PROVIDERS = await api("/api/llm-connections/providers"); } catch (e) { }
+  openModal(`<h3>Add a model connection</h3>
+    <div class="formgrid">
+      <label>Name</label><input id="mc-name" placeholder="prod-anthropic">
+      <label>Provider</label><select id="mc-provider" onchange="toggleModelBaseUrl()">${providerOptions("anthropic")}</select>
+      <label id="mc-baseurl-lbl" style="display:none">Base URL</label>
+      <input id="mc-baseurl" style="display:none" placeholder="http://localhost:11434/v1">
+      <label>Model</label><input id="mc-model" placeholder="claude-opus-4 (optional)">
+      <label>API key</label><input id="mc-key" type="password" placeholder="sk-...">
+    </div>
+    <button class="primary" onclick="submitAddModel()">Add &amp; save</button>
+    <button onclick="closeModal()">Cancel</button>
+    <p id="mc-msg" class="err"></p>`);
+  toggleModelBaseUrl();
+}
+function toggleModelBaseUrl() {
+  const provider = $("mc-provider").value;
+  const editable = !MODEL_PROVIDERS[provider] || MODEL_PROVIDERS[provider].base_url_editable;
+  $("mc-baseurl-lbl").style.display = editable ? "" : "none";
+  $("mc-baseurl").style.display = editable ? "" : "none";
+}
+async function submitAddModel() {
+  try {
+    await api("/api/llm-connections", { method: "POST", body: JSON.stringify({
+      name: $("mc-name").value.trim(), provider: $("mc-provider").value,
+      base_url: $("mc-baseurl").value.trim(), model: $("mc-model").value.trim(),
+      api_key: $("mc-key").value.trim(),
+    })});
+    closeModal(); loadModels();
+  } catch (e) { $("mc-msg").textContent = e.message; }
+}
+
+function openEditModel(c) {
+  const meta = MODEL_PROVIDERS[c.provider] || {};
+  openModal(`<h3>Edit '${esc(c.name)}'</h3>
+    <div class="formgrid">
+      <label>Name</label><input id="me-name" value="${esc(c.name)}">
+      ${meta.base_url_editable ? `<label>Base URL</label><input id="me-baseurl" value="${esc(c.base_url || "")}">` : ""}
+      <label>Model</label><input id="me-model" value="${esc(c.model || "")}">
+      <label>New API key</label><input id="me-key" type="password" placeholder="blank keeps the current key">
+    </div>
+    <button class="primary" onclick="saveEditModel('${esc(c.id)}', ${meta.base_url_editable ? "true" : "false"})">Save</button>
+    <button onclick="closeModal()">Cancel</button>
+    <p id="me-msg" class="err"></p>`);
+}
+async function saveEditModel(id, baseUrlEditable) {
+  const payload = { name: $("me-name").value.trim(), model: $("me-model").value.trim() };
+  if (baseUrlEditable) payload.base_url = $("me-baseurl").value.trim();
+  const key = $("me-key").value.trim();
+  if (key) payload.api_key = key;
+  try {
+    await api(`/api/llm-connections/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    closeModal(); loadModels();
+  } catch (e) { $("me-msg").textContent = e.message; }
+}
+async function testModelConn(id) {
+  try {
+    const res = await api(`/api/llm-connections/${encodeURIComponent(id)}/test`, { method: "POST" });
+    alert(res.ok ? `OK (${res.latency_ms}ms): ${res.detail}` : `Failed: ${res.detail}`);
+  } catch (e) { alert("test failed: " + e.message); }
+}
+async function deleteModelConn(id) {
+  if (!confirm("Delete this connection? Its stored key is removed too.")) return;
+  try { await api(`/api/llm-connections/${encodeURIComponent(id)}`, { method: "DELETE" }); loadModels(); }
+  catch (e) { alert("delete failed: " + e.message); }
+}
+
 /* ── workflows ───────────────────────────────────────────────── */
 async function submitWorkflow() {
   $("wf-msg").textContent = ""; $("wf-result").textContent = "";
@@ -437,6 +603,43 @@ async function submitWorkflow() {
     $("wf-result").textContent = JSON.stringify(res.jobs, null, 2);
     refreshOps();
   } catch (e) { $("wf-msg").innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+}
+
+/* ── diagnostics (mco doctor / mco status / mco upgrade) ───────── */
+async function loadDiagnostics() {
+  $("doctor-checks").innerHTML = '<tr><td class="muted">Running checks...</td></tr>';
+  $("migrations-body").textContent = "Loading...";
+  try {
+    const { checks } = await api("/api/doctor");
+    $("doctor-checks").innerHTML = checks.map(c => {
+      const cls = c.level === "ok" ? "good" : (c.level === "bad" ? "err" : "");
+      const icon = c.level === "ok" ? "OK" : (c.level === "bad" ? "FAIL" : "WARN");
+      return `<tr><td class="${cls}" style="white-space:nowrap">${icon}</td><td>${esc(c.label)}</td>
+        <td class="muted">${esc(c.detail || "")}</td></tr>`;
+    }).join("");
+  } catch (e) { $("doctor-checks").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; }
+
+  try {
+    const m = await api("/api/migrations");
+    let html = `<p>Backend: <b>${esc(m.backend_kind)}</b>. ${esc(m.note || "")}</p>`;
+    if (m.pending && m.pending.length) {
+      html += `<p>${m.pending.length} pending: ${m.pending.map(esc).join(", ")}</p>`;
+      html += m.can_apply
+        ? `<button class="primary" onclick="applyMigrations()">Apply now</button>`
+        : `<p class="muted" style="font-size:.78rem">Set DATABASE_URL to apply automatically, or run <code>mco upgrade</code> to get the combined SQL script for the Supabase SQL editor.</p>`;
+    } else if (m.backend_kind === "postgres") {
+      html += `<p class="good">Up to date.</p>`;
+    }
+    $("migrations-body").innerHTML = html;
+  } catch (e) { $("migrations-body").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+async function applyMigrations() {
+  if (!confirm("Apply pending schema migrations now?")) return;
+  try {
+    const res = await api("/api/migrations/apply", { method: "POST" });
+    alert(`Applied: ${(res.applied || []).join(", ") || "nothing pending"}`);
+    loadDiagnostics();
+  } catch (e) { alert("apply failed: " + e.message); }
 }
 
 /* ── settings ────────────────────────────────────────────────── */
@@ -530,7 +733,9 @@ async function loadIntegrations() {
       conns.map(c => `<tr><td>${esc(c.name)}</td>
         <td>${c.health && c.health.ok ? '<span class="good">ok</span>' : '<span class="err">' + esc((c.health || {}).detail || "down") + '</span>'}</td>
         <td class="muted">${(c.actions || []).map(esc).join(", ")}</td>
-        <td><button onclick="syncConn('${esc(c.name)}')">Sync now</button></td></tr>`).join("") + `</tbody></table>`
+        <td><button onclick="syncConn('${esc(c.name)}')">Sync now</button>
+            ${(c.actions || []).length ? `<button onclick="openRunAction('${esc(c.name)}', ${esc(JSON.stringify(c.actions))})">Run action...</button>` : ""}
+        </td></tr>`).join("") + `</tbody></table>`
       : '<span class="muted">No connectors configured. Set credentials via environment, then reload.</span>';
   } catch (e) {
     $("integrations-body").innerHTML = '<span class="muted">' + esc(e.message) + '</span>';
@@ -542,6 +747,30 @@ async function syncConn(name) {
     alert(`Sync '${name}': ${(res.created || []).length} created, ${(res.skipped || []).length} skipped`);
     refreshOps();
   } catch (e) { alert("sync failed: " + e.message); }
+}
+
+/* ── connector actions (mco platform parity) ────────────────────── */
+function openRunAction(name, actions) {
+  openModal(`<h3>Run action on '${esc(name)}'</h3>
+    <div class="formgrid">
+      <label>Action</label><select id="ra-action">${actions.map(a => `<option>${esc(a)}</option>`).join("")}</select>
+      <label>Params (JSON)</label><textarea id="ra-params" style="min-height:6rem;font-family:monospace">{}</textarea>
+    </div>
+    <button class="primary" onclick="runAction('${esc(name)}')">Run</button>
+    <button onclick="closeModal()">Cancel</button>
+    <p id="ra-msg" class="err"></p>
+    <pre id="ra-result" style="margin-top:.6rem"></pre>`);
+}
+async function runAction(name) {
+  let params;
+  try { params = JSON.parse($("ra-params").value || "{}"); }
+  catch (e) { $("ra-msg").textContent = "Params must be valid JSON."; return; }
+  try {
+    const res = await api(`/api/integrations/${name}/action`, { method: "POST",
+      body: JSON.stringify({ action: $("ra-action").value, params }) });
+    $("ra-msg").textContent = "";
+    $("ra-result").textContent = JSON.stringify(res, null, 2);
+  } catch (e) { $("ra-msg").textContent = e.message; }
 }
 
 /* ── boot ────────────────────────────────────────────────────── */

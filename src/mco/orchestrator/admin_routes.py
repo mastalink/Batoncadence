@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from mco.config import get_config
 from mco.editions import edition_summary
+from mco.orchestrator import llm_connections
 from mco.orchestrator.auth import KNOWN_SCOPES, normalize_scopes, require_scopes
 
 logger = logging.getLogger("mco.orchestrator.admin")
@@ -38,6 +39,8 @@ _IDENT_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 agents_admin_router = APIRouter(prefix="/api/agents")
 settings_router = APIRouter(prefix="/api/settings")
 workflows_router = APIRouter(prefix="/api/workflows")
+llm_connections_router = APIRouter(prefix="/api/llm-connections")
+status_router = APIRouter(prefix="/api")
 
 
 def _db():
@@ -394,3 +397,262 @@ async def submit_workflow_api(payload: dict, caller: dict = Depends(require_scop
                                 detail=f"Step '{step_id}' failed to submit (created so far: {job_ids})")
         job_ids[step_id] = job["id"]
     return {"success": True, "workflow": name, "run": run_id, "jobs": job_ids}
+
+
+# ── LLM Provider Connections ("Model Connections" in the Control Panel) ──────
+#
+# Named, testable connections to LLM providers. See llm_connections.py for
+# why the API key is never stored in the llm_connections table itself.
+
+def _llm_public(row: dict, key_set: bool) -> dict:
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "provider": row.get("provider"),
+        "base_url": row.get("base_url"),
+        "model": row.get("model"),
+        "org_id": row.get("org_id") or "default",
+        "created_at": row.get("created_at"),
+        "key_set": key_set,
+    }
+
+
+def _get_llm_row(db, conn_id: str, caller: dict) -> dict:
+    res = db.table("llm_connections").select("*").eq("id", conn_id).execute()
+    rows = res.data or []
+    if not rows or (rows[0].get("org_id") or "default") != _caller_org(caller):
+        raise HTTPException(status_code=404, detail=f"Connection '{conn_id}' not found")
+    return rows[0]
+
+
+@llm_connections_router.get("/providers")
+async def list_llm_providers(caller: dict = Depends(require_scopes("admin"))):
+    """Provider metadata for the Add Connection form."""
+    return {p: {"label": m["label"], "base_url_editable": m["base_url"] is None}
+            for p, m in llm_connections.PROVIDERS.items()}
+
+
+@llm_connections_router.get("")
+async def list_llm_connections(caller: dict = Depends(require_scopes("admin"))):
+    db = _db()
+    res = db.table("llm_connections").select("*").execute()
+    rows = [r for r in (res.data or []) if (r.get("org_id") or "default") == _caller_org(caller)]
+    config = get_config()
+    return [_llm_public(r, bool(config.get(llm_connections.config_key_for(r["id"]))))
+            for r in rows]
+
+
+@llm_connections_router.post("")
+async def create_llm_connection(payload: dict, caller: dict = Depends(require_scopes("admin"))):
+    name = (payload.get("name") or "").strip()
+    provider = (payload.get("provider") or "").strip().lower()
+    base_url = (payload.get("base_url") or "").strip() or None
+    model = (payload.get("model") or "").strip() or None
+    api_key = (payload.get("api_key") or "").strip()
+
+    if not name or not provider:
+        raise HTTPException(status_code=400, detail="name and provider are required")
+    if not _IDENT_RE.match(name):
+        raise HTTPException(status_code=400,
+                            detail="name may contain only letters, digits, and . _ : - (max 64 chars)")
+    if provider not in llm_connections.PROVIDERS:
+        raise HTTPException(status_code=400,
+                            detail=f"Unknown provider '{provider}'. Valid: {', '.join(sorted(llm_connections.PROVIDERS))}")
+    if provider == "custom" and not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required for a custom connection")
+    if provider != "custom":
+        # Built-in providers use a fixed URL - never let the client steer an
+        # outbound request an operator didn't intend (SSRF guard).
+        base_url = None
+
+    db = _db()
+    row = {"name": name, "provider": provider, "base_url": base_url, "model": model}
+    if _caller_org(caller) != "default":
+        row["org_id"] = _caller_org(caller)
+    res = db.table("llm_connections").insert(row).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Failed to persist connection")
+    saved = res.data[0]
+
+    if api_key:
+        get_config().set(llm_connections.config_key_for(saved["id"]), api_key)
+
+    logger.info(f"LLM connection '{name}' ({provider}) created by {caller.get('instance_id')}")
+    return {"success": True, "connection": _llm_public(saved, bool(api_key))}
+
+
+@llm_connections_router.patch("/{conn_id}")
+async def update_llm_connection(conn_id: str, payload: dict,
+                                caller: dict = Depends(require_scopes("admin"))):
+    """Edit name/model/base_url, and optionally rotate the API key. A blank
+    api_key leaves the stored key untouched (mirrors the Settings pattern)."""
+    db = _db()
+    row = _get_llm_row(db, conn_id, caller)
+    update = {}
+    if "name" in payload:
+        name = str(payload["name"]).strip()
+        if not _IDENT_RE.match(name):
+            raise HTTPException(status_code=400,
+                                detail="name may contain only letters, digits, and . _ : - (max 64 chars)")
+        update["name"] = name
+    if "model" in payload:
+        update["model"] = str(payload["model"]).strip() or None
+    if row.get("provider") == "custom" and "base_url" in payload:
+        base_url = str(payload["base_url"]).strip()
+        if not base_url:
+            raise HTTPException(status_code=400, detail="base_url is required for a custom connection")
+        update["base_url"] = base_url
+
+    api_key = str(payload.get("api_key") or "").strip()
+    if api_key:
+        get_config().set(llm_connections.config_key_for(conn_id), api_key)
+
+    if not update and not api_key:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    if update:
+        res = db.table("llm_connections").update(update).eq("id", conn_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Update failed to persist")
+        row = res.data[0]
+
+    key_set = bool(get_config().get(llm_connections.config_key_for(conn_id)))
+    return {"success": True, "connection": _llm_public(row, key_set)}
+
+
+@llm_connections_router.delete("/{conn_id}")
+async def delete_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
+    db = _db()
+    _get_llm_row(db, conn_id, caller)
+    db.table("llm_connections").delete().eq("id", conn_id).execute()
+    get_config().delete(llm_connections.config_key_for(conn_id))
+    logger.info(f"LLM connection '{conn_id}' deleted by {caller.get('instance_id')}")
+    return {"success": True, "id": conn_id}
+
+
+@llm_connections_router.post("/{conn_id}/test")
+async def test_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
+    """Make one cheap, real call to the provider to prove the key/base_url
+    actually authenticate. Never returns the key itself."""
+    db = _db()
+    row = _get_llm_row(db, conn_id, caller)
+    api_key = get_config().get(llm_connections.config_key_for(conn_id)) or ""
+    return llm_connections.test_connection(row.get("provider"), api_key, row.get("base_url"))
+
+
+# ── Diagnostics + migrations (mco doctor / mco status / mco upgrade parity) ──
+
+@status_router.get("/doctor")
+async def api_doctor(caller: dict = Depends(require_scopes("admin"))):
+    """Structured diagnostics for the machine running this gateway."""
+    import shutil
+    import sys as _sys
+    from mco.config import resolve_env_path
+    from mco.editions import current_edition
+    from mco.notifiers.ntfy import get_ntfy_config
+    from mco.orchestrator.routes import (
+        get_db_client, decorate_presence, get_offline_after_seconds, kill_switch_active,
+    )
+    from mco.security import get_secret_store
+
+    checks = []
+
+    def add(level, label, detail=None):
+        checks.append({"level": level, "label": label, "detail": detail})
+
+    v = _sys.version_info
+    if v >= (3, 9):
+        add("ok", f"Python {v.major}.{v.minor}.{v.micro}")
+    else:
+        add("bad", f"Python {v.major}.{v.minor} is too old (3.9+ required)",
+            "Re-run the installer; it finds or installs a supported Python.")
+
+    config = get_config()
+    env_path = resolve_env_path()
+    if env_path.is_file():
+        token = (config.get("MCO_LOCAL_TOKEN") or "").strip()
+        add("ok", f"Config: {env_path}", "MCO_LOCAL_TOKEN set" if token else "no MCO_LOCAL_TOKEN")
+    else:
+        add("warn", f"No config file at {env_path}", "Run 'mco setup' to create one.")
+
+    store = get_secret_store()
+    if not store.is_initialized():
+        add("ok", "Secret store: off (plaintext .env mode)")
+    elif store.is_unlocked or store.auto_unlock():
+        add("ok", "Secret store: unlocked")
+    else:
+        add("warn", f"Secret store at {store._path} is locked (no working key)",
+            "Run 'mco setup --menu' -> security to unlock or recreate it.")
+
+    add("ok", f"Edition: {current_edition()}")
+
+    db = get_db_client()
+    if db is None:
+        add("warn", "No database (MCO_DISABLE_LOCAL_DB is set?)")
+    else:
+        backend = getattr(db, "backend", "supabase")
+        try:
+            res = db.table("agent_registry").select("*").execute()
+            agents = res.data or []
+            threshold = get_offline_after_seconds()
+            online = sum(1 for a in agents
+                        if decorate_presence(dict(a), threshold)["effective_status"] == "online")
+            add("ok", f"Database: {'embedded LocalStore' if backend == 'local' else 'Supabase'} reachable",
+                f"{len(agents)} agent(s) registered, {online} online")
+        except Exception as e:
+            add("bad", f"Database query failed ({backend})", type(e).__name__)
+
+    if kill_switch_active():
+        add("warn", "Kill switch: ACTIVE - no new jobs or leases")
+    else:
+        add("ok", "Kill switch: off")
+
+    found = {name: bool(shutil.which(name)) for name in ("claude", "codex", "gemini", "git", "docker")}
+    add("ok", "Vendor CLIs (on this machine)",
+        ", ".join(f"{k}={'yes' if v else 'no'}" for k, v in found.items()))
+
+    ntfy_cfg = get_ntfy_config()
+    if ntfy_cfg.get("server") and ntfy_cfg.get("topic"):
+        add("ok", f"Notifications: ntfy -> {ntfy_cfg['server']}/{ntfy_cfg['topic']}")
+    else:
+        add("warn", "Notifications: off", "Set NTFY_TOPIC to enable push alerts.")
+
+    return {"checks": checks}
+
+
+@status_router.get("/migrations")
+async def api_migrations_status(caller: dict = Depends(require_scopes("admin"))):
+    import os as _os
+    from mco import migrations_runner as mig
+
+    kind = mig.backend_kind()
+    all_migs = [n for n, _ in mig.discover()]
+    if kind != "postgres":
+        note = "Embedded LocalStore needs no migrations - rows pick up new fields automatically." \
+            if kind == "local" else "No database configured."
+        return {"backend_kind": kind, "all": all_migs, "pending": [], "can_apply": False, "note": note}
+
+    database_url = (get_config().get("DATABASE_URL") or _os.environ.get("DATABASE_URL") or "").strip()
+    _, pending = mig.write_combined_script()
+    return {"backend_kind": kind, "all": all_migs, "pending": pending, "can_apply": bool(database_url)}
+
+
+@status_router.post("/migrations/apply")
+async def api_migrations_apply(caller: dict = Depends(require_scopes("admin"))):
+    import os as _os
+    from mco import migrations_runner as mig
+
+    kind = mig.backend_kind()
+    if kind != "postgres":
+        raise HTTPException(status_code=400,
+                            detail="Only the Postgres/Supabase backend supports applying migrations here.")
+    database_url = (get_config().get("DATABASE_URL") or _os.environ.get("DATABASE_URL") or "").strip()
+    if not database_url:
+        raise HTTPException(status_code=400,
+                            detail="DATABASE_URL is not configured - apply the pending SQL manually in the Supabase SQL editor.")
+    try:
+        result = mig.apply_postgres(database_url)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Migration failed: {type(e).__name__}")
+    logger.info(f"Migrations applied via API by {caller.get('instance_id')}: {result.get('applied')}")
+    return {"success": True, **result}
