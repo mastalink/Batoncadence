@@ -46,16 +46,25 @@ class WorkflowError(ValueError):
 
 
 def load_workflow(source: Union[str, Path, dict]) -> dict:
-    """Load and validate a workflow from a YAML path/string or a parsed dict."""
+    """Load and validate a workflow from YAML text, a file Path, or a dict.
+
+    SECURITY: a plain `str` is always parsed as literal YAML text - it is
+    never treated as a filesystem path. This function is reachable from the
+    admin HTTP API (POST /api/workflows, gated only by jobs:write - a
+    worker-level scope), so guessing that a short no-newline string might be
+    "a path" would let any caller read arbitrary files off the server by
+    submitting a workflow body that happens to equal an existing path. Only
+    an explicit `Path` object (which untrusted JSON can never deserialize
+    into) reads from disk - see `mco workflow <file>` in cli.py.
+    """
     if isinstance(source, dict):
         workflow = source
+    elif isinstance(source, Path):
+        if not source.exists():
+            raise WorkflowError(f"Workflow file not found: {source}")
+        workflow = yaml.safe_load(source.read_text(encoding="utf-8"))
     else:
-        text = str(source)
-        if "\n" not in text:
-            path = Path(text)
-            if path.exists():
-                text = path.read_text(encoding="utf-8")
-        workflow = yaml.safe_load(text)
+        workflow = yaml.safe_load(str(source))
 
     if not isinstance(workflow, dict):
         raise WorkflowError("Workflow must be a YAML mapping with 'name' and 'steps'")

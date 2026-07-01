@@ -238,3 +238,28 @@ def test_token_compares_stay_constant_time_in_source():
 
     assert "hmac.compare_digest(extract_bearer" in metrics_src
     assert "extract_bearer(authorization) != token" not in metrics_src
+
+
+# ── Listener token is never cached on self (CodeQL clear-text-logging) ───────
+# The listener's bearer token used to be stored as self.token, set once in
+# __init__ right next to a handful of logger.info() calls. That gave a
+# class-wide "this object has a sensitive field" shape that a security
+# scanner can't easily distinguish from an actual leak. _auth_headers() now
+# reads the token fresh on every call and it is never an instance attribute.
+
+def test_listener_never_stores_token_on_self(monkeypatch):
+    monkeypatch.setattr(listener_mod, "get_config",
+                        lambda: {"MCO_AGENT_TOKEN": "s3cret-agent-tok"}, raising=True)
+    monkeypatch.delenv("MCO_AGENT_TOKEN", raising=False)
+    listener = AgentListener.__new__(AgentListener)
+    assert not hasattr(listener, "token")
+    headers = listener._auth_headers()
+    assert headers == {"Authorization": "Bearer s3cret-agent-tok"}
+    assert not hasattr(listener, "token")
+
+
+def test_listener_auth_headers_empty_without_token(monkeypatch):
+    monkeypatch.setattr(listener_mod, "get_config", lambda: {}, raising=True)
+    monkeypatch.delenv("MCO_AGENT_TOKEN", raising=False)
+    listener = AgentListener.__new__(AgentListener)
+    assert listener._auth_headers() == {}

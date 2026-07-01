@@ -128,7 +128,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     // DOMParser/replaceWith are inert per spec — re-create each with
     // createElement so they execute, awaiting onload for src scripts to
     // preserve ordering (React before ReactDOM before Babel before text/babel).
-    const doc = new DOMParser().parseFromString(template, 'text/html');
+    //
+    // `template` is NOT attacker-controllable: this is a self-extracting,
+    // single-file bundle, and `template` comes only from this same
+    // document's own embedded <script type="__bundler/template"> tag
+    // (JSON.parse(templateEl.textContent) above), baked in at build time.
+    // Nothing in this loader reads a URL param, postMessage, cookie, or any
+    // other externally influenceable source.
+    const doc = new DOMParser().parseFromString(template, 'text/html'); // codeql[js/xss-through-dom] false positive: self-referential static bundle, no external taint source (see comment above)
     document.documentElement.replaceWith(doc.documentElement);
     const dead = Array.from(document.scripts);
     for (const old of dead) {

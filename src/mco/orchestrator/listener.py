@@ -72,14 +72,18 @@ class AgentListener:
             http_url = http_url.replace("/ws/broadcast", "")
         self.gateway_http_url = http_url
 
-        # Bearer token for authenticating REST calls to the gateway (same token as WS auth).
-        self.token = get_config().get("MCO_AGENT_TOKEN") or os.environ.get("MCO_AGENT_TOKEN") or ""
-
         logger.info(f"Agent Listener initialized: {self.instance_id} ({self.role}) using gateway HTTP: {self.gateway_http_url}")
 
     def _auth_headers(self) -> Dict[str, str]:
-        """Authorization header for gateway REST calls."""
-        return {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        """Authorization header for gateway REST calls.
+
+        Reads the bearer token fresh on every call rather than caching it on
+        `self` - the token is never stored as an instance attribute, so it
+        can't be logged via any accidental `self.__dict__`/repr dump and a
+        config reload picks up a rotated token without a restart.
+        """
+        token = get_config().get("MCO_AGENT_TOKEN") or os.environ.get("MCO_AGENT_TOKEN") or ""
+        return {"Authorization": f"Bearer {token}"} if token else {}
 
 
     def _load_config(self) -> None:

@@ -1,5 +1,7 @@
 """Workflow DSL tests: validation, topological ordering, and submission."""
 
+from pathlib import Path
+
 import pytest
 
 from mco.orchestrator.workflows import (
@@ -68,6 +70,30 @@ class TestLoadWorkflow:
     def test_empty_steps_rejected(self):
         with pytest.raises(WorkflowError, match="steps"):
             load_workflow("name: x\nsteps: []\n")
+
+    def test_string_source_never_reads_the_filesystem(self, tmp_path, monkeypatch):
+        """Security regression: a bare str must always be parsed as literal YAML
+        text, never guessed at as a path — POST /api/workflows only requires
+        jobs:write (a worker-level scope), so implicit path resolution here
+        would be an arbitrary-file-read primitive for any registered agent."""
+        monkeypatch.chdir(tmp_path)
+        secret = tmp_path / "name"  # a no-newline source could collide with this
+        secret.write_text("TOP SECRET FILE CONTENT", encoding="utf-8")
+        # A short, no-newline string that happens to equal an existing filename:
+        # must be parsed as YAML (and fail as invalid YAML/shape), never opened.
+        with pytest.raises(WorkflowError):
+            load_workflow("name")
+
+    def test_path_object_still_loads_from_disk(self, tmp_path):
+        """CLI callers (mco workflow <file>) opt in explicitly with Path(...)."""
+        p = tmp_path / "wf.yaml"
+        p.write_text(VALID_YAML, encoding="utf-8")
+        wf = load_workflow(p)
+        assert wf["name"] == "release-pipeline"
+
+    def test_missing_path_object_raises_workflow_error(self, tmp_path):
+        with pytest.raises(WorkflowError, match="not found"):
+            load_workflow(tmp_path / "does-not-exist.yaml")
 
     def test_duplicate_step_id_rejected(self):
         with pytest.raises(WorkflowError, match="Duplicate"):

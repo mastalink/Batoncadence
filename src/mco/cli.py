@@ -1232,7 +1232,7 @@ def run_workflow(
     from mco.orchestrator.workflows import load_workflow, topo_order, submit_workflow, WorkflowError
 
     try:
-        workflow = load_workflow(file)
+        workflow = load_workflow(Path(file))
     except WorkflowError as e:
         console.print(f"[red][ERROR] Invalid workflow: {e}[/red]")
         raise typer.Exit(code=1)
