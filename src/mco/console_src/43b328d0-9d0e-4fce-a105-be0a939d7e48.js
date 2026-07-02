@@ -1,5 +1,5 @@
 // Baton — Overview (mission control) + Approvals inbox.
-const { useState: useStateH, useMemo: useMemoH } = React;
+const { useState: useStateH, useMemo: useMemoH, useEffect: useEffectH } = React;
 
 // ----- Overview -----
 function StatCard({ label, value, sub, kind, onClick }) {
@@ -251,4 +251,161 @@ function Approvals({ jobs, tone, advanced, onOpen }) {
   );
 }
 
-Object.assign(window, { Overview, Approvals, StatCard });
+// ----- Drumline shared memory -----
+// Browse/search the collective agent memory (/api/context) and add entries.
+// Recall scoring happens server-side; this screen just asks and renders.
+
+const KIND_STYLE = {
+  fact:     { label: "Fact",     hue: 200 },
+  decision: { label: "Decision", hue: 270 },
+  lesson:   { label: "Lesson",   hue: 22 },
+  handoff:  { label: "Handoff",  hue: 150 },
+  artifact: { label: "Artifact", hue: 0 },
+};
+
+function KindChip({ kind }) {
+  const k = KIND_STYLE[kind] || KIND_STYLE.fact;
+  return (
+    <span style={{
+      fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase",
+      color: `oklch(0.45 0.09 ${k.hue})`, background: `oklch(0.95 0.03 ${k.hue})`,
+      padding: "2px 8px", borderRadius: 999, flex: "none",
+    }}>{k.label}</span>
+  );
+}
+
+function DrumlineMemory({ tone, advanced }) {
+  const store = window.BatonStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [query, setQuery] = useStateH("");
+  const [tags, setTags] = useStateH("");
+  const [entries, setEntries] = useStateH(null); // null = not loaded yet
+  const [err, setErr] = useStateH(null);
+  const [composing, setComposing] = useStateH(false);
+  const [form, setForm] = useStateH({ title: "", content: "", kind: "fact", tags: "" });
+  const [saving, setSaving] = useStateH(false);
+  const [saveErr, setSaveErr] = useStateH(null);
+  const inputStyle = { border: "1px solid var(--border-strong)", borderRadius: 8, padding: "8px 12px", fontSize: 13, background: "var(--surface)", color: "var(--text)" };
+
+  async function load(q, tg) {
+    setErr(null);
+    try {
+      const r = await store.getContext({ query: q !== undefined ? q : query, tags: tg !== undefined ? tg : tags, limit: 25 });
+      setEntries(r || []);
+    } catch (e) { setErr(e.message); setEntries([]); }
+  }
+  useEffectH(() => { if (live) load("", ""); }, [live]);
+
+  if (!live) {
+    return (
+      <Card>
+        <EmptyState icon="◎" title={tone === "plain" ? "Shared memory lives on your server" : "Drumline requires a live gateway"}
+          body={tone === "plain"
+            ? "Connect to your orchestrator in Settings to browse what your agents remember and teach them new facts."
+            : "Connect in Settings to query /api/context — recall scoring, tag filters, and writes all run server-side."} />
+      </Card>
+    );
+  }
+
+  async function save() {
+    if (!form.title.trim() || !form.content.trim()) { setSaveErr("Title and content are required."); return; }
+    setSaving(true); setSaveErr(null);
+    try {
+      await store.addContext({
+        title: form.title.trim(), content: form.content.trim(), kind: form.kind,
+        tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      });
+      setForm({ title: "", content: "", kind: "fact", tags: "" });
+      setComposing(false);
+      await load();
+    } catch (e) { setSaveErr(e.message); }
+    setSaving(false);
+  }
+
+  return (
+    <div>
+      <p style={{ margin: "0 0 16px", color: "var(--text-2)", fontSize: 13.5, maxWidth: 560 }}>
+        {tone === "plain"
+          ? "Everything your agents chose to remember — decisions, lessons, handoffs. Anything you add here is recalled by every agent on its next job."
+          : "The Drumline shared context (agent_context): explicit writes via mco_remember plus auto-distilled job handoffs. Entries below are ranked by the server's recall scorer."}
+      </p>
+
+      <form onSubmit={(e) => { e.preventDefault(); setEntries(null); load(); }}
+        style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <input value={query} onChange={(e) => setQuery(e.target.value)}
+          placeholder={tone === "plain" ? "Search memory…" : "Recall query (soft-scored)…"}
+          style={Object.assign({}, inputStyle, { flex: 1, minWidth: 220 })} />
+        <input value={tags} onChange={(e) => setTags(e.target.value)}
+          placeholder={tone === "plain" ? "tags, comma-separated" : "tag filter (hard)"}
+          style={Object.assign({}, inputStyle, { width: 180, fontFamily: "var(--font-mono)", fontSize: 12.5 })} />
+        <Btn small onClick={() => { setEntries(null); load(); }}>{tone === "plain" ? "Search" : "Recall"}</Btn>
+        <span style={{ flex: 1 }}></span>
+        <Btn small kind="primary" onClick={() => { setComposing(!composing); setSaveErr(null); }}>
+          {composing ? "Cancel" : (tone === "plain" ? "+ Add memory" : "+ Remember")}
+        </Btn>
+      </form>
+
+      {composing ? (
+        <Card style={{ marginBottom: 16 }}>
+          <SectionTitle>{tone === "plain" ? "Teach your agents something" : "New context entry"}</SectionTitle>
+          <div style={{ display: "flex", gap: 10, margin: "12px 0 10px", flexWrap: "wrap" }}>
+            <input value={form.title} onChange={(e) => setForm(Object.assign({}, form, { title: e.target.value }))}
+              placeholder="Title" style={Object.assign({}, inputStyle, { flex: 2, minWidth: 220 })} />
+            <select value={form.kind} onChange={(e) => setForm(Object.assign({}, form, { kind: e.target.value }))}
+              style={Object.assign({}, inputStyle, { width: 130 })}>
+              {Object.keys(KIND_STYLE).map((k) => <option key={k} value={k}>{KIND_STYLE[k].label}</option>)}
+            </select>
+            <input value={form.tags} onChange={(e) => setForm(Object.assign({}, form, { tags: e.target.value }))}
+              placeholder="tags, comma-separated" style={Object.assign({}, inputStyle, { width: 200, fontFamily: "var(--font-mono)", fontSize: 12.5 })} />
+          </div>
+          <textarea value={form.content} onChange={(e) => setForm(Object.assign({}, form, { content: e.target.value }))}
+            placeholder={tone === "plain" ? "What should every agent know?" : "Content (sanitized + capped server-side; recalled into agent prompts)"}
+            rows={4} style={Object.assign({}, inputStyle, { width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" })} />
+          <div style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 12 }}>
+            <Btn kind="primary" disabled={saving} onClick={save}>{saving ? "Saving…" : (tone === "plain" ? "Save memory" : "Remember")}</Btn>
+            {saveErr ? <span style={{ fontSize: 12.5, color: "var(--st-failed-fg)" }}>{saveErr}</span> : null}
+          </div>
+        </Card>
+      ) : null}
+
+      {err ? <Card style={{ marginBottom: 16 }}><div style={{ fontSize: 12.5, color: "var(--st-failed-fg)" }}>{err}</div></Card> : null}
+      {entries === null && !err ? <p style={{ fontSize: 12.5, color: "var(--text-3)" }}>Loading…</p> : null}
+
+      {entries && entries.length === 0 && !err ? (
+        <Card><EmptyState icon="◎" title={tone === "plain" ? "Nothing remembered yet" : "No matching context"}
+          body={tone === "plain"
+            ? "As agents finish jobs, what they learned lands here automatically. Or add the first memory yourself."
+            : "Completed jobs auto-distill into handoffs; mco remember / the composer above write entries directly."} /></Card>
+      ) : null}
+
+      {entries && entries.length > 0 ? (
+        <Card pad={false}>
+          {entries.map((e, i) => (
+            <div key={e.id || i} style={{ padding: "12px 16px", borderBottom: i < entries.length - 1 ? "1px solid var(--border)" : "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <KindChip kind={e.kind} />
+                <span style={{ fontWeight: 600, fontSize: 13.5, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</span>
+                {e.role ? <RoleChip role={e.role} size={18} /> : null}
+                <span style={{ fontSize: 11.5, color: "var(--text-3)", flex: "none" }}>{timeAgo(e.created_at)}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 5, whiteSpace: "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>{e.content}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                {(e.tags || []).map((t) => (
+                  <span key={t} style={{ fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-3)", background: "var(--surface-2)", padding: "1px 7px", borderRadius: 6 }}>{t}</span>
+                ))}
+                <span style={{ flex: 1 }}></span>
+                <span style={{ fontSize: 11, color: "var(--text-3)" }}>
+                  by <Mono style={{ fontSize: 11 }}>{e.created_by || "system"}</Mono>
+                  {e.source_job_id ? <span> · from job <Mono style={{ fontSize: 11 }}>{shortId(e.source_job_id)}</Mono></span> : null}
+                  {advanced && e.weight !== undefined ? <span> · w={e.weight}</span> : null}
+                </span>
+              </div>
+            </div>
+          ))}
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+Object.assign(window, { Overview, Approvals, StatCard, DrumlineMemory, KindChip });

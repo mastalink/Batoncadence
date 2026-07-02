@@ -6,6 +6,13 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8788", "--directory", "website"],
       "port": 8788
+    },
+    {
+      "name": "gateway",
+      "runtimeExecutable": ".venv/bin/mco",
+      "runtimeArgs": ["serve", "--port", "18790"],
+      "port": 18790,
+      "autoPort": false
     }
   ]
 }

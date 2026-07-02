@@ -1,7 +1,151 @@
 // Baton — Agent Fleet + Settings screens.
 const { useState: useStateO, useEffect: useEffectO } = React;
 
+// ----- Register agent panel -----
+function RegisterAgentPanel({ tone, advanced, onDone, onCancel }) {
+  const store = window.BatonStore;
+  const [instanceId, setInstanceId] = useStateO("");
+  const [role, setRole] = useStateO("");
+  const [org, setOrg] = useStateO("");
+  const [busy, setBusy] = useStateO(false);
+  const [err, setErr] = useStateO(null);
+  const [result, setResult] = useStateO(null); // { agent, token }
+  const [copied, setCopied] = useStateO(false);
+  const inputStyle = { border: "1px solid var(--border-strong)", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", width: 240, background: "var(--surface)", color: "var(--text)" };
+
+  async function submit() {
+    setBusy(true); setErr(null);
+    try {
+      const payload = { instance_id: instanceId.trim(), role: role.trim() };
+      if (advanced && org.trim()) payload.org = org.trim();
+      const res = await store.registerAgent(payload);
+      setResult(res);
+      if (onDone) onDone();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+
+  function copyToken() {
+    if (!result || !result.token) return;
+    navigator.clipboard.writeText(result.token).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    });
+  }
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <SectionTitle>{tone === "plain" ? "Add a new agent" : "Register agent"}</SectionTitle>
+      {result ? (
+        <div>
+          <p style={{ fontSize: 12.5, color: "var(--text-2)", margin: "0 0 10px" }}>
+            {tone === "plain"
+              ? `"${result.agent.instance_id}" is registered.`
+              : `Agent "${result.agent.instance_id}" registered with role "${result.agent.role}".`}
+          </p>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+            background: "var(--surface-2)", border: "1px solid var(--st-approval-dot)", borderRadius: 8,
+          }}>
+            <Mono style={{ fontSize: 12.5, color: "var(--text)", flex: 1, wordBreak: "break-all" }}>{result.token}</Mono>
+            <Btn small onClick={copyToken}>{copied ? "Copied" : "Copy"}</Btn>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--st-failed-fg)", fontWeight: 600, margin: "8px 0 0" }}>
+            {tone === "plain" ? "Copy this now — you won't see it again." : "This token is shown once — store it now."}
+          </p>
+          <div style={{ paddingTop: 14 }}>
+            <Btn onClick={onCancel}>{tone === "plain" ? "Done" : "Close"}</Btn>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+            <div>
+              <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 4 }}>Instance ID</div>
+              <input value={instanceId} onChange={(e) => setInstanceId(e.target.value)} placeholder="e.g. claude-worker-3" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 4 }}>Role</div>
+              <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. claude" style={inputStyle} />
+            </div>
+            {advanced ? (
+              <div>
+                <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 4 }}>Org (optional)</div>
+                <input value={org} onChange={(e) => setOrg(e.target.value)} placeholder="default" style={inputStyle} />
+              </div>
+            ) : null}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 14 }}>
+            <Btn kind="primary" disabled={busy || !instanceId.trim() || !role.trim()} onClick={submit}>
+              {busy ? (tone === "plain" ? "Adding…" : "Registering…") : (tone === "plain" ? "Add agent" : "Register")}
+            </Btn>
+            <Btn onClick={onCancel}>Cancel</Btn>
+            {err ? <span style={{ fontSize: 12.5, color: "var(--st-failed-fg)" }}>{err}</span> : null}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ----- Per-agent row admin actions (live only) -----
+function AgentRowActions({ agent, tone }) {
+  const store = window.BatonStore;
+  const [busy, setBusy] = useStateO(false);
+  const [reset, setReset] = useStateO(null); // { token } | { error }
+  const [err, setErr] = useStateO(null);
+
+  async function doReset() {
+    const msg = tone === "plain"
+      ? `Give "${agent.instance_id}" a brand new token? The old one stops working right away.`
+      : `Reset token for "${agent.instance_id}"? The current token is invalidated immediately.`;
+    if (!window.confirm(msg)) return;
+    setBusy(true); setErr(null);
+    try {
+      const res = await store.resetToken(agent.instance_id);
+      setReset(res);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+
+  async function doDelete() {
+    if (!window.confirm(`This agent's token stops working immediately. Remove ${agent.instance_id}?`)) return;
+    setBusy(true); setErr(null);
+    try { await store.deleteAgent(agent.instance_id); }
+    catch (e) { setErr(e.message); setBusy(false); }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, paddingLeft: 16 }}>
+        <Btn small kind="ghost" disabled={busy} onClick={doReset} style={{ fontSize: 11.5, padding: "3px 8px", color: "var(--text-3)" }}>
+          {tone === "plain" ? "New token" : "Reset token"}
+        </Btn>
+        <Btn small kind="ghost" disabled={busy} onClick={doDelete} style={{ fontSize: 11.5, padding: "3px 8px", color: "var(--text-3)" }}>
+          {tone === "plain" ? "Remove" : "Remove"}
+        </Btn>
+      </div>
+      {err ? <div style={{ fontSize: 11.5, color: "var(--st-failed-fg)", paddingLeft: 16, marginTop: 4 }}>{err}</div> : null}
+      {reset && reset.token ? (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, margin: "6px 0 0 16px", padding: "8px 10px",
+          background: "var(--surface-2)", border: "1px solid var(--st-approval-dot)", borderRadius: 8,
+        }}>
+          <Mono style={{ fontSize: 11.5, color: "var(--text)", flex: 1, wordBreak: "break-all" }}>{reset.token}</Mono>
+          <Btn small onClick={() => navigator.clipboard.writeText(reset.token)}>Copy</Btn>
+          <span style={{ fontSize: 11, color: "var(--st-failed-fg)", fontWeight: 600, whiteSpace: "nowrap" }}>
+            {tone === "plain" ? "Won't show again" : "Shown once"}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AgentFleet({ agents, jobs, tone, advanced }) {
+  const store = window.BatonStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [showRegister, setShowRegister] = useStateO(false);
   const byRole = {};
   agents.forEach((a) => { (byRole[a.role] = byRole[a.role] || []).push(a); });
 
@@ -10,11 +154,25 @@ function AgentFleet({ agents, jobs, tone, advanced }) {
 
   return (
     <div>
-      <p style={{ margin: "0 0 16px", color: "var(--text-2)", fontSize: 13.5, maxWidth: 560 }}>
-        {tone === "plain"
-          ? "Every machine or program signed up to do work shows up here, grouped by what it can do."
-          : "Registered agent instances from agent_registry, grouped by role, with live presence heartbeats."}
-      </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 16 }}>
+        <p style={{ margin: 0, color: "var(--text-2)", fontSize: 13.5, maxWidth: 560 }}>
+          {tone === "plain"
+            ? "Every machine or program signed up to do work shows up here, grouped by what it can do."
+            : "Registered agent instances from agent_registry, grouped by role, with live presence heartbeats."}
+        </p>
+        {live ? (
+          <Btn kind="primary" small onClick={() => setShowRegister((v) => !v)}>
+            {showRegister ? "Cancel" : (tone === "plain" ? "Add agent" : "Register agent")}
+          </Btn>
+        ) : null}
+      </div>
+
+      {live && showRegister ? (
+        <RegisterAgentPanel tone={tone} advanced={advanced}
+          onDone={() => { /* keep panel open to show the token */ }}
+          onCancel={() => setShowRegister(false)} />
+      ) : null}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))", gap: 16 }}>
         {Object.entries(byRole).map(([role, list]) => (
           <Card key={role} pad={false}>
@@ -47,6 +205,7 @@ function AgentFleet({ agents, jobs, tone, advanced }) {
                         : <span style={{ color: "var(--text-3)" }}>{tone === "plain" ? "Not connected" : "No heartbeat"}</span>}
                     {advanced ? <span style={{ color: "var(--text-3)" }}> · {doneBy(a)} completed</span> : null}
                   </div>
+                  {live ? <AgentRowActions agent={a} tone={tone} /> : null}
                 </div>
               );
             })}
@@ -101,6 +260,8 @@ function ConnectorsCard({ tone }) {
   const [saveMsg, setSaveMsg] = useStateO(null);
   const [test, setTest] = useStateO({});       // name -> { busy, ok, detail }
   const [loadErr, setLoadErr] = useStateO(null);
+  const [health, setHealth] = useStateO(null);  // name -> { ok, detail } | null on error
+  const [sync, setSync] = useStateO({});        // name -> { busy, ok, summary }
   const inputStyle = { border: "1px solid var(--border-strong)", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", width: 320, background: "var(--surface)", color: "var(--text)" };
 
   // Secrets come back as set/unset (never the value), so we keep their inputs
@@ -117,6 +278,20 @@ function ConnectorsCard({ tone }) {
     let alive = true;
     setLoadErr(null);
     store.getSettings().then((d) => { if (alive) hydrate(d); }).catch((e) => { if (alive) setLoadErr(e.message); });
+    return () => { alive = false; };
+  }, [live]);
+
+  useEffectO(() => {
+    if (!live) { setHealth(null); return; }
+    let alive = true;
+    store.getIntegrations()
+      .then((list) => {
+        if (!alive) return;
+        const h = {};
+        (list || []).forEach((c) => { h[c.name] = c.health || {}; });
+        setHealth(h);
+      })
+      .catch(() => { if (alive) setHealth(null); }); // integrations may need a different scope — hide dots
     return () => { alive = false; };
   }, [live]);
 
@@ -161,6 +336,31 @@ function ConnectorsCard({ tone }) {
     }
   }
 
+  function summarize(r) {
+    if (r && typeof r === "object") {
+      if (r.created != null || r.updated != null || r.count != null) {
+        const parts = [];
+        if (r.created != null) parts.push((Array.isArray(r.created) ? r.created.length : r.created) + " created");
+        if (r.updated != null) parts.push((Array.isArray(r.updated) ? r.updated.length : r.updated) + " updated");
+        if (r.skipped != null) parts.push((Array.isArray(r.skipped) ? r.skipped.length : r.skipped) + " skipped");
+        if (r.count != null && !parts.length) parts.push(r.count + " items");
+        if (parts.length) return parts.join(", ");
+      }
+    }
+    const s = JSON.stringify(r);
+    return s && s.length > 80 ? s.slice(0, 80) + "…" : (s || "done");
+  }
+
+  async function runSync(name) {
+    setSync((s) => Object.assign({}, s, { [name]: { busy: true } }));
+    try {
+      const r = await store.syncConnector(name);
+      setSync((s) => Object.assign({}, s, { [name]: { busy: false, ok: true, summary: summarize(r) } }));
+    } catch (e) {
+      setSync((s) => Object.assign({}, s, { [name]: { busy: false, ok: false, summary: e.message } }));
+    }
+  }
+
   return (
     <Card style={{ marginBottom: 18 }}>
       <SectionTitle>Connectors</SectionTitle>
@@ -168,10 +368,26 @@ function ConnectorsCard({ tone }) {
       {CONNECTORS.map((c) => (
         <div key={c.name} style={{ padding: "14px 0", borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontWeight: 650, fontSize: 13.5, flex: 1 }}>{c.label}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, flex: 1 }}>
+              <div style={{ fontWeight: 650, fontSize: 13.5 }}>{c.label}</div>
+              {health && health[c.name] ? (
+                <span title={health[c.name].detail || ""} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: 99, flex: "none",
+                    background: health[c.name].ok ? "var(--st-done-dot)" : "var(--st-failed-dot)",
+                  }}></span>
+                  <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>{health[c.name].detail || (health[c.name].ok ? "ok" : "unreachable")}</span>
+                </span>
+              ) : null}
+            </div>
             <Btn small disabled={test[c.name] && test[c.name].busy} onClick={() => runTest(c.name)}>
               {test[c.name] && test[c.name].busy ? "Testing…" : "Test connection"}
             </Btn>
+            {live && test[c.name] && test[c.name].ok ? (
+              <Btn small disabled={sync[c.name] && sync[c.name].busy} onClick={() => runSync(c.name)}>
+                {sync[c.name] && sync[c.name].busy ? "Syncing…" : "Sync now"}
+              </Btn>
+            ) : null}
           </div>
           {c.fields.map((k) => (meta && meta[k]) ? (
             <div key={k} style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
@@ -185,6 +401,11 @@ function ConnectorsCard({ tone }) {
           {test[c.name] && !test[c.name].busy ? (
             <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 600, color: test[c.name].ok ? "var(--st-done-fg)" : "var(--st-failed-fg)" }}>
               {(test[c.name].ok ? "✓ " : "✗ ") + (test[c.name].detail || (test[c.name].ok ? "Connected." : "Not reachable."))}
+            </div>
+          ) : null}
+          {sync[c.name] && !sync[c.name].busy ? (
+            <div style={{ marginTop: 6, fontSize: 12, color: sync[c.name].ok ? "var(--st-done-fg)" : "var(--st-failed-fg)" }}>
+              {sync[c.name].ok ? "✓ Synced — " + sync[c.name].summary : "✗ " + sync[c.name].summary}
             </div>
           ) : null}
         </div>
@@ -226,7 +447,7 @@ function Settings({ tone, advanced, setAdvanced }) {
             </div>
             <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 2 }}>
               {mode === "live"
-                ? (tone === "plain" ? "Everything you see is real. Actions affect real jobs." : "Polling /api/jobs and /api/agents every 4s with your bearer token.")
+                ? (tone === "plain" ? "Everything you see is real, updating live. Actions affect real jobs." : "Live events via /ws/broadcast, with /api polling as fallback, using your bearer token.")
                 : (tone === "plain" ? "Connect to your running server to see real jobs and agents." : "Point this console at a running `mco serve` gateway to go live.")}
             </div>
           </div>
