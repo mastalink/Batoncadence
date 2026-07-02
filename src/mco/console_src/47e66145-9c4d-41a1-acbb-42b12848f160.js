@@ -2,10 +2,15 @@
 // Wraps the demo store (data.js) in a facade. When connected, all reads/writes
 // go to the real MCOrchestr8 REST API:
 //   GET  /api/jobs            GET /api/agents       GET /api/jobs/{id}/events
-//   POST /api/jobs            POST /api/jobs/{id}/approve|reject
+//   POST /api/jobs            POST /api/jobs/{id}/approve|reject|retry
 //   PUT  /api/jobs/{id}
-// Polls every 4s (same cadence as the built-in /dashboard) and synthesizes
-// toasts + an activity feed from status diffs.
+//   POST /api/agents          POST /api/agents/{id}/reset-token
+//   DELETE /api/agents/{id}
+//   GET  /api/integrations    POST /api/integrations/{name}/sync
+//   GET/POST /api/context     WS /ws/broadcast
+// Live updates ride /ws/broadcast (token-only auth frame); polling drops to a
+// 30s safety net when the socket is up, 4s otherwise. Poll() synthesizes
+// toasts + an activity feed from status diffs either way.
 (function () {
   const demo = window.BatonStore; // set by data.js (must load first)
   const listeners = new Set();
@@ -15,6 +20,7 @@
   let connState = "demo"; // demo | connecting | live
   let lastError = null;
   let pollTimer = null;
+  let ws = null, wsOk = false, wsRetryTimer = null, wsBackoff = 2000;
 
   let jobs = [];
   let agents = [];
@@ -86,11 +92,51 @@
 
   function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(poll, 4000);
+    // With a live WebSocket feed, polling is just a safety net (agents list,
+    // missed frames); without one it's the primary refresh path.
+    pollTimer = setInterval(poll, wsOk ? 30000 : 4000);
   }
   function stopPolling() {
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
+  }
+
+  // ---- live event feed over /ws/broadcast (polling stays as fallback) ----
+  function startWs() {
+    if (!isLive() || typeof WebSocket === "undefined") return;
+    const base = ((cfg && cfg.url) || "").replace(/\/+$/, "").replace(/^http/, "ws");
+    if (!base) return;
+    try { ws = new WebSocket(base + "/ws/broadcast"); } catch (e) { return; }
+    ws.onopen = () => {
+      // Token-only auth frame; the gateway resolves identity from the hash.
+      try { ws.send(JSON.stringify({ type: "authenticate", payload: { token: (cfg && cfg.token) || "" } })); } catch (e) { /* onclose retries */ }
+    };
+    ws.onmessage = (m) => {
+      let msg = null;
+      try { msg = JSON.parse(m.data); } catch (e) { return; }
+      if (msg.type === "authenticated") {
+        if (msg.payload && msg.payload.success === false) { wsOk = false; try { ws.close(); } catch (e) { } return; }
+        if (!wsOk) { wsOk = true; wsBackoff = 2000; startPolling(); }
+        return;
+      }
+      if (msg.type === "event") {
+        if (!wsOk) { wsOk = true; wsBackoff = 2000; startPolling(); } // zero-config gateways send no ack
+        poll(); // refresh state now; poll() synthesizes toasts + activity
+      }
+    };
+    ws.onclose = () => {
+      ws = null;
+      if (wsOk) { wsOk = false; if (isLive()) startPolling(); } // back to 4s
+      if (isLive()) { wsRetryTimer = setTimeout(startWs, wsBackoff); wsBackoff = Math.min(wsBackoff * 2, 30000); }
+    };
+    ws.onerror = () => { try { ws && ws.close(); } catch (e) { } };
+  }
+  function stopWs() {
+    if (wsRetryTimer) clearTimeout(wsRetryTimer);
+    wsRetryTimer = null;
+    wsOk = false;
+    const w = ws; ws = null;
+    if (w) { try { w.close(); } catch (e) { } }
   }
 
   const facade = {
@@ -109,6 +155,7 @@
         jobs = []; agents = []; eventsCache = {}; prevStatus = {}; liveActivity = [];
         await poll();
         startPolling();
+        startWs();
         toast("ok", "Live", "Connected to " + cfg.url);
         emit();
         return true;
@@ -120,6 +167,7 @@
       }
     },
     disconnect() {
+      stopWs();
       stopPolling();
       connState = "demo"; lastError = null;
       localStorage.removeItem("baton_conn");
@@ -155,8 +203,8 @@
     },
     async retryNow(jobId) {
       if (!isLive()) return demo.retryNow(jobId);
-      try { await api("/api/jobs/" + jobId, { method: "PUT", body: JSON.stringify({ status: "pending" }) }); await poll(); toast("ok", "Re-queued", "Job sent back to the board."); }
-      catch (e) { toast("err", "Retry failed", e.message + " (the gateway only lets the target role update a job)"); }
+      try { await api("/api/jobs/" + jobId + "/retry", { method: "POST" }); await poll(); toast("ok", "Re-queued", "Job sent back to the board."); }
+      catch (e) { toast("err", "Retry failed", e.message + " (retry needs an approver-role token)"); }
     },
     async createJob(payload) {
       if (!isLive()) return demo.createJob(payload);
@@ -212,6 +260,46 @@
     async testConnector(name) {
       if (!isLive()) throw new Error("Connect to your orchestrator first.");
       return api("/api/settings/test-connector", { method: "POST", body: JSON.stringify({ name }) });
+    },
+    async registerAgent(payload) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      const res = await api("/api/agents", { method: "POST", body: JSON.stringify(payload) });
+      await poll();
+      return res;
+    },
+    async resetToken(instanceId) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      return api("/api/agents/" + instanceId + "/reset-token", { method: "POST" });
+    },
+    async deleteAgent(instanceId) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      const res = await api("/api/agents/" + instanceId, { method: "DELETE" });
+      await poll();
+      return res;
+    },
+    async getIntegrations() {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      return api("/api/integrations");
+    },
+    async syncConnector(name) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      return api("/api/integrations/" + name + "/sync", { method: "POST" });
+    },
+
+    // ---- Drumline shared context (live only) ----
+    async getContext(opts) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      const o = opts || {};
+      const params = new URLSearchParams();
+      if (o.query) params.set("query", o.query);
+      if (o.tags) params.set("tags", o.tags);
+      if (o.limit) params.set("limit", String(o.limit));
+      const qs = params.toString();
+      return api("/api/context" + (qs ? "?" + qs : ""));
+    },
+    async addContext(payload) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      return api("/api/context", { method: "POST", body: JSON.stringify(payload) });
     },
 
     // ---- demo sim controls (no-ops while live) ----

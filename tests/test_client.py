@@ -26,6 +26,22 @@ class Recorder:
             return httpx.Response(200, json={"success": True, "job": {"id": "j2"}})
         if path == "/api/agents":
             return httpx.Response(200, json=[{"instance_id": "coding-beast-codex", "role": "codex", "status": "online"}])
+        if path == "/api/settings" and request.method == "GET":
+            return httpx.Response(200, json={
+                "groups": {"governance": [{"key": "MCO_KILL_SWITCH", "type": "bool",
+                                           "label": "Kill switch", "value": False}]},
+                "edition": "community", "known_scopes": ["admin", "jobs:read"],
+            })
+        if path == "/api/settings" and request.method == "PUT":
+            return httpx.Response(200, json={"success": True, "applied": {"MCO_KILL_SWITCH": "true"}})
+        if path == "/api/agents/orgs":
+            return httpx.Response(200, json={"orgs": ["default", "acme"], "in_use": ["default"], "host_operator": True})
+        if path.endswith("/reset-token") and request.method == "POST":
+            instance_id = path.split("/")[3]
+            return httpx.Response(200, json={"success": True, "instance_id": instance_id, "token": "mco_tok_newtoken"})
+        if path.startswith("/api/agents/") and request.method == "DELETE":
+            instance_id = path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json={"success": True, "instance_id": instance_id})
         return httpx.Response(404, json={})
 
     @property
@@ -84,3 +100,51 @@ def test_agents_lists():
     rec = Recorder()
     agents = _client(rec).agents()
     assert agents[0]["role"] == "codex"
+
+
+def test_settings_get_and_put():
+    rec = Recorder()
+    c = _client(rec)
+
+    data = c.settings()
+    assert rec.last.method == "GET"
+    assert rec.last.url.path == "/api/settings"
+    assert rec.last.headers["authorization"] == "Bearer tok123"
+    assert data["edition"] == "community"
+    assert data["groups"]["governance"][0]["key"] == "MCO_KILL_SWITCH"
+
+    res = c.settings_put({"MCO_KILL_SWITCH": True})
+    assert rec.last.method == "PUT"
+    assert rec.last.url.path == "/api/settings"
+    body = json.loads(rec.last.content)
+    assert body == {"MCO_KILL_SWITCH": True}
+    assert res["success"] is True
+
+
+def test_orgs():
+    rec = Recorder()
+    data = _client(rec).orgs()
+    assert rec.last.method == "GET"
+    assert rec.last.url.path == "/api/agents/orgs"
+    assert rec.last.headers["authorization"] == "Bearer tok123"
+    assert data["orgs"] == ["default", "acme"]
+    assert data["host_operator"] is True
+
+
+def test_reset_token_posts():
+    rec = Recorder()
+    res = _client(rec).reset_token("coding-beast-codex")
+    assert rec.last.method == "POST"
+    assert rec.last.url.path == "/api/agents/coding-beast-codex/reset-token"
+    assert rec.last.headers["authorization"] == "Bearer tok123"
+    assert res["success"] is True
+    assert res["token"] == "mco_tok_newtoken"
+
+
+def test_delete_agent():
+    rec = Recorder()
+    res = _client(rec).delete_agent("coding-beast-codex")
+    assert rec.last.method == "DELETE"
+    assert rec.last.url.path == "/api/agents/coding-beast-codex"
+    assert rec.last.headers["authorization"] == "Bearer tok123"
+    assert res == {"success": True, "instance_id": "coding-beast-codex"}

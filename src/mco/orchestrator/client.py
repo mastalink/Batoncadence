@@ -188,3 +188,38 @@ class GatewayClient:
             r = c.get("/api/agents")
             r.raise_for_status()
             return r.json()
+
+    def settings(self) -> dict:
+        """Current settings grouped for the Control Panel, plus edition and known scopes."""
+        with self._client() as c:
+            r = c.get("/api/settings")
+            r.raise_for_status()
+            return r.json()
+
+    def settings_put(self, values: dict) -> dict:
+        """Apply settings changes; a null/empty value deletes that key."""
+        with self._client() as c:
+            r = c.put("/api/settings", json=values)
+            r.raise_for_status()
+            return r.json()
+
+    def orgs(self) -> dict:
+        """Orgs available for registration, which are already in use, and host-operator status."""
+        with self._client() as c:
+            r = c.get("/api/agents/orgs")
+            r.raise_for_status()
+            return r.json()
+
+    def reset_token(self, instance_id: str) -> dict:
+        """Rotate an agent's access token; the new token is returned exactly once."""
+        with self._client() as c:
+            r = c.post(f"/api/agents/{instance_id}/reset-token")
+            r.raise_for_status()
+            return r.json()
+
+    def delete_agent(self, instance_id: str) -> dict:
+        """Remove an agent registration; its token stops working immediately."""
+        with self._client() as c:
+            r = c.delete(f"/api/agents/{instance_id}")
+            r.raise_for_status()
+            return r.json()
