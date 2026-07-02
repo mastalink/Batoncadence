@@ -149,8 +149,11 @@ class FakeDB:
                 self._context.append(data)
                 return R([dict(data)])
             if op == "select":
+                rows = list(self._context)
+                for col, val in self._q_conds.items():
+                    rows = [r for r in rows if r.get(col) == val]
                 # Newest first, mirroring order("created_at", desc=True)
-                return R([dict(r) for r in reversed(self._context)])
+                return R([dict(r) for r in reversed(rows)])
 
         if t == "agent_job_events":
             if op == "insert":

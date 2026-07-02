@@ -58,7 +58,7 @@ async def run_integration_action(name: str, payload: dict, agent: dict = Depends
     approval endpoints. Agents acting autonomously should instead address a
     job to the connector's role, keeping the lease/audit lifecycle intact.
     """
-    from mco.orchestrator.routes import get_approver_roles
+    from mco.orchestrator.utils import get_approver_roles
     if (agent.get("role") or "").lower() not in get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to run connector actions directly")
 

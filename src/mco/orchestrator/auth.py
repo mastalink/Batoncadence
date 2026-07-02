@@ -69,7 +69,7 @@ def hash_token(token: str) -> str:
 
 
 def _approver_roles() -> set:
-    from mco.orchestrator.routes import get_approver_roles  # lazy: avoids import cycle
+    from mco.orchestrator.utils import get_approver_roles
     return get_approver_roles()
 
 
