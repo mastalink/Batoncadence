@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 import mco.orchestrator.routes as routes_mod
 from mco.orchestrator.auth import hash_token, require_agent
-from mco.orchestrator.routes import router, agents_router
+from mco.orchestrator.routes import router, agents_router, events_router
 
 
 # ── App factory ──────────────────────────────────────────────────────────────
@@ -15,6 +15,7 @@ def _build_app() -> FastAPI:
     app = FastAPI()
     app.include_router(router)
     app.include_router(agents_router)
+    app.include_router(events_router)
     return app
 
 
@@ -149,8 +150,11 @@ class FakeDB:
                 self._context.append(data)
                 return R([dict(data)])
             if op == "select":
+                rows = list(self._context)
+                for col, val in self._q_conds.items():
+                    rows = [r for r in rows if r.get(col) == val]
                 # Newest first, mirroring order("created_at", desc=True)
-                return R([dict(r) for r in reversed(self._context)])
+                return R([dict(r) for r in reversed(rows)])
 
         if t == "agent_job_events":
             if op == "insert":
@@ -380,3 +384,61 @@ class TestDropboxSuccess:
         assert resp.status_code == 200
         for agent in resp.json():
             assert "auth_token_hash" not in agent
+
+
+# ── Cross-job audit feed (/api/events) ────────────────────────────────────────
+
+class TestRecentEvents:
+    """GET /api/events: newest-first cross-job feed with job enrichment and
+    host-operator/org tenancy rules."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, monkeypatch):
+        self.db = FakeDB()
+        monkeypatch.setattr(routes_mod, "get_db_client", lambda: self.db)
+        self.app = _build_app()
+        self.app.dependency_overrides[require_agent] = lambda: AGENT
+        self.http = TestClient(self.app)
+
+    def _event(self, job_id, event="created", **kw):
+        data = {"job_id": job_id, "event": event, "actor_id": "a1", "detail": {}}
+        data.update(kw)
+        self.db.table("agent_job_events").insert(data).execute()
+
+    def test_events_enriched_with_job_title(self):
+        jid = self.db.add_job(title="Fix the widget", status="pending",
+                              target_agent_role="codex")
+        self._event(jid, "created")
+        rows = self.http.get("/api/events").json()
+        assert len(rows) == 1
+        assert rows[0]["event"] == "created"
+        assert rows[0]["job_title"] == "Fix the widget"
+        assert rows[0]["target_agent_role"] == "codex"
+
+    def test_default_org_sees_all_orgs(self):
+        a = self.db.add_job(title="A", org_id="org-a")
+        b = self.db.add_job(title="B")  # default org
+        self._event(a); self._event(b)
+        rows = self.http.get("/api/events").json()
+        assert {r["job_title"] for r in rows} == {"A", "B"}
+
+    def test_org_caller_sees_only_own_jobs_events(self):
+        a = self.db.add_job(title="A", org_id="org-a")
+        b = self.db.add_job(title="B")  # default org
+        self._event(a); self._event(b)
+        self.app.dependency_overrides[require_agent] = lambda: {
+            "instance_id": "acme-1", "role": "codex", "status": "online",
+            "org_id": "org-a"}
+        rows = self.http.get("/api/events").json()
+        assert {r["job_title"] for r in rows} == {"A"}
+
+    def test_since_filters_older_events(self):
+        jid = self.db.add_job(title="T")
+        self._event(jid, "created", created_at="2026-01-01T00:00:00Z")
+        self._event(jid, "leased",  created_at="2026-01-02T00:00:00Z")
+        rows = self.http.get("/api/events", params={"since": "2026-01-01T12:00:00Z"}).json()
+        assert [r["event"] for r in rows] == ["leased"]
+
+    def test_no_db_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(routes_mod, "get_db_client", lambda: None)
+        assert self.http.get("/api/events").json() == []

@@ -62,7 +62,7 @@ async def handle_job_create(
         # run the Phase A migration keep working for plain jobs.
         if requires_approval:
             data["requires_approval"] = True
-        if max_retries:
+        if max_retries is not None:
             data["max_retries"] = max_retries
         if escalate_to_role:
             data["escalate_to_role"] = escalate_to_role

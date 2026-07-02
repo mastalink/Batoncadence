@@ -105,6 +105,39 @@ def test_websocket_successful_auth():
             assert db_client.table_mock.updated_fields["status"] == "online"
 
 
+def test_websocket_token_only_auth():
+    """A client presenting only its token (no instance_id/role) is resolved by
+    token hash — the path the console and `mco watch` use."""
+    app = create_app()
+    client = TestClient(app)
+
+    token = "my-secret-token"
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    agent_data = {
+        "instance_id": "test_agent",
+        "role": "codex",
+        "auth_token_hash": token_hash,
+        "status": "offline"
+    }
+
+    db_client = MockDBClient(registered_agents=[agent_data])
+
+    with mock.patch("mco.orchestrator.routes.get_db_client", return_value=db_client):
+        with client.websocket_connect("/ws/broadcast") as websocket:
+            websocket.send_json({
+                "type": "authenticate",
+                "payload": {"token": token}
+            })
+
+            res = websocket.receive_json()
+            assert res["type"] == "authenticated"
+            assert res["payload"]["success"] is True
+
+            # The identity was resolved from the hash and marked online.
+            assert db_client.table_mock.updated_fields is not None
+            assert db_client.table_mock.updated_fields["status"] == "online"
+
+
 def test_websocket_failed_auth_wrong_token():
     """Verify that a client presenting an invalid token is rejected and disconnected."""
     app = create_app()

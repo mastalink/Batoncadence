@@ -203,8 +203,20 @@ async def update_agent(instance_id: str, payload: dict,
         update["scopes"] = scopes or None  # empty list -> role-derived defaults
     if payload.get("status") in ("online", "offline", "disabled"):
         update["status"] = payload["status"]
+    if payload.get("org"):
+        # Host operators may move an agent from their own org into any allowed
+        # org. One-way by design: after the move the agent belongs to the
+        # target tenant and is managed from there (strict org isolation).
+        if _caller_org(caller) != "default":
+            raise HTTPException(status_code=403,
+                                detail="Only the host operator may move agents between orgs")
+        target = str(payload["org"]).strip()
+        if target not in allowed_orgs():
+            raise HTTPException(status_code=400,
+                                detail=f"Org '{target}' is not configured. Allowed: {', '.join(allowed_orgs())}")
+        update["org_id"] = None if target == "default" else target
     if not update:
-        raise HTTPException(status_code=400, detail="Nothing to update (role, scopes, status)")
+        raise HTTPException(status_code=400, detail="Nothing to update (role, scopes, status, org)")
     res = db.table("agent_registry").update(update).eq("instance_id", instance_id).execute()
     if not res.data:
         raise HTTPException(status_code=500, detail="Update failed to persist")
@@ -278,7 +290,21 @@ SETTING_GROUPS = {
         "NTFY_SERVER": {"type": "text", "label": "ntfy server", "placeholder": "https://ntfy.sh"},
         "NTFY_TOPIC": {"type": "text", "label": "ntfy topic (blank = notifications off)"},
     },
+    "connectors": {
+        "SERVICENOW_INSTANCE_URL": {"type": "text", "label": "ServiceNow instance URL",
+                                    "placeholder": "https://devXXXXXX.service-now.com"},
+        "SERVICENOW_USERNAME": {"type": "text", "label": "ServiceNow username", "placeholder": "admin"},
+        "SERVICENOW_PASSWORD": {"type": "secret", "label": "ServiceNow password"},
+        "DYNATRACE_BASE_URL": {"type": "text", "label": "Dynatrace URL",
+                               "placeholder": "https://abc12345.live.dynatrace.com"},
+        "DYNATRACE_API_TOKEN": {"type": "secret", "label": "Dynatrace API token (problems.read + problems.write)"},
+    },
 }
+
+# Saving any of these means the live connector registry was built from stale
+# credentials; rebuild it on the next call so a "Test connection" reflects the
+# values just entered.
+_CONNECTOR_KEYS = frozenset(SETTING_GROUPS["connectors"])
 
 _ALL_SETTINGS = {k: (g, meta) for g, keys in SETTING_GROUPS.items() for k, meta in keys.items()}
 
@@ -322,8 +348,12 @@ async def put_settings(payload: dict, caller: dict = Depends(require_scopes("adm
     if unknown:
         raise HTTPException(status_code=400,
                             detail=f"Not settable via API: {', '.join(unknown)}")
+    from mco.config import SENSITIVE_KEYS
+    from mco.security import get_secret_store
     config = get_config()
+    store_unlocked = get_secret_store().is_unlocked
     applied = {}
+    touched_connector = False
     for key, value in payload.items():
         meta = _ALL_SETTINGS[key][1]
         if meta["type"] == "bool":
@@ -339,10 +369,39 @@ async def put_settings(payload: dict, caller: dict = Depends(require_scopes("adm
             config.delete(key)
             applied[key] = None
         else:
-            config.set(key, value)
+            # Secrets ride the encrypted store when it's unlocked, mirroring the
+            # terminal wizard; otherwise they land in ~/.mco/.env like any value.
+            encrypt = key in SENSITIVE_KEYS and store_unlocked
+            config.set(key, value, encrypt=encrypt)
             applied[key] = True if meta["type"] == "secret" else value
+        if key in _CONNECTOR_KEYS:
+            touched_connector = True
         logger.info(f"Setting {key} changed via API by {caller.get('instance_id')}")
+    if touched_connector:
+        from mco.connectors import reset_connectors
+        reset_connectors()  # next health check rebuilds from the new credentials
     return {"success": True, "applied": applied}
+
+
+@settings_router.post("/test-connector")
+async def test_connector(payload: dict, caller: dict = Depends(require_scopes("admin"))):
+    """Rebuild connectors from the saved credentials and report one's health -
+    the same reachability/auth probe the terminal setup wizard runs, surfaced
+    in the console so an operator can set up and verify without a shell."""
+    name = str((payload or {}).get("name", "")).strip().lower()
+    if name not in ("servicenow", "dynatrace"):
+        raise HTTPException(status_code=400, detail="name must be 'servicenow' or 'dynatrace'")
+    from mco.connectors import build_connectors, get_connector, reset_connectors
+    reset_connectors()
+    build_connectors(force=True)
+    conn = get_connector(name)
+    if not conn:
+        return {"ok": False, "detail": f"{name} is not configured yet - fill in its fields and Save first."}
+    try:
+        health = conn.health()
+    except Exception as e:  # a connector probe should never 500 the panel
+        return {"ok": False, "detail": str(e)}
+    return {"ok": bool(health.get("ok")), "detail": health.get("detail", "")}
 
 
 # ── Workflows (mco workflow parity) ──────────────────────────────────────────

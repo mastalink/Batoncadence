@@ -236,6 +236,23 @@ class TestEditDelete:
         _ctx().http.post("/api/agents", json={"instance_id": "ed3", "role": "codex"})
         assert _ctx().http.patch("/api/agents/ed3", json={}).status_code == 400
 
+    def test_patch_org_moves_agent(self):
+        _ctx().cfg.values["MCO_ORGS"] = "acme"
+        _ctx().http.post("/api/agents", json={"instance_id": "mover", "role": "codex"})
+        resp = _ctx().http.patch("/api/agents/mover", json={"org": "acme"})
+        assert resp.status_code == 200
+        assert resp.json()["agent"]["org_id"] == "acme"
+
+    def test_patch_org_unknown_is_400(self):
+        _ctx().http.post("/api/agents", json={"instance_id": "mover2", "role": "codex"})
+        assert _ctx().http.patch("/api/agents/mover2", json={"org": "nope"}).status_code == 400
+
+    def test_patch_org_by_org_admin_is_403(self):
+        _ctx().cfg.values["MCO_ORGS"] = "acme"
+        _as(ORG_ADMIN)
+        _ctx().http.post("/api/agents", json={"instance_id": "acme-w", "role": "codex"})
+        assert _ctx().http.patch("/api/agents/acme-w", json={"org": "default"}).status_code == 403
+
     def test_delete_kills_the_token(self):
         body = _ctx().http.post("/api/agents", json={"instance_id": "del", "role": "codex"}).json()
         assert _ctx().http.delete("/api/agents/del").status_code == 200
@@ -251,7 +268,8 @@ class TestSettings:
         assert resp.status_code == 200
         body = resp.json()
         assert set(body["groups"]) == {"governance", "memory", "presence", "tenancy",
-                                       "observability", "edition", "security", "notifications"}
+                                       "observability", "edition", "security", "notifications",
+                                       "connectors"}
         assert body["edition"]["edition"] == "community"
         assert "jobs:approve" in body["known_scopes"]
 
@@ -287,6 +305,52 @@ class TestSettings:
         _as(WORKER)
         assert _ctx().http.get("/api/settings").status_code == 403
         assert _ctx().http.put("/api/settings", json={"MCO_KILL_SWITCH": True}).status_code == 403
+
+    def test_connectors_group_exposes_credential_fields(self):
+        conn = {i["key"]: i for i in _ctx().http.get("/api/settings").json()["groups"]["connectors"]}
+        assert conn["SERVICENOW_INSTANCE_URL"]["type"] == "text"
+        assert conn["SERVICENOW_PASSWORD"]["type"] == "secret"
+        assert conn["DYNATRACE_API_TOKEN"]["type"] == "secret"
+
+    def test_put_connector_key_resets_registry(self, monkeypatch):
+        import mco.orchestrator.admin_routes as admin
+        called = {"n": 0}
+        monkeypatch.setattr(admin, "reset_connectors", lambda: called.__setitem__("n", called["n"] + 1),
+                            raising=False)
+        # patch the import target so `from mco.connectors import reset_connectors` resolves to our spy
+        monkeypatch.setattr("mco.connectors.reset_connectors",
+                            lambda: called.__setitem__("n", called["n"] + 1))
+        resp = _ctx().http.put("/api/settings", json={"SERVICENOW_INSTANCE_URL": "https://dev1.service-now.com"})
+        assert resp.status_code == 200
+        assert _ctx().cfg.values["SERVICENOW_INSTANCE_URL"] == "https://dev1.service-now.com"
+        assert called["n"] >= 1   # registry invalidated so the next test reflects new creds
+
+    def test_test_connector_validates_name(self):
+        resp = _ctx().http.post("/api/settings/test-connector", json={"name": "splunk"})
+        assert resp.status_code == 400
+
+    def test_test_connector_reports_unconfigured(self, monkeypatch):
+        monkeypatch.setattr("mco.connectors.build_connectors", lambda force=False: [])
+        monkeypatch.setattr("mco.connectors.reset_connectors", lambda: None)
+        monkeypatch.setattr("mco.connectors.get_connector", lambda name: None)
+        resp = _ctx().http.post("/api/settings/test-connector", json={"name": "dynatrace"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert "configured" in body["detail"]
+
+    def test_test_connector_returns_health(self, monkeypatch):
+        class _Conn:
+            def health(self):
+                return {"ok": True, "detail": "connected to https://dev1.service-now.com"}
+        monkeypatch.setattr("mco.connectors.build_connectors", lambda force=False: [_Conn()])
+        monkeypatch.setattr("mco.connectors.reset_connectors", lambda: None)
+        monkeypatch.setattr("mco.connectors.get_connector", lambda name: _Conn())
+        resp = _ctx().http.post("/api/settings/test-connector", json={"name": "servicenow"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert "connected" in body["detail"]
 
 
 # ── Presence / health checks ─────────────────────────────────────────────────

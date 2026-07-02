@@ -15,14 +15,10 @@ from mco.notifiers.ntfy import (
     notify_job_needs_approval,
 )
 
-# Roles allowed to approve/reject jobs paused at the human-in-the-loop gate.
-DEFAULT_APPROVER_ROLES = "human,admin,operator"
-
-
-def get_approver_roles() -> set:
-    """Lower-cased roles permitted to decide approval gates (MCO_APPROVER_ROLES)."""
-    raw = get_config().get("MCO_APPROVER_ROLES") or DEFAULT_APPROVER_ROLES
-    return {r.strip().lower() for r in raw.split(",") if r.strip()}
+from mco.orchestrator import utils as utils_mod
+# Re-exported for back-compat: these used to live here (now in utils to
+# break the routes <-> auth import cycle).
+from mco.orchestrator.utils import DEFAULT_APPROVER_ROLES, get_approver_roles  # noqa: F401
 
 
 def agent_org(agent: dict) -> str:
@@ -169,6 +165,7 @@ def touch_agent_presence(db_client, agent: dict) -> None:
 logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
 agents_router = APIRouter(prefix="/api/agents")
+events_router = APIRouter(prefix="/api/events")
 
 # Dynamic callback hook for gateway websocket notifications
 # Callable signature: async def callback(event: str, job: dict)
@@ -287,7 +284,7 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
         # Governance columns are only sent when used (pre-migration DB compatibility).
         if requires_approval:
             data["requires_approval"] = True
-        if max_retries:
+        if max_retries is not None:
             data["max_retries"] = max_retries
         if escalate_to_role:
             data["escalate_to_role"] = escalate_to_role
@@ -517,13 +514,74 @@ async def get_job_events(job_id: str, agent: dict = Depends(require_scopes("jobs
     return get_events(db_client, job_id)
 
 
+@events_router.get("")
+async def get_recent_events(
+    since: str = "",
+    limit: int = 100,
+    agent: dict = Depends(require_scopes("jobs:read")),
+):
+    """Cross-job audit feed, newest event first (powers the Activity screen).
+
+    `since` is an ISO timestamp lower bound (exclusive). Events are enriched
+    with their job's title/status so the caller doesn't need a second fetch.
+    Tenant rules match the rest of the API: the default org is the host
+    operator and sees everything; other orgs see only their own jobs' events.
+    """
+    db_client = get_db_client()
+    if not db_client:
+        return []
+    limit = max(1, min(int(limit or 100), 500))
+    try:
+        res = (
+            db_client.table("agent_job_events").select("*")
+            .order("created_at", desc=True).limit(limit).execute()
+        )
+        events = res.data or []
+    except Exception as e:
+        logger.error(f"Error fetching events: {e}")
+        return []
+
+    # `since` filtered in Python: ISO-8601 strings compare lexicographically
+    # and LocalStore's query builder has no gt().
+    if since:
+        events = [e for e in events if str(e.get("created_at") or "") > since]
+
+    # Enrich with job title/status; the same map drives tenant scoping.
+    jobs_by_id = {}
+    try:
+        jres = (
+            db_client.table("agent_jobs").select("*")
+            .order("created_at", desc=True).limit(500).execute()
+        )
+        jobs_by_id = {j.get("id"): j for j in (jres.data or [])}
+    except Exception as e:
+        logger.debug(f"Event enrichment skipped: {e}")
+
+    caller_org = agent_org(agent)
+    out = []
+    for ev in events:
+        job = jobs_by_id.get(ev.get("job_id"))
+        if caller_org != "default":
+            # Org callers only see their own jobs' events; events whose job
+            # fell out of the enrichment window are omitted rather than leaked.
+            if not job or job_org(job) != caller_org:
+                continue
+        entry = dict(ev)
+        if job:
+            entry["job_title"] = job.get("title")
+            entry["job_status"] = job.get("status")
+            entry["target_agent_role"] = job.get("target_agent_role")
+        out.append(entry)
+    return out
+
+
 async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str = "") -> dict:
     """Shared approve/reject flow for jobs paused at the human-in-the-loop gate."""
     db_client = get_db_client()
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
 
-    if (agent.get("role") or "").lower() not in get_approver_roles():
+    if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to decide approval gates")
 
     job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
@@ -582,7 +640,7 @@ async def retry_job(job_id: str, agent: dict = Depends(require_scopes("jobs:appr
     db_client = get_db_client()
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
-    if (agent.get("role") or "").lower() not in get_approver_roles():
+    if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to re-queue jobs")
 
     job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()

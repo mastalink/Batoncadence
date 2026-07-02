@@ -17,7 +17,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("mco.cli")
 
@@ -31,7 +31,7 @@ from rich.table import Table
 
 from mco.config import get_config
 from mco.security import get_secret_store
-from mco.orchestrator.routes import router as jobs_router, agents_router, register_broadcast_callback
+from mco.orchestrator.routes import router as jobs_router, agents_router, events_router, register_broadcast_callback
 from mco.orchestrator.listener import AgentListener
 from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
 
@@ -92,7 +92,10 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        try:
+            self.active_connections.remove(websocket)
+        except ValueError:
+            pass  # already removed by a concurrent disconnect
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
@@ -126,6 +129,7 @@ def create_app() -> FastAPI:
     # Mount REST routing
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
+    app_server.include_router(events_router)
 
     # Enterprise integrations (ServiceNow, Dynatrace, webhooks)
     from mco.orchestrator.integration_routes import integrations_router
@@ -218,6 +222,13 @@ def create_app() -> FastAPI:
                     return
                 authenticated = True
                 ws_manager.active_connections.append(websocket)
+                # Ack success so clients (console, `mco watch`) know they're in
+                # without waiting for the first broadcast.
+                try:
+                    await websocket.send_json({"type": "authenticated",
+                                               "payload": {"success": True}})
+                except Exception:
+                    pass
             else:
                 # No token configured: zero-config local use (loopback default).
                 logger.warning("No MCO_LOCAL_TOKEN set — accepting local WebSocket without auth.")
@@ -235,39 +246,45 @@ def create_app() -> FastAPI:
                     instance_id = payload.get("instance_id")
                     role = payload.get("role")
                     token = payload.get("token")
-                    
-                    if instance_id and role and token:
-                        # Calculate SHA-256 hash of token
+
+                    if token:
+                        # Verify by token hash. instance_id, when supplied, must
+                        # match the same row; token-only auth (console, `mco
+                        # watch`) resolves the identity from the hash alone —
+                        # the token is the secret either way.
                         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-                        
-                        # Verify in DB
-                        res = db_client.table("agent_registry")\
+
+                        q = db_client.table("agent_registry")\
                             .select("*")\
-                            .eq("instance_id", instance_id)\
-                            .eq("auth_token_hash", token_hash)\
-                            .execute()
-                        
+                            .eq("auth_token_hash", token_hash)
+                        if instance_id:
+                            q = q.eq("instance_id", instance_id)
+                        res = q.execute()
+
                         if res.data:
+                            row = res.data[0]
+                            instance_id = row.get("instance_id") or instance_id
+                            role = row.get("role") or role
                             authenticated = True
                             authenticated_instance_id = instance_id
-                            
+
                             # Update status to online in database
                             from datetime import datetime, timezone
                             db_client.table("agent_registry").update({
                                 "status": "online",
                                 "last_seen_at": datetime.now(timezone.utc).isoformat()
                             }).eq("instance_id", instance_id).execute()
-                            
+
                             # Register in ws_manager for broadcast receiving
                             ws_manager.active_connections.append(websocket)
-                            
+
                             # Send success frame
                             await websocket.send_json({
                                 "type": "authenticated",
                                 "payload": {"success": True}
                             })
                             logger.info(f"Agent '{instance_id}' ({role}) successfully authenticated.")
-                            
+
                             # NTFY addon: notify agent online
                             try:
                                 notify_agent_online(role, instance_id)
@@ -943,6 +960,15 @@ def doctor(
                          if decorate_presence(dict(a), threshold)["effective_status"] == "online")
             ok(f"Agents: {len(agents)} registered, {online} online",
                f"threshold {threshold}s")
+            # Schema currency: the Drumline dedup migration (content_hash).
+            # LocalStore is schema-less JSON, so only Postgres/Supabase can lag.
+            if backend != "local":
+                try:
+                    db.table("agent_context").select("content_hash").limit(1).execute()
+                    ok("Migrations: agent_context.content_hash present (dedup active)")
+                except Exception:
+                    warn("Drumline dedup migration not applied (agent_context.content_hash missing)",
+                         "Run 'mco upgrade --apply' (or apply docs/migrations/2026-07_drumline_dedup.sql).")
         except Exception as e:
             bad(f"Database query failed ({backend}): {e}",
                 "Check SUPABASE_URL/SUPABASE_KEY, or file permissions on ~/.mco/local.db.")
@@ -1232,7 +1258,7 @@ def run_workflow(
     from mco.orchestrator.workflows import load_workflow, topo_order, submit_workflow, WorkflowError
 
     try:
-        workflow = load_workflow(file)
+        workflow = load_workflow(file, allow_path=True)
     except WorkflowError as e:
         console.print(f"[red][ERROR] Invalid workflow: {e}[/red]")
         raise typer.Exit(code=1)
@@ -1333,6 +1359,268 @@ def retry(job_id: str = typer.Argument(..., help="Failed/rejected job ID to re-q
     except Exception as e:
         console.print(f"[red][ERROR] Retry failed: {e}[/red]")
         raise typer.Exit(code=1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5b. Drumline & admin parity
+# ─────────────────────────────────────────────────────────────────────────────
+@app.command("recall")
+def recall_context(
+    query: str = typer.Argument("", help="Free-text search over shared context (blank = most recent)."),
+    tags: str = typer.Option("", "--tags", help="Comma-separated tag filter."),
+    limit: int = typer.Option(5, "--limit", help="Max entries to return."),
+    role: str = typer.Option("", "--role", help="Bias results toward this role (role-affine scoring)."),
+):
+    """Recall the most relevant Drumline shared-context entries."""
+    try:
+        client = _gateway_client()
+        if role:
+            client.role = role
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        entries = client.recall(query=query, tags=tag_list or None, limit=limit)
+    except Exception as e:
+        console.print(f"[red][ERROR] Recall failed: {e}[/red]")
+        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
+        raise typer.Exit(code=1)
+
+    if not entries:
+        console.print("[yellow]No matching context found.[/yellow]")
+        return
+
+    table = Table(title="Drumline Recall", show_header=True, header_style="bold magenta")
+    table.add_column("Kind", style="cyan")
+    table.add_column("Title", style="white")
+    table.add_column("Content", style="dim")
+    table.add_column("Tags", style="green")
+    table.add_column("By", style="white")
+    for e in entries:
+        content = (e.get("content") or "").strip().replace("\n", " ")
+        if len(content) > 120:
+            content = content[:120] + "…"
+        table.add_row(
+            str(e.get("kind", "")),
+            str(e.get("title", "")),
+            content,
+            ", ".join(e.get("tags") or []),
+            str(e.get("created_by") or "-"),
+        )
+    console.print(table)
+
+
+@app.command("remember")
+def remember_context(
+    title: str = typer.Argument(..., help="Short title for this memory entry."),
+    content: str = typer.Argument(..., help="The content to remember."),
+    kind: str = typer.Option("fact", "--kind", help="Entry kind: fact, decision, lesson, handoff, or artifact."),
+    tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
+):
+    """Append an entry to the Drumline shared context."""
+    try:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        res = _gateway_client().remember(title=title, content=content, kind=kind, tags=tag_list or None)
+        entry = (res or {}).get("entry") or {}
+        console.print(f"[green][OK][/green] Remembered -> {entry.get('id', '?')}")
+    except Exception as e:
+        console.print(f"[red][ERROR] Remember failed: {e}[/red]")
+        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
+        raise typer.Exit(code=1)
+
+
+@app.command("settings")
+def settings_cmd(
+    key: str = typer.Argument(None, help="Setting key to read or write (blank = list all)."),
+    value: str = typer.Argument(None, help="New value for the key (omit with --unset to clear)."),
+    unset: bool = typer.Option(False, "--unset", help="Clear the key back to its default."),
+):
+    """View or change gateway settings (the Control Panel, from the terminal)."""
+    try:
+        client = _gateway_client()
+        if key is None:
+            data = client.settings()
+            groups = (data or {}).get("groups") or {}
+            for group, rows in groups.items():
+                table = Table(title=f"Settings: {group}", show_header=True, header_style="bold magenta")
+                table.add_column("Key", style="cyan")
+                table.add_column("Type", style="white")
+                table.add_column("Label", style="dim")
+                table.add_column("Value", style="green")
+                for row in rows:
+                    if row.get("type") == "secret":
+                        display = "•••• (set)" if row.get("value") else "-"
+                    else:
+                        display = str(row.get("value")) if row.get("value") not in (None, "") else "-"
+                    table.add_row(row.get("key", ""), row.get("type", ""), row.get("label", ""), display)
+                console.print(table)
+            return
+
+        if unset:
+            res = client.settings_put({key: None})
+            console.print(f"[bold yellow][OK] {key} cleared.[/bold yellow]" if res.get("success")
+                          else f"[red][ERROR] Failed to clear {key}: {res}[/red]")
+            return
+
+        if value is None:
+            data = client.settings()
+            groups = (data or {}).get("groups") or {}
+            found = None
+            for rows in groups.values():
+                for row in rows:
+                    if row.get("key") == key:
+                        found = row
+                        break
+                if found:
+                    break
+            if not found:
+                console.print(f"[red][ERROR] Unknown setting: {key}[/red]")
+                raise typer.Exit(code=1)
+            if found.get("type") == "secret":
+                display = "•••• (set)" if found.get("value") else "-"
+            else:
+                display = str(found.get("value")) if found.get("value") not in (None, "") else "-"
+            console.print(f"[cyan]{key}[/cyan] = {display}")
+            return
+
+        coerced: Any = value
+        if value.strip().lower() in ("true", "1", "on"):
+            coerced = True
+        elif value.strip().lower() in ("false", "0", "off"):
+            coerced = False
+        res = client.settings_put({key: coerced})
+        if res.get("success"):
+            console.print(f"[green][OK][/green] {key} updated.")
+        else:
+            console.print(f"[red][ERROR] Update failed: {res}[/red]")
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[red][ERROR] {e}[/red]")
+        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
+        raise typer.Exit(code=1)
+
+
+@app.command("orgs")
+def list_orgs_cmd():
+    """List orgs available for registration (Control Panel tenancy dropdown, from the terminal)."""
+    try:
+        data = _gateway_client().orgs()
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to query orgs: {e}[/red]")
+        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
+        raise typer.Exit(code=1)
+
+    orgs = data.get("orgs") or []
+    in_use = set(data.get("in_use") or [])
+    table = Table(title="Orgs", show_header=True, header_style="bold magenta")
+    table.add_column("Org", style="cyan")
+    table.add_column("In use", style="green")
+    for org in orgs:
+        table.add_row(org, "yes" if org in in_use else "")
+    console.print(table)
+    console.print(f"[dim]Host operator: {data.get('host_operator', False)}[/dim]")
+
+
+@app.command("reset-token")
+def reset_token_cmd(instance_id: str = typer.Argument(..., help="Instance ID of the agent to rotate.")):
+    """Rotate an agent's access token. The old token stops working immediately."""
+    try:
+        res = _gateway_client().reset_token(instance_id)
+    except Exception as e:
+        console.print(f"[red][ERROR] Token reset failed: {e}[/red]")
+        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
+        raise typer.Exit(code=1)
+
+    token = res.get("token", "")
+    console.print(Panel.fit(
+        f"[bold green][OK] Token rotated for '{instance_id}'.[/bold green]\n\n"
+        f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
+        f"[bold white]{token}[/bold white]",
+        border_style="green"
+    ))
+
+
+@app.command("deregister")
+def deregister_agent(
+    instance_id: str = typer.Argument(..., help="Instance ID of the agent to remove."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+):
+    """Remove an agent registration. Its token stops working immediately."""
+    if not yes:
+        confirmed = typer.confirm(f"Deregister agent '{instance_id}'? This cannot be undone.")
+        if not confirmed:
+            console.print("[yellow]Cancelled.[/yellow]")
+            raise typer.Exit(code=0)
+    try:
+        _gateway_client().delete_agent(instance_id)
+        console.print(f"[bold yellow][OK] Agent {instance_id} deregistered — its token no longer works.[/bold yellow]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Deregister failed: {e}[/red]")
+        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
+        raise typer.Exit(code=1)
+
+
+@app.command("watch")
+def watch(
+    raw: bool = typer.Option(False, "--raw", help="Print raw event JSON instead of formatted lines."),
+):
+    """Live-tail job events from the gateway's broadcast feed (Ctrl-C to stop)."""
+    config = get_config()
+    base = (config.get("MCO_GATEWAY_URL") or "http://127.0.0.1:18789").rstrip("/")
+    if base.startswith("https://"):
+        ws_url = "wss://" + base[len("https://"):] + "/ws/broadcast"
+    elif base.startswith("http://"):
+        ws_url = "ws://" + base[len("http://"):] + "/ws/broadcast"
+    else:
+        ws_url = base + "/ws/broadcast"
+    token = config.get("MCO_AGENT_TOKEN") or config.get("MCO_LOCAL_TOKEN") or ""
+
+    async def _tail():
+        import websockets
+        backoff = 1.0
+        while True:
+            try:
+                async with websockets.connect(ws_url) as ws:
+                    # Token-only auth: the gateway resolves identity from the
+                    # token hash (or MCO_LOCAL_TOKEN in Local-Only mode).
+                    await ws.send(json.dumps({"type": "authenticate",
+                                              "payload": {"token": token}}))
+                    console.print(f"[green]Watching {ws_url}[/green] [dim](Ctrl-C to stop)[/dim]")
+                    backoff = 1.0
+                    async for frame in ws:
+                        try:
+                            msg = json.loads(frame)
+                        except (TypeError, ValueError):
+                            continue
+                        mtype = msg.get("type")
+                        payload = msg.get("payload") or {}
+                        if mtype == "authenticated":
+                            if payload.get("success") is False:
+                                console.print("[red][ERROR] WebSocket auth failed — "
+                                              "check MCO_AGENT_TOKEN / MCO_LOCAL_TOKEN.[/red]")
+                                return
+                            continue
+                        if raw:
+                            console.print_json(json.dumps(msg))
+                            continue
+                        if mtype == "event":
+                            job = payload.get("job") or {}
+                            ts = datetime.now().strftime("%H:%M:%S")
+                            console.print(
+                                f"[dim]{ts}[/dim] [cyan]{payload.get('event', '?')}[/cyan] "
+                                f"[bold]{job.get('title', '')}[/bold] "
+                                f"[dim]({job.get('status', '')} · {str(job.get('id', ''))[:8]}"
+                                f" → {job.get('target_agent_role', '') or '-'})[/dim]")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                console.print(f"[yellow]Disconnected: {e} — retrying in {int(backoff)}s…[/yellow]")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+
+    try:
+        asyncio.run(_tail())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
