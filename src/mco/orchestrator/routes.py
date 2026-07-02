@@ -107,6 +107,7 @@ def touch_agent_presence(db_client, agent: dict) -> None:
 logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
 agents_router = APIRouter(prefix="/api/agents")
+events_router = APIRouter(prefix="/api/events")
 
 # Dynamic callback hook for gateway websocket notifications
 # Callable signature: async def callback(event: str, job: dict)
@@ -450,6 +451,67 @@ async def get_job_events(job_id: str, agent: dict = Depends(require_scopes("jobs
     if job_res.data and job_org(job_res.data[0]) != agent_org(agent):
         return []
     return get_events(db_client, job_id)
+
+
+@events_router.get("")
+async def get_recent_events(
+    since: str = "",
+    limit: int = 100,
+    agent: dict = Depends(require_scopes("jobs:read")),
+):
+    """Cross-job audit feed, newest event first (powers the Activity screen).
+
+    `since` is an ISO timestamp lower bound (exclusive). Events are enriched
+    with their job's title/status so the caller doesn't need a second fetch.
+    Tenant rules match the rest of the API: the default org is the host
+    operator and sees everything; other orgs see only their own jobs' events.
+    """
+    db_client = get_db_client()
+    if not db_client:
+        return []
+    limit = max(1, min(int(limit or 100), 500))
+    try:
+        res = (
+            db_client.table("agent_job_events").select("*")
+            .order("created_at", desc=True).limit(limit).execute()
+        )
+        events = res.data or []
+    except Exception as e:
+        logger.error(f"Error fetching events: {e}")
+        return []
+
+    # `since` filtered in Python: ISO-8601 strings compare lexicographically
+    # and LocalStore's query builder has no gt().
+    if since:
+        events = [e for e in events if str(e.get("created_at") or "") > since]
+
+    # Enrich with job title/status; the same map drives tenant scoping.
+    jobs_by_id = {}
+    try:
+        jres = (
+            db_client.table("agent_jobs").select("*")
+            .order("created_at", desc=True).limit(500).execute()
+        )
+        jobs_by_id = {j.get("id"): j for j in (jres.data or [])}
+    except Exception as e:
+        logger.debug(f"Event enrichment skipped: {e}")
+
+    caller_org = agent_org(agent)
+    out = []
+    for ev in events:
+        job = jobs_by_id.get(ev.get("job_id"))
+        if caller_org != "default":
+            # Org callers only see their own jobs' events; events whose job
+            # fell out of the enrichment window are omitted rather than leaked.
+            if not job or job_org(job) != caller_org:
+                continue
+        entry = dict(ev)
+        if job:
+            entry["job_title"] = job.get("title")
+            entry["job_status"] = job.get("status")
+            entry["target_agent_role"] = job.get("target_agent_role")
+        out.append(entry)
+    return out
 
 
 async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str = "") -> dict:

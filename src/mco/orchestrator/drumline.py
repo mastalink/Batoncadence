@@ -52,15 +52,19 @@ def _terms(text: str) -> List[str]:
 # ── Writing memory ────────────────────────────────────────────────────────────
 
 def sanitize_content(content: str) -> str:
-    """Strip patterns that could carry prompt injection through shared memory.
+    """Neutralize patterns that could carry prompt injection through shared
+    memory, without destroying the content.
 
-    Remembered content is recalled into other agents' prompts, so embedded
-    code fences, markup, and tool-call markers are removed before storage.
+    Remembered content is recalled into other agents' prompts. Deleting
+    suspicious spans (the first cut of this fix) silently ate legitimate code
+    handoffs, so instead the syntax is defanged in place: angle brackets become
+    lookalikes so markup can't parse as directives, code fences are broken so
+    they can't open/close a block in the recalling prompt, and explicit
+    tool-call markers are dropped. The information survives; the teeth don't.
     """
-    content = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
-    content = re.sub(r"<[^>]+>", "", content)
-    content = re.sub(r"!function_call:.*", "", content)
-    content = content.replace("`", "")
+    content = re.sub(r"!function_call:.*", "", content)  # tool-call markers: no safe form
+    content = content.replace("```", "'''")              # break fence open/close
+    content = content.replace("<", "‹").replace(">", "›")  # ‹ › lookalikes
     return content[:MAX_CONTENT_CHARS]
 
 

@@ -4,6 +4,11 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-01
+
+The parity release: everything the API can do, the CLI and the console can
+do too - plus the external security audit remediations.
+
 ### Added
 - **`/metrics`** Prometheus endpoint (jobs by status, approval queue depth,
   agents registered/online, kill-switch, database state); optional
@@ -14,6 +19,44 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
   Postgres auto-applies via DATABASE_URL + psycopg (recorded in
   schema_migrations) or emits a combined script for the Supabase SQL editor.
   Migrations now ship as package data.
+- **CLI parity**: `mco recall` / `mco remember` (Drumline from the
+  terminal), `mco settings` (the Control Panel whitelist without a
+  browser), `mco reset-token` / `mco deregister`, `mco orgs`, and
+  `mco watch` (live WebSocket event tail with automatic reconnect).
+- **Console: Memory screen** - search/tag recall of the Drumline shared
+  context plus an add-entry composer.
+- **Console: Activity screen** - the cross-job immutable audit trail with
+  client-side stats (24h throughput, failure rate, approval latency),
+  backed by the new `GET /api/events` feed (org-scoped, job-enriched).
+- **Console: Fleet admin** - register agents (one-time token), rotate
+  tokens, remove agents, and move agents between orgs (host operator,
+  one-way by design); **Tenancy card** to view/create orgs.
+- **Console: connector operations** - health dots, and "Sync now" next to
+  "Test connection"; new Connectors settings group (ServiceNow/Dynatrace)
+  with a server-side `test-connector` probe.
+- **Console live updates** over `/ws/broadcast` with polling fallback
+  (4s -> 30s safety net while the socket is up). The gateway accepts
+  token-only WebSocket auth (identity resolved from the token hash).
+- **Drumline dedup**: identical title|content|role returns the existing
+  entry (SHA-256 `content_hash`; migration `2026-07_drumline_dedup.sql`;
+  graceful fallback pre-migration). `mco doctor` warns when the migration
+  is pending.
+- Reproducible console build: `scripts/build_console.py extract|build|verify`
+  with editable sources in `src/mco/console_src/` (verified in CI).
+
+### Security (external audit remediation)
+- Drumline content is sanitized before storage: prompt-injection syntax is
+  neutralized in place (angle brackets to lookalikes, broken code fences,
+  tool-call markers dropped) - content survives, the teeth don't.
+- Tenant isolation for Drumline recall pushed into the SQL query for named
+  orgs, with the Python filter retained as defense-in-depth.
+- WebSocket disconnects are race-safe; `max_retries=0` is honored;
+  `supabase` pinned `<2.0.0`; routes/auth import cycle removed.
+
+### Changed
+- Drumline recall recency bias capped at 20% so relevance dominates.
+- Console job retry uses the dedicated `POST /api/jobs/{id}/retry`.
+- CI test matrix now covers Python 3.11 and 3.14.
 
 ## [0.2.0] - 2026-06-12
 

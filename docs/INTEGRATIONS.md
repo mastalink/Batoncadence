@@ -54,6 +54,24 @@ gateway after configuring, then verify:
 mco connectors        # name | health | supported actions
 ```
 
+### From the console
+
+The console's **Settings → Connectors** panel is the GUI counterpart to
+`mco setup` / `mco connectors` / `mco sync <name>` - useful when you'd rather
+not open a terminal on the machine running the gateway. An operator enters
+the ServiceNow/Dynatrace credentials, clicks **Save** (writes them through
+the same encrypted settings path as `mco setup`), then:
+
+- **Test connection** - reruns the connector's `health()` probe server-side
+  and reports reachability/auth back inline, the same check `mco connectors`
+  runs from a shell.
+- **Sync now** - pulls open platform objects into the job board on demand,
+  equivalent to `mco sync <name>`.
+
+Each connector row shows a health dot reflecting live reachability/auth
+state, so a credential going stale or a platform outage is visible without
+running `mco connectors`.
+
 ---
 
 ## 2. Ingestion: platform objects -> agent jobs

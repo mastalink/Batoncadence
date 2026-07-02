@@ -286,6 +286,27 @@
       return api("/api/integrations/" + name + "/sync", { method: "POST" });
     },
 
+    // ---- cross-job audit feed + tenancy (live only) ----
+    async getRecentEvents(opts) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      const o = opts || {};
+      const params = new URLSearchParams();
+      if (o.since) params.set("since", o.since);
+      if (o.limit) params.set("limit", String(o.limit));
+      const qs = params.toString();
+      return api("/api/events" + (qs ? "?" + qs : ""));
+    },
+    async getOrgs() {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      return api("/api/agents/orgs");
+    },
+    async updateAgent(instanceId, payload) {
+      if (!isLive()) throw new Error("Connect to your orchestrator first.");
+      const res = await api("/api/agents/" + instanceId, { method: "PATCH", body: JSON.stringify(payload) });
+      await poll();
+      return res;
+    },
+
     // ---- Drumline shared context (live only) ----
     async getContext(opts) {
       if (!isLive()) throw new Error("Connect to your orchestrator first.");

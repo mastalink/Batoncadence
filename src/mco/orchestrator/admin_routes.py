@@ -203,8 +203,20 @@ async def update_agent(instance_id: str, payload: dict,
         update["scopes"] = scopes or None  # empty list -> role-derived defaults
     if payload.get("status") in ("online", "offline", "disabled"):
         update["status"] = payload["status"]
+    if payload.get("org"):
+        # Host operators may move an agent from their own org into any allowed
+        # org. One-way by design: after the move the agent belongs to the
+        # target tenant and is managed from there (strict org isolation).
+        if _caller_org(caller) != "default":
+            raise HTTPException(status_code=403,
+                                detail="Only the host operator may move agents between orgs")
+        target = str(payload["org"]).strip()
+        if target not in allowed_orgs():
+            raise HTTPException(status_code=400,
+                                detail=f"Org '{target}' is not configured. Allowed: {', '.join(allowed_orgs())}")
+        update["org_id"] = None if target == "default" else target
     if not update:
-        raise HTTPException(status_code=400, detail="Nothing to update (role, scopes, status)")
+        raise HTTPException(status_code=400, detail="Nothing to update (role, scopes, status, org)")
     res = db.table("agent_registry").update(update).eq("instance_id", instance_id).execute()
     if not res.data:
         raise HTTPException(status_code=500, detail="Update failed to persist")

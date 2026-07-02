@@ -89,11 +89,14 @@ function RegisterAgentPanel({ tone, advanced, onDone, onCancel }) {
 }
 
 // ----- Per-agent row admin actions (live only) -----
-function AgentRowActions({ agent, tone }) {
+function AgentRowActions({ agent, tone, orgs }) {
   const store = window.BatonStore;
   const [busy, setBusy] = useStateO(false);
   const [reset, setReset] = useStateO(null); // { token } | { error }
   const [err, setErr] = useStateO(null);
+  const [moving, setMoving] = useStateO(false);
+  const [target, setTarget] = useStateO("");
+  const [moveErr, setMoveErr] = useStateO(null);
 
   async function doReset() {
     const msg = tone === "plain"
@@ -115,6 +118,24 @@ function AgentRowActions({ agent, tone }) {
     catch (e) { setErr(e.message); setBusy(false); }
   }
 
+  const currentOrg = agent.org_id || "default";
+  const moveTargets = orgs && orgs.orgs ? orgs.orgs.filter((o) => o !== currentOrg) : [];
+  const canMove = !!(orgs && orgs.host_operator && orgs.orgs && orgs.orgs.length > 1);
+
+  async function doMove() {
+    if (!target) return;
+    const msg = tone === "plain"
+      ? `Move "${agent.instance_id}" to ${target}? You'll manage it from that org afterward.`
+      : `Move "${agent.instance_id}" to org ${target}? Strict isolation: it will no longer be manageable from the default org.`;
+    if (!window.confirm(msg)) return;
+    setBusy(true); setMoveErr(null);
+    try {
+      await store.updateAgent(agent.instance_id, { org: target });
+      setMoving(false); setTarget("");
+    } catch (e) { setMoveErr(e.message); }
+    setBusy(false);
+  }
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, paddingLeft: 16 }}>
@@ -124,6 +145,11 @@ function AgentRowActions({ agent, tone }) {
         <Btn small kind="ghost" disabled={busy} onClick={doDelete} style={{ fontSize: 11.5, padding: "3px 8px", color: "var(--text-3)" }}>
           {tone === "plain" ? "Remove" : "Remove"}
         </Btn>
+        {canMove ? (
+          <Btn small kind="ghost" disabled={busy} onClick={() => { setMoving((v) => !v); setMoveErr(null); }} style={{ fontSize: 11.5, padding: "3px 8px", color: "var(--text-3)" }}>
+            {tone === "plain" ? "Move…" : "Move…"}
+          </Btn>
+        ) : null}
       </div>
       {err ? <div style={{ fontSize: 11.5, color: "var(--st-failed-fg)", paddingLeft: 16, marginTop: 4 }}>{err}</div> : null}
       {reset && reset.token ? (
@@ -138,6 +164,24 @@ function AgentRowActions({ agent, tone }) {
           </span>
         </div>
       ) : null}
+      {moving ? (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, margin: "6px 0 0 16px", padding: "8px 10px",
+          background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, flexWrap: "wrap",
+        }}>
+          <span style={{ fontSize: 11.5, color: "var(--text-2)" }}>{tone === "plain" ? "Move to:" : "Target org:"}</span>
+          <select value={target} onChange={(e) => setTarget(e.target.value)} style={{
+            border: "1px solid var(--border-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 12,
+            fontFamily: "var(--font-mono)", background: "var(--surface)", color: "var(--text)",
+          }}>
+            <option value="">{tone === "plain" ? "choose an org…" : "select org…"}</option>
+            {moveTargets.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+          <Btn small kind="primary" disabled={busy || !target} onClick={doMove}>{busy ? "Moving…" : "Confirm"}</Btn>
+          <Btn small onClick={() => { setMoving(false); setTarget(""); setMoveErr(null); }}>Cancel</Btn>
+          {moveErr ? <span style={{ fontSize: 11.5, color: "var(--st-failed-fg)" }}>{moveErr}</span> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -146,8 +190,16 @@ function AgentFleet({ agents, jobs, tone, advanced }) {
   const store = window.BatonStore;
   const live = (store.mode ? store.mode() : "demo") === "live";
   const [showRegister, setShowRegister] = useStateO(false);
+  const [orgs, setOrgs] = useStateO(null); // { orgs, in_use, host_operator } | null
   const byRole = {};
   agents.forEach((a) => { (byRole[a.role] = byRole[a.role] || []).push(a); });
+
+  useEffectO(() => {
+    if (!live) { setOrgs(null); return; }
+    let alive = true;
+    store.getOrgs().then((d) => { if (alive) setOrgs(d); }).catch(() => { if (alive) setOrgs(null); });
+    return () => { alive = false; };
+  }, [live]);
 
   const workingOn = (a) => jobs.find((j) => j.leased_by_instance_id === a.instance_id && ["leased", "in_progress"].includes(j.status));
   const doneBy = (a) => jobs.filter((j) => j.leased_by_instance_id === a.instance_id && j.status === "completed").length;
@@ -205,7 +257,7 @@ function AgentFleet({ agents, jobs, tone, advanced }) {
                         : <span style={{ color: "var(--text-3)" }}>{tone === "plain" ? "Not connected" : "No heartbeat"}</span>}
                     {advanced ? <span style={{ color: "var(--text-3)" }}> · {doneBy(a)} completed</span> : null}
                   </div>
-                  {live ? <AgentRowActions agent={a} tone={tone} /> : null}
+                  {live ? <AgentRowActions agent={a} tone={tone} orgs={orgs} /> : null}
                 </div>
               );
             })}
@@ -419,6 +471,122 @@ function ConnectorsCard({ tone }) {
   );
 }
 
+const ORG_NAME_RE = /^[A-Za-z0-9._:-]{1,64}$/;
+
+function TenancyCard({ tone, advanced }) {
+  const store = window.BatonStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [orgs, setOrgs] = useStateO(null);   // { orgs, in_use, host_operator } | null
+  const [loadErr, setLoadErr] = useStateO(null);
+  const [newOrg, setNewOrg] = useStateO("");
+  const [addErr, setAddErr] = useStateO(null);
+  const [adding, setAdding] = useStateO(false);
+  const inputStyle = { border: "1px solid var(--border-strong)", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", width: 220, background: "var(--surface)", color: "var(--text)" };
+
+  function refresh() {
+    setLoadErr(null);
+    return store.getOrgs().then((d) => setOrgs(d)).catch((e) => setLoadErr(e.message));
+  }
+
+  useEffectO(() => {
+    if (!live) { setOrgs(null); return; }
+    let alive = true;
+    store.getOrgs().then((d) => { if (alive) setOrgs(d); }).catch((e) => { if (alive) setLoadErr(e.message); });
+    return () => { alive = false; };
+  }, [live]);
+
+  if (!live) {
+    return (
+      <Card style={{ marginBottom: 18 }}>
+        <SectionTitle>Tenancy</SectionTitle>
+        <p style={{ fontSize: 12.5, color: "var(--text-2)", margin: "10px 0 0", maxWidth: 520 }}>
+          {tone === "plain"
+            ? "Connect to your orchestrator above, then set up orgs to keep different teams' agents and jobs separate."
+            : "Connect a live gateway above to manage MCO_ORGS and move agents between tenants."}
+        </p>
+      </Card>
+    );
+  }
+
+  async function addOrg() {
+    const name = newOrg.trim();
+    setAddErr(null);
+    if (!name) { setAddErr(tone === "plain" ? "Type an org name first." : "Org name is required."); return; }
+    if (!ORG_NAME_RE.test(name)) {
+      setAddErr(tone === "plain" ? "Use only letters, digits, and . _ : - (max 64 chars)." : "Invalid org name — letters, digits, and . _ : - only (max 64 chars).");
+      return;
+    }
+    const existing = (orgs && orgs.orgs) || [];
+    if (existing.indexOf(name) !== -1) {
+      setAddErr(tone === "plain" ? `"${name}" already exists.` : `Org "${name}" is already configured.`);
+      return;
+    }
+    setAdding(true);
+    try {
+      const settings = await store.getSettings();
+      const tenancyGroup = (settings.groups && settings.groups.tenancy) || [];
+      const item = tenancyGroup.find((s) => s.key === "MCO_ORGS");
+      const current = (item && item.value) || "";
+      const parts = String(current).split(",").map((s) => s.trim()).filter(Boolean);
+      parts.push(name);
+      await store.saveSettings({ MCO_ORGS: parts.join(", ") });
+      setNewOrg("");
+      await refresh();
+    } catch (e) { setAddErr(e.message); }
+    setAdding(false);
+  }
+
+  if (orgs && orgs.host_operator === false) {
+    return (
+      <Card style={{ marginBottom: 18 }}>
+        <SectionTitle>Tenancy</SectionTitle>
+        <p style={{ fontSize: 12.5, color: "var(--text-3)", margin: "10px 0 0" }}>
+          {tone === "plain" ? "Tenants are managed by your host operator." : "Org management requires the host operator (default org)."}
+        </p>
+      </Card>
+    );
+  }
+
+  const inUse = (orgs && orgs.in_use) || [];
+  const list = (orgs && orgs.orgs) || [];
+
+  return (
+    <Card style={{ marginBottom: 18 }}>
+      <SectionTitle>Tenancy</SectionTitle>
+      {!orgs && !loadErr ? <p style={{ fontSize: 12.5, color: "var(--text-3)", margin: "10px 0 0" }}>Loading…</p> : null}
+      {list.map((o) => (
+        <div key={o} style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "10px 0",
+          borderBottom: "1px solid var(--border)",
+        }}>
+          <Mono style={{ fontSize: 13, color: "var(--text)", fontWeight: 600 }}>{o}</Mono>
+          {o === "default" ? <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>(host)</span> : null}
+          {inUse.indexOf(o) !== -1 ? (
+            <span style={{
+              fontSize: 11, fontWeight: 600, color: "var(--st-done-fg)", background: "var(--st-done-bg)",
+              padding: "2px 9px", borderRadius: 999,
+            }}>in use</span>
+          ) : null}
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 14 }}>
+        <input value={newOrg} onChange={(e) => setNewOrg(e.target.value)}
+          placeholder={tone === "plain" ? "new org name" : "org name"} style={inputStyle} />
+        <Btn kind="primary" small disabled={adding || !newOrg.trim()} onClick={addOrg}>
+          {adding ? "Adding…" : "Add org"}
+        </Btn>
+        {addErr ? <span style={{ fontSize: 12, color: "var(--st-failed-fg)" }}>{addErr}</span> : null}
+        {loadErr ? <span style={{ fontSize: 12, color: "var(--st-failed-fg)" }}>{loadErr}</span> : null}
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--text-3)", margin: "14px 0 0" }}>
+        {tone === "plain"
+          ? "Orgs keep teams' jobs and memory completely separate."
+          : "Orgs are hard tenant boundaries — jobs, Drumline memory, and agent registrations never cross them."}
+      </p>
+    </Card>
+  );
+}
+
 function Settings({ tone, advanced, setAdvanced }) {
   const store = window.BatonStore;
   const conn = store.config ? store.config() : { url: "http://127.0.0.1:18789", token: "" };
@@ -495,6 +663,7 @@ function Settings({ tone, advanced, setAdvanced }) {
       </Card>
 
       <ConnectorsCard tone={tone} />
+      {advanced ? <TenancyCard tone={tone} advanced={advanced} /> : null}
 
       {advanced ? (
         <Card>

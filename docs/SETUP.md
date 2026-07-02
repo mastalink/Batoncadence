@@ -317,6 +317,9 @@ You can drive a role with the bundled worker instead of an AI app:
 mco listen --role codex --instance coding-beast-codex
 ```
 
+The daemon polls its inbox every 30s by default; override with
+`MCO_POLL_INTERVAL=<seconds>` if you want it tighter or looser.
+
 ---
 
 ## Part 8 — Kick off a job
@@ -331,6 +334,24 @@ mco_send(to_role="codex", title="Hello world", instructions="Create hello.py tha
 Codex's next loop tick leases it, writes the file, completes it, and sends a
 review job to Antigravity. Watch it flow with `mco agents` and the Supabase
 table editor.
+
+To watch it live instead of polling, `mco watch` opens a WebSocket to the
+gateway and tails job events as they happen (reconnects automatically if the
+gateway drops); add `--raw` for unformatted JSON frames.
+
+---
+
+## Settings from the terminal
+
+Everything the console's Control Panel can change, `mco settings` can too:
+
+```bash
+mco settings                              # list all gateway settings, grouped
+mco settings MCO_AGENT_OFFLINE_AFTER 300  # change one
+mco settings MCO_AGENT_OFFLINE_AFTER --unset   # clear it back to default
+```
+
+Same whitelist as the Control Panel — unknown keys are rejected.
 
 ---
 

@@ -48,6 +48,47 @@ REST: `POST /api/context` `{"title", "content", "kind", "tags", "role", "weight"
 Kinds: `fact | decision | lesson | handoff | artifact`. Any authenticated
 agent may write; entries are stamped with the author for accountability.
 
+**3. From the terminal or the console.** `mco remember "Title" "Content"
+--kind lesson --tags a,b` writes an entry the same way (kinds: `fact`,
+`decision`, `lesson`, `handoff`, `artifact`). The console's **Memory** screen
+gives operators the same composer with a search/tag box on top for recall,
+so a human can browse or add to shared memory without touching the CLI.
+
+### Content sanitization (neutralize, don't delete)
+
+Remembered content is recalled straight into other agents' prompts, so
+`remember()` runs it through `sanitize_content()` first. The first cut of
+this fix deleted suspicious spans outright - and silently ate legitimate
+code handoffs along with the injection attempts. The fix instead defangs the
+syntax in place and keeps the information:
+
+- Angle brackets become lookalikes (`<`/`>` -> `‹`/`›`) so markup can't parse
+  as directives in the recalling prompt.
+- Code fences (```` ``` ````) become `'''` so they can't open/close a block.
+- `!function_call:` lines are dropped outright - there's no safe defanged
+  form for an explicit tool-call marker.
+- Content is capped at 2000 characters (`MAX_CONTENT_CHARS`).
+
+A code handoff full of `<script>` tags or fenced diffs still reads clearly
+after sanitization - it just can't execute as instructions when replayed
+into someone else's prompt.
+
+### Deduplication
+
+`remember()` hashes `title|content|role` (SHA-256, via `content_hash()`)
+before inserting. If an entry with the same hash already exists, `remember()`
+returns that existing row instead of inserting a duplicate - repeated
+distillation of the same outcome, or an agent re-remembering the same fact,
+doesn't bloat the table.
+
+- **LocalStore** needs nothing extra; dedup works out of the box.
+- **Postgres/Supabase** needs the `content_hash` column, added by
+  [`migrations/2026-07_drumline_dedup.sql`](migrations/2026-07_drumline_dedup.sql)
+  (idempotent). Pre-migration databases fall back to a plain insert - dedup
+  just doesn't kick in until you migrate.
+- `mco doctor` checks for the column and warns if it's missing; `mco upgrade
+  --apply` applies the migration.
+
 ## How memory gets out
 
 **1. Automatic prompt injection (the tap).**
@@ -96,7 +137,8 @@ GUI agents (Claude Desktop / Codex / Antigravity via MCP) dip in on demand:
 mco_recall(query="dynatrace token", tags="ops", limit=5)
 ```
 
-REST: `GET /api/context?query=...&role=...&tags=a,b&limit=5`.
+REST: `GET /api/context?query=...&role=...&tags=a,b&limit=5`. From a terminal:
+`mco recall "dynatrace token" --tags ops --limit 5 --role codex`.
 
 ## Recall scoring (deterministic by design)
 

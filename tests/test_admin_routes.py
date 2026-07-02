@@ -236,6 +236,23 @@ class TestEditDelete:
         _ctx().http.post("/api/agents", json={"instance_id": "ed3", "role": "codex"})
         assert _ctx().http.patch("/api/agents/ed3", json={}).status_code == 400
 
+    def test_patch_org_moves_agent(self):
+        _ctx().cfg.values["MCO_ORGS"] = "acme"
+        _ctx().http.post("/api/agents", json={"instance_id": "mover", "role": "codex"})
+        resp = _ctx().http.patch("/api/agents/mover", json={"org": "acme"})
+        assert resp.status_code == 200
+        assert resp.json()["agent"]["org_id"] == "acme"
+
+    def test_patch_org_unknown_is_400(self):
+        _ctx().http.post("/api/agents", json={"instance_id": "mover2", "role": "codex"})
+        assert _ctx().http.patch("/api/agents/mover2", json={"org": "nope"}).status_code == 400
+
+    def test_patch_org_by_org_admin_is_403(self):
+        _ctx().cfg.values["MCO_ORGS"] = "acme"
+        _as(ORG_ADMIN)
+        _ctx().http.post("/api/agents", json={"instance_id": "acme-w", "role": "codex"})
+        assert _ctx().http.patch("/api/agents/acme-w", json={"org": "default"}).status_code == 403
+
     def test_delete_kills_the_token(self):
         body = _ctx().http.post("/api/agents", json={"instance_id": "del", "role": "codex"}).json()
         assert _ctx().http.delete("/api/agents/del").status_code == 200
