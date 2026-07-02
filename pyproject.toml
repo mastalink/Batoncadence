@@ -1,6 +1,6 @@
 [project]
 name = "batoncadence"
-version = "0.2.0"
+version = "0.3.0"
 description = "BatonCadence: a governed job board for AI agents - approval gates, immutable audit, and Drumline shared memory. Every agent. One baton."
 readme = "README.md"
 requires-python = ">=3.9"

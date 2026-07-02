@@ -31,7 +31,7 @@ from rich.table import Table
 
 from mco.config import get_config
 from mco.security import get_secret_store
-from mco.orchestrator.routes import router as jobs_router, agents_router, register_broadcast_callback
+from mco.orchestrator.routes import router as jobs_router, agents_router, events_router, register_broadcast_callback
 from mco.orchestrator.listener import AgentListener
 from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
 
@@ -129,6 +129,7 @@ def create_app() -> FastAPI:
     # Mount REST routing
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
+    app_server.include_router(events_router)
 
     # Enterprise integrations (ServiceNow, Dynatrace, webhooks)
     from mco.orchestrator.integration_routes import integrations_router
@@ -959,6 +960,15 @@ def doctor(
                          if decorate_presence(dict(a), threshold)["effective_status"] == "online")
             ok(f"Agents: {len(agents)} registered, {online} online",
                f"threshold {threshold}s")
+            # Schema currency: the Drumline dedup migration (content_hash).
+            # LocalStore is schema-less JSON, so only Postgres/Supabase can lag.
+            if backend != "local":
+                try:
+                    db.table("agent_context").select("content_hash").limit(1).execute()
+                    ok("Migrations: agent_context.content_hash present (dedup active)")
+                except Exception:
+                    warn("Drumline dedup migration not applied (agent_context.content_hash missing)",
+                         "Run 'mco upgrade --apply' (or apply docs/migrations/2026-07_drumline_dedup.sql).")
         except Exception as e:
             bad(f"Database query failed ({backend}): {e}",
                 "Check SUPABASE_URL/SUPABASE_KEY, or file permissions on ~/.mco/local.db.")

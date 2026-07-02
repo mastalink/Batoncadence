@@ -1,5 +1,5 @@
 // Baton — Job Board screen + Job detail drawer + New Job composer.
-const { useState: useStateJ, useMemo: useMemoJ } = React;
+const { useState: useStateJ, useMemo: useMemoJ, useEffect: useEffectJ } = React;
 
 const JOB_FILTERS = [
   { id: "all", label: "All" },
@@ -264,4 +264,217 @@ function NewJobForm({ tone, advanced, onClose }) {
   );
 }
 
-Object.assign(window, { JobBoard, JobDetail, NewJobForm });
+// ----- Activity feed (cross-job audit explorer) -----
+function humanDuration(ms) {
+  const s = ms / 1000;
+  if (s < 90) return Math.round(s) + "s";
+  const m = s / 60;
+  if (m < 90) return Math.round(m) + "m";
+  const h = m / 60;
+  if (h < 48) return (h < 10 ? h.toFixed(1) : Math.round(h)) + "h";
+  const d = h / 24;
+  return (d < 10 ? d.toFixed(1) : Math.round(d)) + "d";
+}
+
+function computeFeedStats(events, jobs) {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const last24h = events.filter((e) => now - new Date(e.created_at).getTime() <= dayMs);
+
+  const completed = jobs.filter((j) => j.status === "completed").length;
+  const failed = jobs.filter((j) => j.status === "failed").length;
+  const failDenom = completed + failed;
+  const failureRate = failDenom > 0 ? Math.round((failed / failDenom) * 100) + "%" : "—";
+
+  // Median approval wait: pair each job's needs_approval-ish event with the
+  // next approve/reject-ish event that follows it, within the fetched window.
+  const byJob = {};
+  events.forEach((e) => { (byJob[e.job_id] = byJob[e.job_id] || []).push(e); });
+  const waits = [];
+  Object.keys(byJob).forEach((jobId) => {
+    const list = byJob[jobId].slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    let pendingAt = null;
+    list.forEach((e) => {
+      const ev = String(e.event || "").toLowerCase();
+      const isApprovalAsk = ev.indexOf("needs_approval") >= 0 || ev.indexOf("approv") >= 0 && ev.indexOf("approved") < 0 && ev.indexOf("reject") < 0;
+      const isDecision = ev.indexOf("approv") >= 0 || ev.indexOf("reject") >= 0;
+      if (isApprovalAsk && !isDecision) { pendingAt = new Date(e.created_at).getTime(); return; }
+      if (isDecision && pendingAt != null) {
+        waits.push(new Date(e.created_at).getTime() - pendingAt);
+        pendingAt = null;
+      }
+    });
+  });
+  let medianWait = "—";
+  if (waits.length) {
+    const sorted = waits.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const med = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    medianWait = humanDuration(med);
+  }
+
+  const activeAgents = new Set(last24h.filter((e) => e.actor_id).map((e) => e.actor_id)).size;
+
+  return {
+    events24h: last24h.length,
+    failureRate,
+    medianWait,
+    activeAgents,
+  };
+}
+
+function ActivityFeedScreen({ jobs, tone, advanced, onOpen }) {
+  const store = window.BatonStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [events, setEvents] = useStateJ(null); // null = not loaded yet
+  const [err, setErr] = useStateJ(null);
+  const [limit, setLimit] = useStateJ(200);
+  const [loading, setLoading] = useStateJ(false);
+  const [query, setQuery] = useStateJ("");
+  const [typeFilter, setTypeFilter] = useStateJ("all");
+  const inputStyle = { border: "1px solid var(--border-strong)", borderRadius: 8, padding: "8px 12px", fontSize: 13, background: "var(--surface)", color: "var(--text)" };
+
+  async function load(lim) {
+    setLoading(true); setErr(null);
+    try {
+      const rows = await store.getRecentEvents({ limit: lim || limit });
+      setEvents(rows || []);
+    } catch (e) { setErr(e.message); setEvents([]); }
+    setLoading(false);
+  }
+  useEffectJ(() => { if (live) load(limit); }, [live]);
+
+  const jobIds = useMemoJ(() => new Set(jobs.map((j) => j.id)), [jobs]);
+  const titleOf = (jobId) => { const j = jobs.find((x) => x.id === jobId); return j ? j.title : shortId(jobId); };
+
+  const eventTypes = useMemoJ(() => {
+    const set = new Set((events || []).map((e) => e.event));
+    return Array.from(set).sort();
+  }, [events]);
+
+  const filtered = useMemoJ(() => {
+    let list = events || [];
+    if (typeFilter !== "all") list = list.filter((e) => e.event === typeFilter);
+    if (query) {
+      const q = query.toLowerCase();
+      list = list.filter((e) => (
+        (e.event || "") + " " + (e.job_title || titleOf(e.job_id) || "") + " " + (e.actor_id || "")
+      ).toLowerCase().indexOf(q) >= 0);
+    }
+    return list;
+  }, [events, typeFilter, query, jobs]);
+
+  const stats = useMemoJ(() => computeFeedStats(events || [], jobs), [events, jobs]);
+
+  if (!live) {
+    return (
+      <div>
+        <p style={{ margin: "0 0 16px", color: "var(--text-2)", fontSize: 13.5, maxWidth: 560 }}>
+          {tone === "plain"
+            ? "Every step every agent took, newest first — the paper trail behind the job board."
+            : "The immutable agent_job_events trail across all jobs, newest first. Rows are append-only and tamper-evident."}
+        </p>
+        <Card>
+          <EmptyState icon="≡" title={tone === "plain" ? "The activity feed lives on your server" : "Activity feed requires a live gateway"}
+            body={tone === "plain"
+              ? "Connect to your orchestrator in Settings to see the full audit trail across every job."
+              : "Connect in Settings to query /api/events — the cross-job audit trail runs server-side."} />
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p style={{ margin: "0 0 16px", color: "var(--text-2)", fontSize: 13.5, maxWidth: 560 }}>
+        {tone === "plain"
+          ? "Every step every agent took, newest first — the paper trail behind the job board."
+          : "The immutable agent_job_events trail across all jobs, newest first. Rows are append-only and tamper-evident."}
+      </p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
+        <StatCard label={tone === "plain" ? "Events (last day)" : "Events (24h)"} value={stats.events24h} sub={tone === "plain" ? "things that happened recently" : "rows in the fetched window"} kind="active" />
+        <StatCard label="Failure rate" value={stats.failureRate} sub={tone === "plain" ? "of finished jobs" : "failed / (completed + failed)"} kind={stats.failureRate !== "—" && parseInt(stats.failureRate) > 0 ? "failed" : "done"} />
+        <StatCard label={tone === "plain" ? "Typical wait for OK" : "Median approval wait"} value={stats.medianWait} sub={tone === "plain" ? "time until someone decided" : "needs_approval → decision"} kind="approval" />
+        <StatCard label={tone === "plain" ? "Agents working (24h)" : "Active agents (24h)"} value={stats.activeAgents} sub={tone === "plain" ? "distinct agents seen recently" : "distinct actor_id, last 24h"} kind="done" />
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <input value={query} onChange={(e) => setQuery(e.target.value)}
+          placeholder={tone === "plain" ? "Search activity…" : "Filter event / job / actor…"}
+          style={Object.assign({}, inputStyle, { flex: 1, minWidth: 220 })} />
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={Object.assign({}, inputStyle, { width: 200 })}>
+          <option value="all">{tone === "plain" ? "All event types" : "All events"}</option>
+          {eventTypes.map((t) => <option key={t} value={t}>{eventLabel(t, tone)}</option>)}
+        </select>
+        <Btn small onClick={() => load(limit)}>{loading ? "Refreshing…" : "Refresh"}</Btn>
+      </div>
+
+      {err ? <Card><div style={{ fontSize: 12.5, color: "var(--st-failed-fg)" }}>{err}</div></Card> : null}
+
+      {events === null && !err ? <p style={{ fontSize: 12.5, color: "var(--text-3)" }}>Loading…</p> : null}
+
+      {events && events.length === 0 && !err ? (
+        <Card><EmptyState icon="≡" title={tone === "plain" ? "Nothing has happened yet" : "No audit events yet"} body={tone === "plain" ? "As agents pick up and finish jobs, every step will show up here." : "Job lifecycle events across the fleet will appear here as they occur."} /></Card>
+      ) : null}
+
+      {events && events.length > 0 ? (
+        <React.Fragment>
+          <Card pad={false}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+              <THead cols={advanced ? ["When", "Event", "Job", "Actor", "Detail"] : ["When", "Event", "Job", "Actor"]} />
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr><td colSpan={advanced ? 5 : 4}><EmptyState icon="○" title="No matching events" body="Try a different search or event type." /></td></tr>
+                ) : filtered.map((e) => {
+                  const clickable = jobIds.has(e.job_id);
+                  return (
+                    <tr key={e.id} onClick={clickable ? () => onOpen(e.job_id) : undefined}
+                      style={{ cursor: clickable ? "pointer" : "default" }}
+                      onMouseEnter={(ev) => { if (clickable) ev.currentTarget.style.background = "var(--surface-2)"; }}
+                      onMouseLeave={(ev) => { if (clickable) ev.currentTarget.style.background = "transparent"; }}>
+                      <Td>
+                        <span title={e.created_at} style={{ color: "var(--text-3)", fontSize: 12.5, whiteSpace: "nowrap" }}>{timeAgo(e.created_at)}</span>
+                      </Td>
+                      <Td>
+                        <span style={{
+                          display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
+                          color: `var(--st-${eventKind(e.event)}-fg)`, background: `var(--st-${eventKind(e.event)}-bg)`,
+                          borderRadius: 999, padding: "3px 9px",
+                        }}>{eventLabel(e.event, tone)}</span>
+                      </Td>
+                      <Td>
+                        <span style={{ fontWeight: 600 }}>{e.job_title || titleOf(e.job_id)}</span>
+                        {advanced ? <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}><Mono style={{ fontSize: 11 }}>{shortId(e.job_id)}</Mono></div> : null}
+                      </Td>
+                      <Td>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                          <Mono>{e.actor_id || "—"}</Mono>
+                          {e.actor_role ? <RoleChip role={e.actor_role} size={18} /> : null}
+                        </span>
+                      </Td>
+                      {advanced ? (
+                        <Td>
+                          <Mono style={{ fontSize: 11, color: "var(--text-3)" }}>
+                            {e.detail ? (() => { const s = JSON.stringify(e.detail); return s.length > 80 ? s.slice(0, 80) + "…" : s; })() : "—"}
+                          </Mono>
+                        </Td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
+          <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+            <Btn small disabled={loading || limit >= 500} onClick={() => { const next = Math.min(500, limit * 2); setLimit(next); load(next); }}>
+              {loading ? "Loading…" : (limit >= 500 ? (tone === "plain" ? "That's everything we fetch" : "Fetch limit reached") : "Load more")}
+            </Btn>
+          </div>
+        </React.Fragment>
+      ) : null}
+    </div>
+  );
+}
+
+Object.assign(window, { JobBoard, JobDetail, NewJobForm, ActivityFeedScreen });
