@@ -58,6 +58,64 @@ def get_offline_after_seconds() -> int:
         return 300
 
 
+def get_lease_ttl_seconds() -> int:
+    """How long a job may sit LEASED before it's considered abandoned and
+    reclaimed to PENDING (MCO_LEASE_TTL_SECONDS). 0 (or negative) disables
+    reclamation entirely. Default 900s / 15m."""
+    try:
+        return int(get_config().get("MCO_LEASE_TTL_SECONDS") or 900)
+    except (TypeError, ValueError):
+        return 900
+
+
+def reclaim_stale_leases(db_client) -> int:
+    """Revert LEASED jobs whose lease has outlived the TTL back to PENDING so
+    another worker can pick them up.
+
+    Without this, a worker that crashes / is Ctrl-C'd / loses the network
+    mid-job leaves that job LEASED forever - permanent starvation (audit
+    finding F-01). Matching the presence design (no standalone background
+    sweeper), this runs opportunistically on the pending-poll path: the next
+    time ANY worker polls, stale leases are recovered. Best-effort and never
+    raises - reclamation must never break the job path. Returns the count
+    reclaimed."""
+    ttl = get_lease_ttl_seconds()
+    if ttl <= 0:
+        return 0
+    try:
+        from datetime import datetime, timezone
+        res = db_client.table("agent_jobs").select("*").eq("status", "leased").execute()
+        now = datetime.now(timezone.utc)
+        reclaimed = 0
+        for job in (res.data or []):
+            started = job.get("started_at")
+            if not started:
+                continue
+            try:
+                ts = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+            if (now - ts).total_seconds() <= ttl:
+                continue
+            job_id = job.get("id")
+            db_client.table("agent_jobs").update({
+                "status": "pending",
+                "leased_by_instance_id": None,
+                "started_at": None,
+            }).eq("id", job_id).execute()
+            record_event(db_client, job_id, "lease_expired", "system", "reaper",
+                         {"lease_ttl_seconds": ttl, "leased_by": job.get("leased_by_instance_id")})
+            reclaimed += 1
+        if reclaimed:
+            logger.info(f"Reclaimed {reclaimed} stale lease(s) past the {ttl}s TTL back to pending.")
+        return reclaimed
+    except Exception as e:
+        logger.debug(f"Stale-lease reclamation skipped: {type(e).__name__}")
+        return 0
+
+
 def decorate_presence(row: dict, threshold: int) -> dict:
     """Add derived liveness to a registry row.
 
@@ -284,6 +342,9 @@ async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Dep
     if not db_client:
         return []
     touch_agent_presence(db_client, agent)
+    # Recover jobs abandoned by crashed/killed workers (F-01) before we hand
+    # this poller its work. Best-effort; never blocks the poll on failure.
+    reclaim_stale_leases(db_client)
     try:
         res = db_client.table("agent_jobs")\
             .select("*")\
