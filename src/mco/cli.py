@@ -779,7 +779,13 @@ def listen(
 # 4. Status and Diagnostics
 # ─────────────────────────────────────────────────────────────────────────────
 @app.command("status")
-def status():
+def status(
+    show_all: bool = typer.Option(
+        False,
+        "--all",
+        help="Show all resolved configuration keys, including unrelated process environment.",
+    ),
+):
     """Print BatonCadence health check and diagnostics."""
     config = get_config()
     store = get_secret_store()
@@ -807,6 +813,9 @@ def status():
     table.add_column("Value", style="green")
     
     masked = config.get_masked_config()
+    if not show_all:
+        allowed_prefixes = ("MCO_", "OPERATOR_", "SUPABASE_")
+        masked = {k: v for k, v in masked.items() if k.startswith(allowed_prefixes)}
     for k, v in masked.items():
         table.add_row(k, v)
 
