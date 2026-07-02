@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 import mco.notifiers.ntfy as ntfy_mod
 import mco.orchestrator.routes as routes_mod
+import mco.orchestrator.utils as utils_mod
 from mco.orchestrator.auth import require_agent
 from mco.orchestrator.routes import router, agents_router
 
@@ -105,7 +106,7 @@ class TestApprovalGates(_GovernanceBase):
         assert resp.status_code == 404
 
     def test_custom_approver_roles_config(self, monkeypatch):
-        monkeypatch.setattr(routes_mod, "get_approver_roles", lambda: {"codex"})
+        monkeypatch.setattr(utils_mod, "get_approver_roles", lambda: {"codex"})
         job_id = self._gated_job()
         resp = self.http.post(f"/api/jobs/{job_id}/approve")
         assert resp.status_code == 200

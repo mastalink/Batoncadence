@@ -15,14 +15,10 @@ from mco.notifiers.ntfy import (
     notify_job_needs_approval,
 )
 
-# Roles allowed to approve/reject jobs paused at the human-in-the-loop gate.
-DEFAULT_APPROVER_ROLES = "human,admin,operator"
-
-
-def get_approver_roles() -> set:
-    """Lower-cased roles permitted to decide approval gates (MCO_APPROVER_ROLES)."""
-    raw = get_config().get("MCO_APPROVER_ROLES") or DEFAULT_APPROVER_ROLES
-    return {r.strip().lower() for r in raw.split(",") if r.strip()}
+from mco.orchestrator import utils as utils_mod
+# Re-exported for back-compat: these used to live here (now in utils to
+# break the routes <-> auth import cycle).
+from mco.orchestrator.utils import DEFAULT_APPROVER_ROLES, get_approver_roles  # noqa: F401
 
 
 def agent_org(agent: dict) -> str:
@@ -229,7 +225,7 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
         # Governance columns are only sent when used (pre-migration DB compatibility).
         if requires_approval:
             data["requires_approval"] = True
-        if max_retries:
+        if max_retries is not None:
             data["max_retries"] = max_retries
         if escalate_to_role:
             data["escalate_to_role"] = escalate_to_role
@@ -462,7 +458,7 @@ async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str 
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
 
-    if (agent.get("role") or "").lower() not in get_approver_roles():
+    if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to decide approval gates")
 
     job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
@@ -521,7 +517,7 @@ async def retry_job(job_id: str, agent: dict = Depends(require_scopes("jobs:appr
     db_client = get_db_client()
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
-    if (agent.get("role") or "").lower() not in get_approver_roles():
+    if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to re-queue jobs")
 
     job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()

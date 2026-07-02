@@ -55,7 +55,7 @@ class AgentListener:
         self.instance_id = "default_agent"
         self.role = "codex"
         self.gateway_ws_url = "ws://127.0.0.1:18789/ws/broadcast"
-        self.poll_interval = 30.0  # seconds
+        self.poll_interval = float(os.environ.get("MCO_POLL_INTERVAL", 30.0))  # seconds
 
         self._load_config()
 

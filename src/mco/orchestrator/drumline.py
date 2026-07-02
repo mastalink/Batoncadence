@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+from hashlib import sha256
 from typing import Any, List, Optional
 
 logger = logging.getLogger("mco.drumline")
@@ -50,6 +51,26 @@ def _terms(text: str) -> List[str]:
 
 # ── Writing memory ────────────────────────────────────────────────────────────
 
+def sanitize_content(content: str) -> str:
+    """Strip patterns that could carry prompt injection through shared memory.
+
+    Remembered content is recalled into other agents' prompts, so embedded
+    code fences, markup, and tool-call markers are removed before storage.
+    """
+    content = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
+    content = re.sub(r"<[^>]+>", "", content)
+    content = re.sub(r"!function_call:.*", "", content)
+    content = content.replace("`", "")
+    return content[:MAX_CONTENT_CHARS]
+
+
+def content_hash(title: str, content: str, role: Optional[str] = None) -> str:
+    """Deterministic SHA-256 of title|content|role, used for deduplication."""
+    return sha256(
+        f"{title[:300]}|{content[:MAX_CONTENT_CHARS]}|{role or ''}".encode()
+    ).hexdigest()
+
+
 def remember(
     db_client: Any,
     *,
@@ -74,7 +95,7 @@ def remember(
         "role": (role or None),
         "kind": kind,
         "title": title[:300],
-        "content": content[:MAX_CONTENT_CHARS],
+        "content": sanitize_content(content),
         "tags": [t.strip().lower() for t in (tags or []) if t and t.strip()],
         "created_by": created_by,
         "source_job_id": source_job_id,
@@ -83,6 +104,24 @@ def remember(
     # Tenant stamp (omitted for the default org so pre-migration DBs keep working).
     if org_id and org_id != "default":
         data["org_id"] = org_id
+
+    # Dedup: identical title|content|role returns the existing row instead of
+    # inserting a duplicate. Falls back to a plain insert on DBs that predate
+    # the content_hash migration.
+    h = content_hash(data["title"], data["content"], role=role or None)
+    try:
+        existing = (
+            db_client.table(CONTEXT_TABLE)
+            .select("id")
+            .eq("content_hash", h)
+            .execute()
+        )
+        if existing.data:
+            return existing.data[0]
+        data["content_hash"] = h
+    except Exception:
+        logger.debug("content_hash dedup unavailable (missing migration?) — inserting without hash")
+
     try:
         res = db_client.table(CONTEXT_TABLE).insert(data).execute()
         return res.data[0] if res.data else None
@@ -276,20 +315,22 @@ def recall(
     """
     if db_client is None:
         return []
+    effective_org = org_id or "default"
     try:
-        res = (
-            db_client.table(CONTEXT_TABLE)
-            .select("*")
-            .order("created_at", desc=True)
-            .limit(FETCH_WINDOW)
-            .execute()
-        )
+        q = db_client.table(CONTEXT_TABLE).select("*")
+        # Tenant isolation pushed into SQL for named orgs (security + perf).
+        # The default org can't use .eq(): its rows may carry org_id NULL on
+        # pre-migration DBs, so it relies on the Python filter below.
+        if effective_org != "default":
+            q = q.eq("org_id", effective_org)
+        res = q.order("created_at", desc=True).limit(FETCH_WINDOW).execute()
     except Exception as e:
         logger.warning(f"Drumline recall skipped: {e}")
         return []
 
-    # Tenant isolation: an org only ever recalls its own memory.
-    entries = [e for e in (res.data or []) if (e.get("org_id") or "default") == (org_id or "default")]
+    # Defense-in-depth: an org only ever recalls its own memory, even if the
+    # SQL filter was skipped or bypassed.
+    entries = [e for e in (res.data or []) if (e.get("org_id") or "default") == effective_org]
     if tags:
         wanted = {t.strip().lower() for t in tags if t and t.strip()}
         entries = [e for e in entries if wanted & set(e.get("tags") or [])]
@@ -298,7 +339,7 @@ def recall(
     n = max(len(entries), 1)
     scored = []
     for i, entry in enumerate(entries):
-        recency = 0.5 * (n - i) / n
+        recency = 0.2 * (n - i) / n  # cap recency at 20% so relevance dominates
         s = score_entry(entry, terms, role, recency)
         if terms and s <= recency:  # query given but nothing matched: drop
             continue
