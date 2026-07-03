@@ -2,6 +2,7 @@
 
 import os
 import logging
+import importlib.metadata as importlib_metadata
 import re
 import subprocess
 from pathlib import Path
@@ -193,6 +194,11 @@ def _repo_root() -> Path:
 
 
 def _package_version() -> str:
+    try:
+        return importlib_metadata.version("batoncadence")
+    except importlib_metadata.PackageNotFoundError:
+        pass
+
     pyproject = _repo_root() / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
     match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)

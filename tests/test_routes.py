@@ -211,6 +211,15 @@ class TestVersionRoute:
         assert body["version"] == "0.3.0"
         assert set(body) == {"version", "git_commit"}
 
+    def test_version_route_uses_package_metadata_without_pyproject(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(routes_mod.importlib_metadata, "version", lambda name: "1.2.3")
+        monkeypatch.setattr(routes_mod, "_repo_root", lambda: tmp_path)
+
+        resp = TestClient(_build_app()).get("/api/version")
+
+        assert resp.status_code == 200
+        assert resp.json()["version"] == "1.2.3"
+
 
 # ── Auth-enforcement tests (real require_agent, no dependency override) ───────
 
