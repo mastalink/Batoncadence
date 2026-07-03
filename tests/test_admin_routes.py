@@ -504,3 +504,23 @@ class TestGovernanceEvidencePack:
         assert audit["regulatory_basis"]["eu_ai_act_article_12"].startswith("Record-keeping")
         assert audit["regulatory_basis"]["eu_ai_act_article_14"].startswith("Human oversight")
         assert audit["pending_approvals"][0]["id"] == pending["id"]
+
+    def test_evidence_pack_date_only_end_includes_selected_day(self):
+        job = _ctx().http.post("/api/jobs", json={
+            "title": "Year end approval",
+            "target_agent_role": "codex",
+        }).json()["job"]
+        for event in _ctx().db._events:
+            if event.get("job_id") == job["id"]:
+                event["created_at"] = "2026-12-31T15:30:00Z"
+
+        resp = _ctx().http.post("/api/governance/evidence-pack", json={
+            "start_date": "2026-12-31",
+            "end_date": "2026-12-31",
+        })
+        assert resp.status_code == 200
+        files = {f["filename"]: f for f in resp.json()["files"]}
+        audit = json.loads(files["audit-trail.json"]["text"])
+
+        assert audit["summary"]["audit_events"] == 1
+        assert audit["audit_events"][0]["job_id"] == job["id"]
