@@ -24,7 +24,7 @@ import logging
 import re
 import secrets as _secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -492,12 +492,14 @@ async def seed_demo_pipeline(caller: dict = Depends(require_scopes("jobs:write")
 
 # ── Workflows (mco workflow parity) ──────────────────────────────────────────
 
-def _parse_iso(value):
+def _parse_iso(value, *, end_of_day: bool = False):
     if not value:
         return None
     try:
         text = str(value).strip()
         if len(text) == 10:
+            if end_of_day:
+                return datetime.combine(datetime.fromisoformat(text), time.max, tzinfo=timezone.utc)
             text += "T00:00:00+00:00"
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except (TypeError, ValueError):
@@ -556,7 +558,7 @@ async def export_evidence_pack(payload: dict = None,
 
     body = payload or {}
     start = _parse_iso(body.get("start_date") or body.get("start"))
-    end = _parse_iso(body.get("end_date") or body.get("end"))
+    end = _parse_iso(body.get("end_date") or body.get("end"), end_of_day=True)
     if start and end and start > end:
         raise HTTPException(status_code=400, detail="start_date must be before end_date")
 
