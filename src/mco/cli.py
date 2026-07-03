@@ -633,7 +633,7 @@ def restart(
     start(host=host, port=port)
 
 
-service_app = typer.Typer(help="Run the gateway as a boot-persistent OS service.")
+service_app = typer.Typer(help="Run BatonCadence processes as boot-persistent OS services.")
 app.add_typer(service_app, name="service")
 
 
@@ -655,11 +655,36 @@ def service_install(
         raise typer.Exit(code=1)
 
 
+@service_app.command("install-waker")
+def service_install_waker(
+    role: str = typer.Argument(..., help="Agent role this waker should watch."),
+    exec_command: Optional[str] = typer.Argument(None, help="Shell command to run when jobs are pending."),
+    exec_option: Optional[str] = typer.Option(None, "--exec", help="Shell command to run when jobs are pending."),
+    instance: Optional[str] = typer.Option(None, "--instance", help="Optional agent instance ID this waker should watch."),
+    min_interval: float = typer.Option(10.0, "--min-interval", help="Minimum seconds between spawn starts."),
+):
+    """Install a self-restarting waker service for one role/instance."""
+    from mco import service
+    resolved_exec = exec_command or exec_option
+    if not resolved_exec:
+        console.print("[red][X] Waker service install failed:[/red] missing exec command")
+        raise typer.Exit(code=1)
+    console.print(f"[cyan]Installing waker via {service.backend_name()}...[/cyan]")
+    ok_flag, detail = service.install_waker(role, resolved_exec, instance=instance, min_interval=min_interval)
+    if ok_flag:
+        console.print(f"[green][OK][/green] {detail}")
+    else:
+        console.print(f"[red][X] Waker service install failed:[/red] {detail}")
+        raise typer.Exit(code=1)
+
+
 @service_app.command("uninstall")
-def service_uninstall():
+def service_uninstall(
+    selector: Optional[str] = typer.Argument(None, help="Service name or waker role. Defaults to the gateway."),
+):
     """Remove the boot-persistent service (does not stop a running gateway)."""
     from mco import service
-    ok_flag, detail = service.uninstall()
+    ok_flag, detail = service.uninstall(selector or service.SERVICE_NAME)
     if ok_flag:
         console.print(f"[green][OK][/green] {detail}")
     else:
@@ -668,15 +693,30 @@ def service_uninstall():
 
 
 @service_app.command("status")
-def service_status():
-    """Show whether the boot-persistent service is installed."""
+def service_status(
+    selector: Optional[str] = typer.Argument(None, help="Optional service name or waker role to inspect."),
+):
+    """Show installed BatonCadence services, or one selected service."""
     from mco import service
-    state = service.status()
+    if selector is None:
+        states = service.status(None)
+        if not states:
+            console.print(f"[yellow]No BatonCadence services found via {service.backend_name()}.[/yellow]")
+            raise typer.Exit(code=0)
+        for state in states:
+            _print_service_status(service.backend_name(), state)
+        return
+    state = service.status(selector)
+    _print_service_status(service.backend_name(), state)
+
+
+def _print_service_status(backend: str, state: dict[str, object]):
     installed = bool(state.get("installed"))
     running = bool(state.get("running"))
     color = "green" if installed and running else "yellow" if installed else "red"
     console.print(Panel.fit(
-        f"[bold]{service.backend_name()}[/bold]\n"
+        f"[bold]{backend}[/bold]\n"
+        f"Name:      {state.get('name', 'BatonCadence-gateway')}\n"
         f"Installed: [{color}]{'yes' if installed else 'no'}[/{color}]\n"
         f"Running:   [{color}]{'yes' if running else 'no'}[/{color}]\n"
         f"Last exit: {state.get('last_exit', 'unknown')}",
@@ -685,10 +725,12 @@ def service_status():
 
 
 @service_app.command("restart")
-def service_restart():
+def service_restart(
+    selector: Optional[str] = typer.Argument(None, help="Service name or waker role. Defaults to the gateway."),
+):
     """Restart the boot-persistent gateway service."""
     from mco import service
-    ok_flag, detail = service.restart()
+    ok_flag, detail = service.restart(selector or service.SERVICE_NAME)
     if ok_flag:
         console.print(f"[green][OK][/green] {detail}")
     else:
@@ -698,18 +740,19 @@ def service_restart():
 
 @service_app.command("logs")
 def service_logs(
+    selector: Optional[str] = typer.Argument(None, help="Service name or waker role. Defaults to the gateway."),
     lines: int = typer.Option(80, "--lines", "-n", help="Number of recent log lines to print."),
     follow: bool = typer.Option(False, "--follow", "-f", help="Keep streaming new log lines."),
 ):
-    """Tail the gateway log file."""
+    """Tail a service log file."""
     from mco import service
-    log_path = service.gateway_log_path()
+    log_path = service.log_path(selector or service.SERVICE_NAME)
     if not log_path.exists():
-        console.print(f"[yellow]No gateway log found at {log_path}.[/yellow]")
+        console.print(f"[yellow]No service log found at {log_path}.[/yellow]")
         raise typer.Exit(code=0)
     console.print(f"[dim]Log: {log_path}[/dim]")
     try:
-        for line in service.tail_log(lines=lines, follow=follow):
+        for line in service.tail_log(selector or service.SERVICE_NAME, lines=lines, follow=follow):
             console.print(line)
     except KeyboardInterrupt:
         console.print("\n[dim]Stopped.[/dim]")
