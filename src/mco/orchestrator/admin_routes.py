@@ -17,10 +17,14 @@ Design rules:
   its own org.
 """
 
+import base64
 import hashlib
+import json
 import logging
 import re
 import secrets as _secrets
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -38,6 +42,7 @@ _IDENT_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 agents_admin_router = APIRouter(prefix="/api/agents")
 settings_router = APIRouter(prefix="/api/settings")
 workflows_router = APIRouter(prefix="/api/workflows")
+governance_router = APIRouter(prefix="/api/governance")
 
 
 def _db():
@@ -404,7 +409,252 @@ async def test_connector(payload: dict, caller: dict = Depends(require_scopes("a
     return {"ok": bool(health.get("ok")), "detail": health.get("detail", "")}
 
 
+DEMO_WORKFLOW_NAME = "jde-demo-live-pipeline"
+
+DEMO_PIPELINE_STEPS = [
+    {
+        "id": "plan",
+        "role": "claude",
+        "title": "Demo pipeline: plan the customer change",
+        "instructions": (
+            "Read the pilot brief, identify the fastest credible implementation "
+            "path, and hand Codex a scoped build plan."
+        ),
+        "depends_on": [],
+    },
+    {
+        "id": "build",
+        "role": "codex",
+        "title": "Demo pipeline: build the approved slice",
+        "instructions": (
+            "Implement the planned change, keep the blast radius small, and "
+            "return files changed plus verification output."
+        ),
+        "depends_on": ["plan"],
+    },
+    {
+        "id": "review",
+        "role": "reviewer",
+        "title": "Demo pipeline: test and sign off",
+        "instructions": (
+            "Review the branch, run the requested tests, and approve or return "
+            "findings with concrete reproduction notes."
+        ),
+        "depends_on": ["build"],
+    },
+]
+
+
+@workflows_router.post("/demo-pipeline")
+async def seed_demo_pipeline(caller: dict = Depends(require_scopes("jobs:write"))):
+    """Seed the three-step live sales demo pipeline."""
+    from mco.orchestrator.routes import create_job
+
+    run_id = uuid.uuid4().hex[:12]
+    job_ids = {}
+    for step in DEMO_PIPELINE_STEPS:
+        deps = [job_ids[d] for d in step["depends_on"]]
+        payload = {
+            "title": step["title"],
+            "description": step["instructions"],
+            "target_agent_role": step["role"],
+            "depends_on": deps,
+            "input_payload": {
+                "prompt": step["instructions"],
+                "workflow": {
+                    "name": DEMO_WORKFLOW_NAME,
+                    "run": run_id,
+                    "step": step["id"],
+                },
+                "demo": {
+                    "kind": "pilot-sales-demo",
+                    "sequence": ["claude plans", "codex builds", "reviewer tests"],
+                },
+            },
+            "max_retries": 1 if step["id"] == "build" else 0,
+        }
+        res = await create_job(payload, caller)
+        job = (res or {}).get("job") or {}
+        if not res.get("success") or not job.get("id"):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Demo step '{step['id']}' failed to submit (created so far: {job_ids})",
+            )
+        job_ids[step["id"]] = job["id"]
+    return {
+        "success": True,
+        "workflow": DEMO_WORKFLOW_NAME,
+        "run": run_id,
+        "jobs": job_ids,
+        "message": "Seeded claude plans -> codex builds -> reviewer tests.",
+    }
+
+
 # ── Workflows (mco workflow parity) ──────────────────────────────────────────
+
+def _parse_iso(value):
+    if not value:
+        return None
+    try:
+        text = str(value).strip()
+        if len(text) == 10:
+            text += "T00:00:00+00:00"
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid ISO date/time: {value}")
+
+
+def _event_time(ev: dict):
+    return _parse_iso(ev.get("created_at")) if ev.get("created_at") else None
+
+
+def _pdf_escape(text: str) -> str:
+    return str(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _make_cover_pdf(lines: list[str]) -> bytes:
+    content_lines = ["BT", "/F1 12 Tf", "72 760 Td"]
+    for i, line in enumerate(lines[:28]):
+        if i:
+            content_lines.append("0 -18 Td")
+        content_lines.append(f"({_pdf_escape(line)}) Tj")
+    content_lines.append("ET")
+    stream = "\n".join(content_lines)
+    objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        f"<< /Length {len(stream.encode('utf-8'))} >>\nstream\n{stream}\nendstream",
+    ]
+    parts = [b"%PDF-1.4\n"]
+    offsets = [0]
+    for idx, obj in enumerate(objects, start=1):
+        offsets.append(sum(len(p) for p in parts))
+        parts.append(f"{idx} 0 obj\n{obj}\nendobj\n".encode("utf-8"))
+    xref_at = sum(len(p) for p in parts)
+    xref = ["xref", f"0 {len(objects) + 1}", "0000000000 65535 f "]
+    xref.extend(f"{off:010d} 00000 n " for off in offsets[1:])
+    trailer = [
+        *xref,
+        "trailer",
+        f"<< /Size {len(objects) + 1} /Root 1 0 R >>",
+        "startxref",
+        str(xref_at),
+        "%%EOF",
+    ]
+    parts.append(("\n".join(trailer) + "\n").encode("utf-8"))
+    return b"".join(parts)
+
+
+@governance_router.post("/evidence-pack")
+async def export_evidence_pack(payload: dict = None,
+                               caller: dict = Depends(require_scopes("jobs:read"))):
+    """Return a PDF/JSON evidence bundle for approval and audit history."""
+    from mco.orchestrator.routes import agent_org, job_org, get_db_client
+
+    body = payload or {}
+    start = _parse_iso(body.get("start_date") or body.get("start"))
+    end = _parse_iso(body.get("end_date") or body.get("end"))
+    if start and end and start > end:
+        raise HTTPException(status_code=400, detail="start_date must be before end_date")
+
+    db = get_db_client()
+    if not db:
+        raise HTTPException(status_code=400, detail="Database not configured")
+
+    events = db.table("agent_job_events").select("*").order("created_at", desc=False).execute().data or []
+    jobs = db.table("agent_jobs").select("*").order("created_at", desc=True).limit(500).execute().data or []
+    jobs_by_id = {j.get("id"): j for j in jobs}
+    caller_org = agent_org(caller)
+
+    filtered = []
+    for ev in events:
+        job = jobs_by_id.get(ev.get("job_id"))
+        if caller_org != "default" and (not job or job_org(job) != caller_org):
+            continue
+        ts = _event_time(ev)
+        if start and ts and ts < start:
+            continue
+        if end and ts and ts > end:
+            continue
+        row = dict(ev)
+        if job:
+            row["job_title"] = job.get("title")
+            row["job_status"] = job.get("status")
+            row["target_agent_role"] = job.get("target_agent_role")
+        filtered.append(row)
+
+    pending_approvals = [
+        {
+            "id": j.get("id"),
+            "title": j.get("title"),
+            "target_agent_role": j.get("target_agent_role"),
+            "created_at": j.get("created_at"),
+        }
+        for j in jobs
+        if (caller_org == "default" or job_org(j) == caller_org) and j.get("status") == "needs_approval"
+    ]
+    decisions = [e for e in filtered if e.get("event") in ("approved", "rejected")]
+    exported_at = datetime.now(timezone.utc).isoformat()
+    audit_json = {
+        "exported_at": exported_at,
+        "requested_by": caller.get("instance_id"),
+        "org_id": caller_org,
+        "range": {
+            "start": start.isoformat() if start else None,
+            "end": end.isoformat() if end else None,
+        },
+        "regulatory_basis": {
+            "eu_ai_act_article_12": "Record-keeping: preserve system event logs and job lifecycle audit data.",
+            "eu_ai_act_article_14": "Human oversight: preserve approval requests and operator decisions.",
+        },
+        "summary": {
+            "audit_events": len(filtered),
+            "pending_approvals": len(pending_approvals),
+            "decisions": len(decisions),
+        },
+        "pending_approvals": pending_approvals,
+        "decision_history": decisions,
+        "audit_events": filtered,
+    }
+    cover_pdf = _make_cover_pdf([
+        "BatonCadence Compliance Evidence Pack",
+        f"Exported at: {exported_at}",
+        f"Requested by: {caller.get('instance_id')} ({caller.get('role')})",
+        f"Org: {caller_org}",
+        f"Range start: {audit_json['range']['start'] or 'beginning of record'}",
+        f"Range end: {audit_json['range']['end'] or 'latest event'}",
+        "",
+        "EU AI Act Article 12 - record-keeping",
+        "This pack preserves job lifecycle and audit event records.",
+        "",
+        "EU AI Act Article 14 - human oversight",
+        "This pack preserves pending approvals and human decisions.",
+        "",
+        f"Audit events: {audit_json['summary']['audit_events']}",
+        f"Pending approvals: {audit_json['summary']['pending_approvals']}",
+        f"Approval decisions: {audit_json['summary']['decisions']}",
+    ])
+    return {
+        "success": True,
+        "generated_at": exported_at,
+        "summary": audit_json["summary"],
+        "files": [
+            {
+                "filename": "cover.pdf",
+                "mime": "application/pdf",
+                "base64": base64.b64encode(cover_pdf).decode("ascii"),
+            },
+            {
+                "filename": "audit-trail.json",
+                "mime": "application/json",
+                "text": json.dumps(audit_json, indent=2, default=str),
+            },
+        ],
+    }
+
 
 @workflows_router.post("")
 async def submit_workflow_api(payload: dict, caller: dict = Depends(require_scopes("jobs:write"))):
@@ -414,7 +664,6 @@ async def submit_workflow_api(payload: dict, caller: dict = Depends(require_scop
     create_job path the REST API uses - governance, audit, broadcast, and
     Context Exchange run-stamping all included. Returns {step_id: job_id}.
     """
-    import uuid
     from mco.orchestrator.workflows import WorkflowError, load_workflow, topo_order
     from mco.orchestrator.routes import create_job
 

@@ -32,6 +32,11 @@
   const emit = () => listeners.forEach((fn) => fn());
   const rid = () => Math.random().toString(36).slice(2);
   const toast = (kind, title, body) => toastFns.forEach((fn) => fn({ id: rid(), kind, title, body }));
+  function withWorkflow(job) {
+    const wf = job && job.input_payload && job.input_payload.workflow;
+    if (!wf || job.workflow) return job;
+    return Object.assign({}, job, { workflow: wf.name || wf.run, workflow_run: wf.run, workflow_step: wf.step });
+  }
 
   // Re-emit demo store changes while in demo mode
   demo.subscribe(() => { if (!isLive()) emit(); });
@@ -64,8 +69,9 @@
   async function poll() {
     try {
       const [j, a] = await Promise.all([api("/api/jobs"), api("/api/agents")]);
+      const normalized = (j || []).map(withWorkflow);
       const seenBefore = Object.keys(prevStatus).length > 0;
-      (j || []).forEach((job) => {
+      normalized.forEach((job) => {
         const old = prevStatus[job.id];
         if (seenBefore && old !== job.status) {
           liveActivity.unshift({
@@ -81,7 +87,7 @@
         prevStatus[job.id] = job.status;
       });
       liveActivity = liveActivity.slice(0, 50);
-      jobs = j || []; agents = a || [];
+      jobs = normalized; agents = a || [];
       if (lastError) { lastError = null; }
       emit();
     } catch (e) {
@@ -246,6 +252,19 @@
         toast("ok", "Workflow submitted", name + " — " + steps.length + " steps queued.");
         return idMap;
       } catch (e) { toast("err", "Workflow failed", e.message); return idMap; }
+    },
+    async seedDemoPipeline() {
+      if (!isLive()) return demo.seedDemoPipeline();
+      try {
+        const res = await api("/api/workflows/demo-pipeline", { method: "POST", body: JSON.stringify({}) });
+        await poll();
+        toast("ok", "Demo pipeline running", "Claude -> Codex -> reviewer is now visible in the live feed.");
+        return res;
+      } catch (e) { toast("err", "Demo seed failed", e.message); }
+    },
+    async exportEvidencePack(payload) {
+      if (!isLive()) return demo.exportEvidencePack(payload);
+      return api("/api/governance/evidence-pack", { method: "POST", body: JSON.stringify(payload || {}) });
     },
 
     // ---- settings & connectors (live only) ----
