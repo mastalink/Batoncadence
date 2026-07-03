@@ -551,7 +551,7 @@ def start(
     """Start the gateway in the background (the pair of 'mco stop').
 
     Unlike 'mco serve' (foreground, for terminals/systemd/Docker), this
-    detaches: your terminal stays free, output goes to ~/.mco/gateway.log,
+    detaches: your terminal stays free, output goes to ~/.mco/logs/gateway.log,
     and 'mco stop' shuts it down.
     """
     import subprocess
@@ -573,7 +573,8 @@ def start(
                           f"Stop it with: [cyan]mco stop --port {port}[/cyan]")
             raise typer.Exit(code=1)
 
-    log_path = Path.home() / ".mco" / "gateway.log"
+    from mco.service import gateway_log_path
+    log_path = gateway_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "a", encoding="utf-8", errors="replace")
 
@@ -659,8 +660,11 @@ def service_uninstall():
     """Remove the boot-persistent service (does not stop a running gateway)."""
     from mco import service
     ok_flag, detail = service.uninstall()
-    color = "green" if ok_flag else "yellow"
-    console.print(f"[{color}][OK][/{color}] {detail}")
+    if ok_flag:
+        console.print(f"[green][OK][/green] {detail}")
+    else:
+        console.print(f"[red][X] Service uninstall failed:[/red] {detail}")
+        raise typer.Exit(code=1)
 
 
 @service_app.command("status")
@@ -668,8 +672,47 @@ def service_status():
     """Show whether the boot-persistent service is installed."""
     from mco import service
     state = service.status()
-    color = "green" if state == "installed" else "yellow"
-    console.print(f"Service ({service.backend_name()}): [{color}]{state}[/{color}]")
+    installed = bool(state.get("installed"))
+    running = bool(state.get("running"))
+    color = "green" if installed and running else "yellow" if installed else "red"
+    console.print(Panel.fit(
+        f"[bold]{service.backend_name()}[/bold]\n"
+        f"Installed: [{color}]{'yes' if installed else 'no'}[/{color}]\n"
+        f"Running:   [{color}]{'yes' if running else 'no'}[/{color}]\n"
+        f"Last exit: {state.get('last_exit', 'unknown')}",
+        border_style=color,
+    ))
+
+
+@service_app.command("restart")
+def service_restart():
+    """Restart the boot-persistent gateway service."""
+    from mco import service
+    ok_flag, detail = service.restart()
+    if ok_flag:
+        console.print(f"[green][OK][/green] {detail}")
+    else:
+        console.print(f"[red][X] Service restart failed:[/red] {detail}")
+        raise typer.Exit(code=1)
+
+
+@service_app.command("logs")
+def service_logs(
+    lines: int = typer.Option(80, "--lines", "-n", help="Number of recent log lines to print."),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Keep streaming new log lines."),
+):
+    """Tail the gateway log file."""
+    from mco import service
+    log_path = service.gateway_log_path()
+    if not log_path.exists():
+        console.print(f"[yellow]No gateway log found at {log_path}.[/yellow]")
+        raise typer.Exit(code=0)
+    console.print(f"[dim]Log: {log_path}[/dim]")
+    try:
+        for line in service.tail_log(lines=lines, follow=follow):
+            console.print(line)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
 
 
 @app.command("stop")
