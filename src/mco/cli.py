@@ -31,7 +31,13 @@ from rich.table import Table
 
 from mco.config import get_config
 from mco.security import get_secret_store
-from mco.orchestrator.routes import router as jobs_router, agents_router, events_router, register_broadcast_callback
+from mco.orchestrator.routes import (
+    router as jobs_router,
+    agents_router,
+    events_router,
+    version_router,
+    register_broadcast_callback,
+)
 from mco.orchestrator.listener import AgentListener
 from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
 
@@ -130,6 +136,7 @@ def create_app() -> FastAPI:
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
     app_server.include_router(events_router)
+    app_server.include_router(version_router)
 
     # Enterprise integrations (ServiceNow, Dynatrace, webhooks)
     from mco.orchestrator.integration_routes import integrations_router

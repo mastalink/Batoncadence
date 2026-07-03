@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 import mco.orchestrator.routes as routes_mod
 from mco.orchestrator.auth import hash_token, require_agent
-from mco.orchestrator.routes import router, agents_router, events_router
+from mco.orchestrator.routes import router, agents_router, events_router, version_router
 
 
 # ── App factory ──────────────────────────────────────────────────────────────
@@ -16,6 +16,7 @@ def _build_app() -> FastAPI:
     app.include_router(router)
     app.include_router(agents_router)
     app.include_router(events_router)
+    app.include_router(version_router)
     return app
 
 
@@ -200,6 +201,24 @@ class FakeDB:
 
 TOKEN = "test-token-abc"
 AGENT = {"instance_id": "agent-1", "role": "codex", "status": "online"}
+
+
+class TestVersionRoute:
+    def test_version_route_returns_package_version_and_git_commit_key(self):
+        resp = TestClient(_build_app()).get("/api/version")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["version"] == "0.3.0"
+        assert set(body) == {"version", "git_commit"}
+
+    def test_version_route_uses_package_metadata_without_pyproject(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(routes_mod.importlib_metadata, "version", lambda name: "1.2.3")
+        monkeypatch.setattr(routes_mod, "_repo_root", lambda: tmp_path)
+
+        resp = TestClient(_build_app()).get("/api/version")
+
+        assert resp.status_code == 200
+        assert resp.json()["version"] == "1.2.3"
 
 
 # ── Auth-enforcement tests (real require_agent, no dependency override) ───────
