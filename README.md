@@ -86,7 +86,7 @@ BatonCadence sits between your agents and the work they do. It gives you:
 ## Quick start
 
 ```bash
-mco start             # start the gateway in the background (logs to ~/.mco/gateway.log)
+mco start             # start the gateway in the background (logs to ~/.mco/logs/gateway.log)
 mco stop              # stop it
 mco restart           # stop + start
 mco serve             # foreground alternative (terminals, systemd, Docker)
