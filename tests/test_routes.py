@@ -311,6 +311,41 @@ class TestDropboxPolicy:
         resp = self.http.put("/api/jobs/j99", json={"status": "completed"})
         assert resp.status_code == 403
 
+    def test_lease_403_wrong_role(self):
+        # AGENT is role "codex"; a job addressed to "claude" must not be leasable.
+        self.db.add_job(id="claude-job", target_agent_role="claude", status="pending")
+        resp = self.http.post("/api/jobs/lease", json={
+            "task_id": "claude-job",
+            "agent_instance_id": "agent-1",
+        })
+        assert resp.status_code == 403
+
+    def test_lease_403_sibling_instance_of_same_role(self):
+        # Same role (codex) but the job is reserved for a *specific* other
+        # instance. The inbox hides it from agent-1, so lease must 403 too -
+        # this is the case a naive check (role-match only) would wrongly allow.
+        self.db.add_job(
+            id="sibling-job",
+            target_agent_role="codex",
+            target_agent_id="codex-sibling",
+            status="pending",
+        )
+        resp = self.http.post("/api/jobs/lease", json={
+            "task_id": "sibling-job",
+            "agent_instance_id": "agent-1",
+        })
+        assert resp.status_code == 403
+
+    def test_lease_200_correctly_addressed(self):
+        # A job addressed to the caller's role (no specific instance) leases fine.
+        self.db.add_job(id="mine", target_agent_role="codex", status="pending")
+        resp = self.http.post("/api/jobs/lease", json={
+            "task_id": "mine",
+            "agent_instance_id": "agent-1",
+        })
+        assert resp.status_code == 200
+        assert resp.json().get("success") is True
+
 
 # ── Success and validation tests ──────────────────────────────────────────────
 

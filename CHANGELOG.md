@@ -4,6 +4,16 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
 
 ## [Unreleased]
 
+### Fixed
+- **Security (dropbox isolation):** `POST /api/jobs/lease` now enforces the
+  same addressee rule as the inbox and the completion endpoint - an agent may
+  only lease jobs addressed to its own role (or to its specific instance).
+  Previously the lease endpoint checked only org isolation, so any authenticated
+  agent could lease another agent's pending job; completion was still blocked,
+  so the job would strand in `leased` state and record a false actor in the
+  audit trail. The check mirrors the inbox filter, so a same-role sibling
+  instance is still blocked from an instance-targeted job.
+
 ## [0.3.0] - 2026-07-01
 
 The parity release: everything the API can do, the CLI and the console can

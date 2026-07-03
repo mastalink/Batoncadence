@@ -429,6 +429,25 @@ async def lease_job(payload: dict, agent: dict = Depends(require_scopes("jobs:wr
         if pre.data and job_org(pre.data[0]) != agent_org(agent):
             raise HTTPException(status_code=404, detail="Job not found")
 
+        # Dropbox rule: you may only lease mail addressed to you. This mirrors
+        # the inbox filter (get_pending_jobs) exactly - a role match is required,
+        # and an instance-targeted job is reserved for that instance - so an
+        # agent can lease precisely what its inbox shows and nothing else. The
+        # org check above stays first, so cross-org probes get 404 (not 403) and
+        # never learn a job exists. Without this, any authenticated agent could
+        # lease another agent's job (completion is still blocked downstream, so
+        # the job would strand in leased-limbo and mis-attribute the audit trail).
+        if pre.data:
+            j = pre.data[0]
+            target_role = (j.get("target_agent_role") or "").lower()
+            target_id = j.get("target_agent_id")
+            if target_role != (agent.get("role") or "").lower() or \
+               (target_id and target_id != agent.get("instance_id")):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Cannot lease a job not addressed to you",
+                )
+
         res = db_client.rpc("lease_task", {
             "p_agent_instance_id": agent_instance_id,
             "p_task_id": task_id
