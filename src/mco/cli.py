@@ -1687,6 +1687,50 @@ def watch(
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Enterprise integrations
 # ─────────────────────────────────────────────────────────────────────────────
+@app.command("wake")
+def wake(
+    exec_command: str = typer.Option(..., "--exec", help="Shell command to run when this worker has pending jobs."),
+    role: Optional[str] = typer.Option(None, "--role", help="Agent role to watch for."),
+    instance: Optional[str] = typer.Option(None, "--instance", help="Agent instance ID to watch for."),
+    gateway: Optional[str] = typer.Option(None, "--gateway", help="Gateway HTTP URL."),
+    token: Optional[str] = typer.Option(None, "--token", help="Agent bearer token."),
+    min_interval: float = typer.Option(10.0, "--min-interval", help="Minimum seconds between spawn starts."),
+):
+    """Wake a local worker command when this agent's inbox has pending jobs."""
+    from mco.waker import Waker, WakerAuthError
+
+    config = get_config()
+    resolved_role = role or config.get("AGENT_ROLE") or os.environ.get("AGENT_ROLE") or ""
+    resolved_instance = instance or config.get("AGENT_INSTANCE_ID") or os.environ.get("AGENT_INSTANCE_ID") or ""
+    resolved_gateway = gateway or config.get("MCO_GATEWAY_URL") or os.environ.get("MCO_GATEWAY_URL") or None
+    resolved_token = (
+        token
+        or config.get("MCO_AGENT_TOKEN")
+        or os.environ.get("MCO_AGENT_TOKEN")
+        or config.get("MCO_LOCAL_TOKEN")
+        or os.environ.get("MCO_LOCAL_TOKEN")
+        or ""
+    )
+
+    waker = Waker(
+        exec_command=exec_command,
+        role=resolved_role,
+        instance_id=resolved_instance,
+        gateway_url=resolved_gateway,
+        token=resolved_token,
+        min_interval=min_interval,
+    )
+    console.print(f"[green]Waking {resolved_role}/{resolved_instance} from {waker.ws_url}[/green] "
+                  "[dim](Ctrl-C to stop)[/dim]")
+    try:
+        asyncio.run(waker.run_forever())
+    except WakerAuthError as e:
+        console.print(f"[red][ERROR] {e}[/red]")
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
+
+
 @app.command("connectors")
 def list_connectors_cmd():
     """List configured enterprise connectors and their health (via the gateway)."""
