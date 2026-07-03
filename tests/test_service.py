@@ -70,6 +70,14 @@ def test_waker_name_is_derived_from_kind_role_and_instance():
     assert spec.launchd_label == "com.batoncadence.wake-opencode-opencode-beast"
 
 
+def test_poll_name_is_derived_from_kind_role_and_instance():
+    spec = service._poll_spec("opencode", "C:/worker/run.cmd", instance="opencode-beast")
+    assert spec.name == "BatonCadence-poll-opencode-opencode-beast"
+    assert spec.name != service.SERVICE_NAME
+    assert spec.unit_name == "batoncadence-poll-opencode-opencode-beast.service"
+    assert spec.launchd_label == "com.batoncadence.poll-opencode-opencode-beast"
+
+
 def test_backend_name_is_platform_appropriate():
     name = service.backend_name()
     assert name in ("Windows Task Scheduler", "macOS launchd", "systemd --user")
@@ -100,6 +108,22 @@ def test_windows_waker_task_xml_has_restart_on_failure_settings():
     assert 1 <= count <= 255
     assert "-m mco.cli wake --role opencode --exec" in xml
     assert "--instance opencode-beast" in xml
+
+
+def test_windows_poll_task_xml_has_repetition_interval_without_waker_restart():
+    xml = service._poll_windows_task_xml(
+        "opencode",
+        "worker-run --once",
+        instance="opencode-beast",
+        poll_interval=1800,
+    )
+    minidom.parseString(xml.encode("utf-16"))
+    assert "<TimeTrigger>" in xml
+    assert "<Repetition>" in xml
+    assert "<Interval>PT30M</Interval>" in xml
+    assert "<RestartOnFailure>" not in xml
+    assert "worker-run" in xml
+    assert "--once" in xml
 
 
 def test_windows_install_uses_schtasks_xml_without_real_install(monkeypatch, tmp_path):
@@ -183,6 +207,23 @@ def test_systemd_waker_unit_restarts_always_and_logs_to_waker_log():
     assert "StandardError=append:%h/.mco/logs/batoncadence-wake-opencode-opencode-beast.log" in unit
 
 
+def test_systemd_poll_unit_and_timer_run_worker_on_fixed_interval():
+    unit = service._poll_systemd_unit_text("opencode", "worker-run --once", instance="opencode-beast")
+    timer = service._poll_systemd_timer_text(
+        "opencode",
+        "worker-run --once",
+        instance="opencode-beast",
+        poll_interval=1800,
+    )
+    assert "Type=oneshot" in unit
+    assert "ExecStart=worker-run --once" in unit
+    assert "Restart=always" not in unit
+    assert "StandardOutput=append:%h/.mco/logs/batoncadence-poll-opencode-opencode-beast.log" in unit
+    assert "OnUnitActiveSec=1800" in timer
+    assert "Unit=batoncadence-poll-opencode-opencode-beast.service" in timer
+    assert "WantedBy=timers.target" in timer
+
+
 def test_systemd_install_writes_unit_and_enables_without_real_install(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(service, "_systemd_unit_path", lambda: tmp_path / "bc.service")
@@ -218,6 +259,26 @@ def test_systemd_waker_install_writes_distinct_unit_without_real_install(monkeyp
     assert ["systemctl", "--user", "enable", "--now", spec.unit_name] in calls
 
 
+def test_systemd_poll_install_writes_service_and_timer_without_real_install(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(service, "_systemd_unit_path", lambda unit_name=service.SYSTEMD_UNIT_NAME: tmp_path / unit_name)
+    monkeypatch.setattr(
+        service.subprocess,
+        "run",
+        lambda cmd, **kwargs: calls.append(cmd) or _RunResult(),
+    )
+
+    spec = service._poll_spec("opencode", "worker-run --once", instance="opencode-beast", poll_interval=1800)
+    ok_flag, _ = service._linux_install_poll_service(spec)
+
+    assert ok_flag
+    service_path = tmp_path / "batoncadence-poll-opencode-opencode-beast.service"
+    timer_path = tmp_path / "batoncadence-poll-opencode-opencode-beast.timer"
+    assert service_path.read_text(encoding="utf-8") == service._service_systemd_unit_text(spec)
+    assert timer_path.read_text(encoding="utf-8") == service._service_systemd_timer_text(spec)
+    assert ["systemctl", "--user", "enable", "--now", "batoncadence-poll-opencode-opencode-beast.timer"] in calls
+
+
 def test_launchd_plist_is_valid_xml_and_logs_to_gateway_log():
     xml = service._launchd_plist_xml("127.0.0.1", 18789)
     minidom.parseString(xml)
@@ -234,6 +295,21 @@ def test_launchd_waker_plist_has_keepalive_and_distinct_label():
     assert "<key>KeepAlive</key>" in xml
     assert "<true/>" in xml
     assert ".mco/logs/batoncadence-wake-opencode-opencode-beast.log" in xml.replace("\\", "/")
+
+
+def test_launchd_poll_plist_has_startinterval_and_distinct_label():
+    xml = service._poll_launchd_plist_xml(
+        "opencode",
+        "worker-run --once",
+        instance="opencode-beast",
+        poll_interval=1800,
+    )
+    minidom.parseString(xml)
+    assert "com.batoncadence.poll-opencode-opencode-beast" in xml
+    assert "<key>StartInterval</key>" in xml
+    assert "<integer>1800</integer>" in xml
+    assert "<key>KeepAlive</key>" not in xml
+    assert ".mco/logs/batoncadence-poll-opencode-opencode-beast.log" in xml.replace("\\", "/")
 
 
 def test_install_dispatch_matches_platform(monkeypatch):

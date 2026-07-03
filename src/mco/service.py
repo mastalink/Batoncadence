@@ -36,6 +36,7 @@ class ServiceSpec:
     restart_on_failure: bool
     role: str | None = None
     instance: str | None = None
+    poll_interval: float | None = None
 
     @property
     def unit_name(self) -> str:
@@ -72,6 +73,13 @@ def _waker_service_name(role: str, instance: str | None = None) -> str:
     return "-".join(parts)
 
 
+def _poll_service_name(role: str, instance: str | None = None) -> str:
+    parts = ["BatonCadence", "poll", _slug(role)]
+    if instance:
+        parts.append(_slug(instance))
+    return "-".join(parts)
+
+
 def _serve_argv(host: str, port: int) -> list[str]:
     """Argv that runs the gateway in the foreground."""
     return [sys.executable, "-m", "mco.cli", "serve", "--host", host, "--port", str(port)]
@@ -94,6 +102,11 @@ def _wake_argv(role: str, exec_command: str, instance: str | None = None, min_in
     if instance:
         argv.extend(["--instance", instance])
     return argv
+
+
+def _poll_argv(exec_command: str) -> list[str]:
+    """Argv that runs the configured worker wrapper once."""
+    return shlex.split(exec_command, posix=os.name != "nt")
 
 
 def _format_interval(value: float) -> str:
@@ -127,6 +140,24 @@ def _waker_spec(
     )
 
 
+def _poll_spec(
+    role: str,
+    exec_command: str,
+    instance: str | None = None,
+    poll_interval: float = 1800.0,
+) -> ServiceSpec:
+    return ServiceSpec(
+        name=_poll_service_name(role, instance),
+        kind="poll",
+        role=role,
+        instance=instance,
+        argv=_poll_argv(exec_command),
+        description=f"BatonCadence polling worker for {role}{('/' + instance) if instance else ''}",
+        restart_on_failure=False,
+        poll_interval=poll_interval,
+    )
+
+
 def _windows_task_xml(host: str, port: int) -> str:
     return _service_windows_task_xml(_gateway_spec(host, port))
 
@@ -140,6 +171,15 @@ def _waker_windows_task_xml(
     return _service_windows_task_xml(_waker_spec(role, exec_command, instance, min_interval))
 
 
+def _poll_windows_task_xml(
+    role: str,
+    exec_command: str,
+    instance: str | None = None,
+    poll_interval: float = 1800.0,
+) -> str:
+    return _service_windows_task_xml(_poll_spec(role, exec_command, instance, poll_interval))
+
+
 def _service_windows_task_xml(spec: ServiceSpec) -> str:
     command = escape(spec.argv[0])
     arguments = escape(" ".join(shlex.quote(part) for part in spec.argv[1:]))
@@ -151,18 +191,31 @@ def _service_windows_task_xml(spec: ServiceSpec) -> str:
       <Count>{WINDOWS_RESTART_COUNT}</Count>
     </RestartOnFailure>
 """
+    if spec.kind == "poll":
+        triggers = f"""    <TimeTrigger>
+      <Repetition>
+        <Interval>{_windows_duration(spec.poll_interval or 1800.0)}</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2000-01-01T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+"""
+    else:
+        triggers = """    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+"""
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>{escape(spec.description)}</Description>
   </RegistrationInfo>
   <Triggers>
-    <BootTrigger>
-      <Enabled>true</Enabled>
-    </BootTrigger>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-    </LogonTrigger>
+{triggers.rstrip()}
   </Triggers>
   <Principals>
     <Principal id="Author">
@@ -188,6 +241,24 @@ def _service_windows_task_xml(spec: ServiceSpec) -> str:
   </Actions>
 </Task>
 """
+
+
+def _windows_duration(seconds: float) -> str:
+    remaining = max(1, int(seconds))
+    days, remaining = divmod(remaining, 24 * 60 * 60)
+    hours, remaining = divmod(remaining, 60 * 60)
+    minutes, seconds = divmod(remaining, 60)
+    date = f"{days}D" if days else ""
+    time_parts = ""
+    if hours:
+        time_parts += f"{hours}H"
+    if minutes:
+        time_parts += f"{minutes}M"
+    if seconds or not (date or time_parts):
+        time_parts += f"{seconds}S"
+    if time_parts:
+        return f"P{date}T{time_parts}"
+    return f"P{date}"
 
 
 def _windows_task_xml_path(name: str = SERVICE_NAME) -> Path:
@@ -229,9 +300,41 @@ def _waker_systemd_unit_text(
     return _service_systemd_unit_text(_waker_spec(role, exec_command, instance, min_interval))
 
 
+def _poll_systemd_unit_text(
+    role: str,
+    exec_command: str,
+    instance: str | None = None,
+    poll_interval: float = 1800.0,
+) -> str:
+    return _service_systemd_unit_text(_poll_spec(role, exec_command, instance, poll_interval))
+
+
+def _poll_systemd_timer_text(
+    role: str,
+    exec_command: str,
+    instance: str | None = None,
+    poll_interval: float = 1800.0,
+) -> str:
+    return _service_systemd_timer_text(_poll_spec(role, exec_command, instance, poll_interval))
+
+
 def _service_systemd_unit_text(spec: ServiceSpec) -> str:
     exec_start = " ".join(shlex.quote(part) for part in spec.argv)
     log_path = _systemd_log_path(spec)
+    if spec.kind == "poll":
+        return f"""[Unit]
+Description={spec.description}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={exec_start}
+WorkingDirectory=%h
+Environment=HOME=%h
+StandardOutput=append:{log_path}
+StandardError=append:{log_path}
+"""
     return f"""[Unit]
 Description={spec.description}
 After=network-online.target
@@ -249,6 +352,21 @@ StandardError=append:{log_path}
 
 [Install]
 WantedBy=default.target
+"""
+
+
+def _service_systemd_timer_text(spec: ServiceSpec) -> str:
+    return f"""[Unit]
+Description=Run {spec.description} every {_format_interval(spec.poll_interval or 1800.0)} seconds
+
+[Timer]
+OnBootSec=0
+OnUnitActiveSec={_format_interval(spec.poll_interval or 1800.0)}
+Unit={spec.unit_name}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
 """
 
 
@@ -276,11 +394,23 @@ def _waker_launchd_plist_xml(
     return _service_launchd_plist_xml(_waker_spec(role, exec_command, instance, min_interval))
 
 
+def _poll_launchd_plist_xml(
+    role: str,
+    exec_command: str,
+    instance: str | None = None,
+    poll_interval: float = 1800.0,
+) -> str:
+    return _service_launchd_plist_xml(_poll_spec(role, exec_command, instance, poll_interval))
+
+
 def _service_launchd_plist_xml(spec: ServiceSpec) -> str:
     args_xml = "\n".join(f"      <string>{escape(part)}</string>" for part in spec.argv)
     log_path = escape(str(spec.log_path))
     working_dir = escape(str(Path.home()))
     keep_alive = "  <key>KeepAlive</key>\n  <true/>\n" if spec.restart_on_failure or spec.kind == "gateway" else ""
+    start_interval = ""
+    if spec.kind == "poll":
+        start_interval = f"  <key>StartInterval</key>\n  <integer>{max(1, int(spec.poll_interval or 1800.0))}</integer>\n"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -296,7 +426,7 @@ def _service_launchd_plist_xml(spec: ServiceSpec) -> str:
   <string>{working_dir}</string>
   <key>RunAtLoad</key>
   <true/>
-{keep_alive}  <key>StandardOutPath</key>
+{keep_alive}{start_interval}  <key>StandardOutPath</key>
   <string>{log_path}</string>
   <key>StandardErrorPath</key>
   <string>{log_path}</string>
@@ -418,6 +548,29 @@ def _linux_install_service(spec: ServiceSpec) -> tuple[bool, str]:
     return _linux_enable_unit(spec.unit_name, path)
 
 
+def _linux_install_poll_service(spec: ServiceSpec) -> tuple[bool, str]:
+    service_path = _systemd_unit_path(spec.unit_name)
+    timer_name = _systemd_timer_name(spec.unit_name)
+    timer_path = _systemd_unit_path(timer_name)
+    service_path.parent.mkdir(parents=True, exist_ok=True)
+    spec.log_path.parent.mkdir(parents=True, exist_ok=True)
+    service_path.write_text(_service_systemd_unit_text(spec), encoding="utf-8")
+    timer_path.write_text(_service_systemd_timer_text(spec), encoding="utf-8")
+    for cmd in (
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "enable", "--now", timer_name],
+    ):
+        res = _run(cmd)
+        if res.returncode != 0:
+            return False, res.stderr.strip() or res.stdout.strip() or f"{' '.join(cmd)} failed"
+    return True, (f"Installed systemd --user service at {service_path} and timer at {timer_path}.\n"
+                  "For boot-without-login, run: sudo loginctl enable-linger $USER")
+
+
+def _systemd_timer_name(unit_name: str) -> str:
+    return unit_name.removesuffix(".service") + ".timer"
+
+
 def _linux_enable_unit(unit_name: str, path: Path) -> tuple[bool, str]:
     for cmd in (
         ["systemctl", "--user", "daemon-reload"],
@@ -432,18 +585,28 @@ def _linux_enable_unit(unit_name: str, path: Path) -> tuple[bool, str]:
 
 def _linux_uninstall(unit_name: str = SYSTEMD_UNIT_NAME) -> tuple[bool, str]:
     _run(["systemctl", "--user", "disable", "--now", unit_name])
+    timer_name = _systemd_timer_name(unit_name)
+    _run(["systemctl", "--user", "disable", "--now", timer_name])
     path = _systemd_unit_path(unit_name)
     if path.exists():
         path.unlink()
+    timer_path = _systemd_unit_path(timer_name)
+    if timer_path.exists():
+        timer_path.unlink()
     _run(["systemctl", "--user", "daemon-reload"])
     return True, f"Removed systemd --user unit '{unit_name}'."
 
 
 def _linux_status(unit_name: str = SYSTEMD_UNIT_NAME, name: str = SERVICE_NAME) -> dict[str, object]:
     enabled = _run(["systemctl", "--user", "is-enabled", unit_name])
-    if enabled.returncode != 0:
+    path = _systemd_unit_path(unit_name)
+    timer_name = _systemd_timer_name(unit_name)
+    timer_enabled = _run(["systemctl", "--user", "is-enabled", timer_name])
+    timer_installed = _systemd_unit_path(timer_name).exists() or timer_enabled.returncode == 0
+    if enabled.returncode != 0 and not path.exists() and not timer_installed:
         return _base_status(False, name=name)
-    active = _run(["systemctl", "--user", "is-active", unit_name])
+    active_target = timer_name if timer_installed else unit_name
+    active = _run(["systemctl", "--user", "is-active", active_target])
     exit_code = _run(["systemctl", "--user", "show", unit_name, "-p", "ExecMainStatus", "--value"])
     return _base_status(
         installed=True,
@@ -572,6 +735,20 @@ def install_waker(
     return _linux_install_service(spec)
 
 
+def install_poll(
+    role: str,
+    exec_command: str,
+    instance: str | None = None,
+    poll_interval: float = 1800.0,
+) -> tuple[bool, str]:
+    spec = _poll_spec(role, exec_command, instance=instance, poll_interval=poll_interval)
+    if os.name == "nt":
+        return _win_install_service(spec)
+    if sys.platform == "darwin":
+        return _mac_install_service(spec)
+    return _linux_install_poll_service(spec)
+
+
 def uninstall(selector: str | None = SERVICE_NAME) -> tuple[bool, str]:
     target = _resolve_target(selector)
     if os.name == "nt":
@@ -640,12 +817,13 @@ def _selector_matches_name(selector: str, name: str) -> bool:
 def _target_from_name(name: str) -> ServiceSpec:
     if name == SERVICE_NAME or _slug(name) == "batoncadence-gateway":
         return _gateway_spec("127.0.0.1", 18789)
+    kind = "poll" if _slug(name).startswith("batoncadence-poll-") else "wake"
     return ServiceSpec(
         name=name,
-        kind="wake",
+        kind=kind,
         argv=[],
         description=name,
-        restart_on_failure=True,
+        restart_on_failure=kind == "wake",
     )
 
 
