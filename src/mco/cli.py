@@ -636,6 +636,86 @@ def restart(
 service_app = typer.Typer(help="Run BatonCadence processes as boot-persistent OS services.")
 app.add_typer(service_app, name="service")
 
+fleet_app = typer.Typer(help="Apply declarative per-worker service run modes.")
+app.add_typer(fleet_app, name="fleet")
+
+
+def _print_fleet_missing(path):
+    from mco import fleet
+    console.print(f"[yellow]No fleet config found at {path}.[/yellow]")
+    console.print("[dim]Create one like:[/dim]")
+    console.print(fleet.sample_config())
+
+
+@fleet_app.command("apply")
+def fleet_apply():
+    """Reconcile OS services to ~/.mco/fleet.toml."""
+    from mco import fleet
+    try:
+        summaries = fleet.apply_fleet()
+    except fleet.FleetConfigMissing as exc:
+        _print_fleet_missing(exc)
+        raise typer.Exit(code=0)
+    except fleet.FleetConfigError as exc:
+        console.print(f"[red][X] Fleet apply failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+    if not summaries:
+        console.print("[green][OK][/green] Fleet config is empty; no worker services declared.")
+        return
+    for summary in summaries:
+        console.print(summary)
+
+
+@fleet_app.command("status")
+def fleet_status():
+    """Show configured workers and their installed/running state."""
+    from mco import fleet
+    try:
+        rows = fleet.fleet_status()
+    except fleet.FleetConfigMissing as exc:
+        _print_fleet_missing(exc)
+        raise typer.Exit(code=0)
+    except fleet.FleetConfigError as exc:
+        console.print(f"[red][X] Fleet status failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+    if not rows:
+        console.print("[yellow]Fleet config has no workers.[/yellow]")
+        return
+    table = Table(title="BatonCadence Fleet")
+    for column in ("Worker", "Role", "Instance", "Mode", "Installed", "Running", "Service"):
+        table.add_column(column)
+    for row in rows:
+        installed = "yes" if row["installed"] else "no"
+        running = "yes" if row["running"] else "no"
+        table.add_row(
+            str(row["worker"]),
+            str(row["role"]),
+            str(row["instance"] or ""),
+            str(row["mode"]),
+            installed,
+            running,
+            str(row["service"]),
+        )
+    console.print(table)
+
+
+@fleet_app.command("set")
+def fleet_set(
+    worker: str = typer.Argument(..., help="Worker table name under [workers]."),
+    assignment: str = typer.Argument(..., help="KEY=VALUE assignment, for example mode=waker."),
+):
+    """Update one worker field in ~/.mco/fleet.toml."""
+    from mco import fleet
+    try:
+        message = fleet.set_worker_value(worker, assignment)
+    except fleet.FleetConfigMissing as exc:
+        _print_fleet_missing(exc)
+        raise typer.Exit(code=1)
+    except (fleet.FleetConfigError, ValueError) as exc:
+        console.print(f"[red][X] Fleet set failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+    console.print(f"[green][OK][/green] {message}")
+
 
 @service_app.command("install")
 def service_install(
