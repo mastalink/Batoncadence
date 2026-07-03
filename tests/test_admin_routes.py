@@ -1,5 +1,8 @@
 """Admin API tests: agent management, settings whitelist, workflow submission."""
 
+import base64
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,6 +14,7 @@ import mco.orchestrator.routes as routes_mod
 from mco.orchestrator.auth import require_agent, verify_token
 from mco.orchestrator.admin_routes import (
     agents_admin_router,
+    governance_router,
     settings_router,
     workflows_router,
 )
@@ -58,6 +62,7 @@ def setup(monkeypatch):
     app.include_router(jobs_router)
     app.include_router(agents_router)
     app.include_router(agents_admin_router)
+    app.include_router(governance_router)
     app.include_router(settings_router)
     app.include_router(workflows_router)
     app.dependency_overrides[require_agent] = lambda: ADMIN
@@ -448,3 +453,54 @@ class TestWorkflowSubmit:
     def test_worker_may_submit(self):
         _as(WORKER)  # jobs:write is a worker default scope
         assert _ctx().http.post("/api/workflows", json={"yaml": WF_YAML}).status_code == 200
+
+
+class TestDemoPipeline:
+    def test_demo_pipeline_seeds_three_job_dag(self):
+        resp = _ctx().http.post("/api/workflows/demo-pipeline")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["workflow"] == "jde-demo-live-pipeline"
+        assert set(body["jobs"]) == {"plan", "build", "review"}
+
+        plan = _ctx().db._jobs[body["jobs"]["plan"]]
+        build = _ctx().db._jobs[body["jobs"]["build"]]
+        review = _ctx().db._jobs[body["jobs"]["review"]]
+        assert plan["target_agent_role"] == "claude"
+        assert build["target_agent_role"] == "codex"
+        assert review["target_agent_role"] == "reviewer"
+        assert build["depends_on"] == [plan["id"]]
+        assert review["depends_on"] == [build["id"]]
+        assert plan["input_payload"]["workflow"]["run"] == body["run"]
+        assert len(_ctx().db._events) == 3
+
+
+class TestGovernanceEvidencePack:
+    def test_evidence_pack_returns_pdf_cover_and_audit_json(self):
+        pending = _ctx().http.post("/api/jobs", json={
+            "title": "Release approval",
+            "target_agent_role": "codex",
+            "requires_approval": True,
+        }).json()["job"]
+        decided = _ctx().http.post("/api/jobs", json={
+            "title": "Firewall change",
+            "target_agent_role": "codex",
+            "requires_approval": True,
+        }).json()["job"]
+        assert _ctx().http.post(f"/api/jobs/{decided['id']}/approve").status_code == 200
+
+        resp = _ctx().http.post("/api/governance/evidence-pack", json={
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+        })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["summary"]["pending_approvals"] == 1
+        assert body["summary"]["decisions"] == 1
+
+        files = {f["filename"]: f for f in body["files"]}
+        assert base64.b64decode(files["cover.pdf"]["base64"]).startswith(b"%PDF-1.4")
+        audit = json.loads(files["audit-trail.json"]["text"])
+        assert audit["regulatory_basis"]["eu_ai_act_article_12"].startswith("Record-keeping")
+        assert audit["regulatory_basis"]["eu_ai_act_article_14"].startswith("Human oversight")
+        assert audit["pending_approvals"][0]["id"] == pending["id"]

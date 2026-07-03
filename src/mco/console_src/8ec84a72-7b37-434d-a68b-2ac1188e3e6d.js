@@ -5,6 +5,7 @@ const NAV = [
   { id: "overview", label: "Overview", icon: "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" },
   { id: "jobs", label: "Job Board", icon: "M4 6h16M4 12h16M4 18h10" },
   { id: "approvals", label: "Approvals", icon: "M9 12l2 2 4-5M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18z" },
+  { id: "governance", label: "Governance", icon: "M12 3l8 4v5c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V7l8-4zM9 12l2 2 4-5" },
   { id: "workflows", label: "Workflows", icon: "M5 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM5 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM7 5h10M7 19h10M19 12H7" },
   { id: "agents", label: "Agent Fleet", icon: "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM5 22a7 7 0 0 1 14 0M19 8a2.5 2.5 0 1 0-4 0M9 8a2.5 2.5 0 1 1-4 0" },
   { id: "memory", label: "Memory", icon: "M21 5c0 1.66-4.03 3-9 3S3 6.66 3 5s4.03-3 9-3 9 1.34 9 3zM3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" },
@@ -65,8 +66,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const PAGE_TITLES = {
-  expert: { overview: "Overview", jobs: "Job Board", approvals: "Approval Queue", workflows: "Workflows", agents: "Agent Fleet", memory: "Drumline Memory", activity: "Audit Trail", settings: "Settings" },
-  plain: { overview: "Overview", jobs: "All work", approvals: "Needs your OK", workflows: "Flows", agents: "Your agents", memory: "Shared memory", activity: "What happened", settings: "Settings" },
+  expert: { overview: "Overview", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", workflows: "Workflows", agents: "Agent Fleet", memory: "Drumline Memory", activity: "Audit Trail", settings: "Settings" },
+  plain: { overview: "Overview", jobs: "All work", approvals: "Needs your OK", governance: "Governance", workflows: "Flows", agents: "Your agents", memory: "Shared memory", activity: "What happened", settings: "Settings" },
 };
 
 function App() {
@@ -105,6 +106,7 @@ function App() {
     overview: <Overview jobs={jobs} agents={agents} tone={tone} advanced={advanced} onNav={setPage} onOpen={setOpenJob} />,
     jobs: <JobBoard jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} onCompose={() => setComposing(true)} />,
     approvals: <Approvals jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
+    governance: <Governance jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     workflows: <WorkflowBuilder jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     agents: <AgentFleet agents={agents} jobs={jobs} tone={tone} advanced={advanced} />,
     memory: <DrumlineMemory tone={tone} advanced={advanced} />,

@@ -142,10 +142,12 @@ def create_app() -> FastAPI:
     # Admin API: agent management, settings, workflow submission (Control Panel)
     from mco.orchestrator.admin_routes import (
         agents_admin_router,
+        governance_router,
         settings_router,
         workflows_router,
     )
     app_server.include_router(agents_admin_router)
+    app_server.include_router(governance_router)
     app_server.include_router(settings_router)
     app_server.include_router(workflows_router)
 
