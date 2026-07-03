@@ -19,6 +19,24 @@ def test_serve_argv_runs_the_gateway():
     assert argv[-5:] == ["serve", "--host", "0.0.0.0", "--port", "9000"]
 
 
+def test_wake_argv_runs_the_waker_with_selector_values():
+    argv = service._wake_argv("opencode", "opencode run", instance="opencode-beast", min_interval=2.5)
+    assert argv[0] == sys.executable
+    assert argv[1:4] == ["-m", "mco.cli", "wake"]
+    assert "--role" in argv and "opencode" in argv
+    assert "--exec" in argv and "opencode run" in argv
+    assert "--instance" in argv and "opencode-beast" in argv
+    assert "--min-interval" in argv and "2.5" in argv
+
+
+def test_waker_name_is_derived_from_kind_role_and_instance():
+    spec = service._waker_spec("opencode", "opencode run", instance="opencode-beast")
+    assert spec.name == "BatonCadence-wake-opencode-opencode-beast"
+    assert spec.name != service.SERVICE_NAME
+    assert spec.unit_name == "batoncadence-wake-opencode-opencode-beast.service"
+    assert spec.launchd_label == "com.batoncadence.wake-opencode-opencode-beast"
+
+
 def test_backend_name_is_platform_appropriate():
     name = service.backend_name()
     assert name in ("Windows Task Scheduler", "macOS launchd", "systemd --user")
@@ -31,6 +49,23 @@ def test_windows_task_xml_has_boot_and_logon_triggers():
     assert "<LogonTrigger>" in xml
     assert "<Command>" in xml and sys.executable in xml
     assert "-m mco.cli serve --host 127.0.0.1 --port 18789" in xml
+
+
+def test_windows_waker_task_xml_has_restart_on_failure_settings():
+    xml = service._waker_windows_task_xml(
+        "opencode",
+        "opencode run",
+        instance="opencode-beast",
+        min_interval=5,
+    )
+    minidom.parseString(xml.encode("utf-16"))
+    assert "<BootTrigger>" in xml
+    assert "<LogonTrigger>" in xml
+    assert "<RestartOnFailure>" in xml
+    assert "<Interval>PT5S</Interval>" in xml
+    assert "<Count>999</Count>" in xml
+    assert "-m mco.cli wake --role opencode --exec" in xml
+    assert "--instance opencode-beast" in xml
 
 
 def test_windows_install_uses_schtasks_xml_without_real_install(monkeypatch, tmp_path):
@@ -53,6 +88,37 @@ def test_windows_install_uses_schtasks_xml_without_real_install(monkeypatch, tmp
     assert calls[1] == ["schtasks", "/Run", "/TN", service.SERVICE_NAME]
 
 
+def test_windows_waker_install_uses_role_service_name_and_restart_xml(monkeypatch, tmp_path):
+    calls = []
+    xml_path = tmp_path / "BatonCadence-wake-opencode-opencode-beast.xml"
+    monkeypatch.setattr(service, "_windows_task_xml_path", lambda name=service.SERVICE_NAME: tmp_path / f"{name}.xml")
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _RunResult()
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+
+    ok_flag, detail = service._win_install_service(
+        service._waker_spec("opencode", "opencode run", instance="opencode-beast")
+    )
+
+    assert ok_flag
+    assert "restart-on-failure" in detail
+    assert xml_path.exists()
+    assert "<RestartOnFailure>" in xml_path.read_text(encoding="utf-16")
+    assert calls[0] == [
+        "schtasks",
+        "/Create",
+        "/TN",
+        "BatonCadence-wake-opencode-opencode-beast",
+        "/XML",
+        str(xml_path),
+        "/F",
+    ]
+    assert calls[1] == ["schtasks", "/Run", "/TN", "BatonCadence-wake-opencode-opencode-beast"]
+
+
 def test_windows_status_parses_running_and_last_exit():
     parsed = service._parse_windows_status(
         "TaskName: BatonCadence-gateway\n"
@@ -69,6 +135,16 @@ def test_systemd_unit_renders_execstart_restart_and_logs():
     assert "Restart=always" in unit
     assert "StandardOutput=append:%h/.mco/logs/gateway.log" in unit
     assert "StandardError=append:%h/.mco/logs/gateway.log" in unit
+
+
+def test_systemd_waker_unit_restarts_always_and_logs_to_waker_log():
+    unit = service._waker_systemd_unit_text("opencode", "opencode run", instance="opencode-beast")
+    assert "ExecStart=" in unit
+    assert "wake --role opencode --exec" in unit
+    assert "Restart=always" in unit
+    assert "RestartSec=5" in unit
+    assert "StandardOutput=append:%h/.mco/logs/batoncadence-wake-opencode-opencode-beast.log" in unit
+    assert "StandardError=append:%h/.mco/logs/batoncadence-wake-opencode-opencode-beast.log" in unit
 
 
 def test_systemd_install_writes_unit_and_enables_without_real_install(monkeypatch, tmp_path):
@@ -88,6 +164,24 @@ def test_systemd_install_writes_unit_and_enables_without_real_install(monkeypatc
     assert ["systemctl", "--user", "enable", "--now", service.SYSTEMD_UNIT_NAME] in calls
 
 
+def test_systemd_waker_install_writes_distinct_unit_without_real_install(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(service, "_systemd_unit_path", lambda unit_name=service.SYSTEMD_UNIT_NAME: tmp_path / unit_name)
+    monkeypatch.setattr(
+        service.subprocess,
+        "run",
+        lambda cmd, **kwargs: calls.append(cmd) or _RunResult(),
+    )
+
+    spec = service._waker_spec("opencode", "opencode run", instance="opencode-beast")
+    ok_flag, _ = service._linux_install_service(spec)
+
+    assert ok_flag
+    unit_path = tmp_path / "batoncadence-wake-opencode-opencode-beast.service"
+    assert unit_path.read_text(encoding="utf-8") == service._service_systemd_unit_text(spec)
+    assert ["systemctl", "--user", "enable", "--now", spec.unit_name] in calls
+
+
 def test_launchd_plist_is_valid_xml_and_logs_to_gateway_log():
     xml = service._launchd_plist_xml("127.0.0.1", 18789)
     minidom.parseString(xml)
@@ -95,6 +189,15 @@ def test_launchd_plist_is_valid_xml_and_logs_to_gateway_log():
     assert "<key>RunAtLoad</key>" in xml
     assert "<key>KeepAlive</key>" in xml
     assert ".mco/logs/gateway.log" in xml.replace("\\", "/")
+
+
+def test_launchd_waker_plist_has_keepalive_and_distinct_label():
+    xml = service._waker_launchd_plist_xml("opencode", "opencode run", instance="opencode-beast")
+    minidom.parseString(xml)
+    assert "com.batoncadence.wake-opencode-opencode-beast" in xml
+    assert "<key>KeepAlive</key>" in xml
+    assert "<true/>" in xml
+    assert ".mco/logs/batoncadence-wake-opencode-opencode-beast.log" in xml.replace("\\", "/")
 
 
 def test_install_dispatch_matches_platform(monkeypatch):
