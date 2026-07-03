@@ -2,6 +2,9 @@
 
 import os
 import logging
+import re
+import subprocess
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 from mco.orchestrator.contracts import JobStatus
 from mco.orchestrator.auth import require_agent, require_scopes
@@ -166,6 +169,7 @@ logger = logging.getLogger("mco.orchestrator.routes")
 router = APIRouter(prefix="/api/jobs")
 agents_router = APIRouter(prefix="/api/agents")
 events_router = APIRouter(prefix="/api/events")
+version_router = APIRouter(prefix="/api")
 
 # Dynamic callback hook for gateway websocket notifications
 # Callable signature: async def callback(event: str, job: dict)
@@ -182,6 +186,37 @@ def register_broadcast_callback(callback) -> None:
 # PostgREST/Auth/Realtime sub-clients), so building it per request made every
 # endpoint slow enough to trip client timeouts. Build once, reuse.
 _db_client = None
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _package_version() -> str:
+    pyproject = _repo_root() / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+    if not match:
+        raise RuntimeError("project version not found in pyproject.toml")
+    return match.group(1)
+
+
+def _git_commit() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(_repo_root()),
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+        ).strip() or None
+    except Exception:
+        return None
+
+
+@version_router.get("/version")
+async def get_version():
+    return {"version": _package_version(), "git_commit": _git_commit()}
 
 
 def get_db_client(force_new: bool = False):
