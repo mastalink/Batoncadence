@@ -23,6 +23,8 @@ from xml.sax.saxutils import escape
 SERVICE_NAME = "BatonCadence-gateway"
 SYSTEMD_UNIT_NAME = "batoncadence-gateway.service"
 LAUNCHD_LABEL = "com.batoncadence.gateway"
+WINDOWS_RESTART_INTERVAL = "PT1M"
+WINDOWS_RESTART_COUNT = 3
 
 
 @dataclass(frozen=True)
@@ -144,9 +146,9 @@ def _service_windows_task_xml(spec: ServiceSpec) -> str:
     working_dir = escape(str(Path.home()))
     restart_xml = ""
     if spec.restart_on_failure:
-        restart_xml = """    <RestartOnFailure>
-      <Interval>PT5S</Interval>
-      <Count>999</Count>
+        restart_xml = f"""    <RestartOnFailure>
+      <Interval>{WINDOWS_RESTART_INTERVAL}</Interval>
+      <Count>{WINDOWS_RESTART_COUNT}</Count>
     </RestartOnFailure>
 """
     return f"""<?xml version="1.0" encoding="UTF-16"?>

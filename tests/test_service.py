@@ -5,12 +5,45 @@ import xml.dom.minidom as minidom
 
 import mco.service as service
 
+TASK_SCHEDULER_NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+
 
 class _RunResult:
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+def _restart_on_failure_values(xml):
+    doc = minidom.parseString(xml.encode("utf-16"))
+    restart_nodes = doc.getElementsByTagNameNS(TASK_SCHEDULER_NS, "RestartOnFailure")
+    assert len(restart_nodes) == 1
+    restart = restart_nodes[0]
+
+    interval_nodes = restart.getElementsByTagNameNS(TASK_SCHEDULER_NS, "Interval")
+    count_nodes = restart.getElementsByTagNameNS(TASK_SCHEDULER_NS, "Count")
+    assert len(interval_nodes) == 1
+    assert len(count_nodes) == 1
+
+    interval = interval_nodes[0].firstChild.nodeValue
+    count = int(count_nodes[0].firstChild.nodeValue)
+    return interval, count
+
+
+def _task_scheduler_duration_seconds(duration):
+    match = service.re.fullmatch(
+        r"P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?",
+        duration,
+    )
+    assert match, f"Unsupported Task Scheduler duration: {duration}"
+    values = {name: int(value or 0) for name, value in match.groupdict().items()}
+    return (
+        values["days"] * 24 * 60 * 60
+        + values["hours"] * 60 * 60
+        + values["minutes"] * 60
+        + values["seconds"]
+    )
 
 
 def test_serve_argv_runs_the_gateway():
@@ -62,8 +95,9 @@ def test_windows_waker_task_xml_has_restart_on_failure_settings():
     assert "<BootTrigger>" in xml
     assert "<LogonTrigger>" in xml
     assert "<RestartOnFailure>" in xml
-    assert "<Interval>PT5S</Interval>" in xml
-    assert "<Count>999</Count>" in xml
+    interval, count = _restart_on_failure_values(xml)
+    assert _task_scheduler_duration_seconds(interval) >= 60
+    assert 1 <= count <= 255
     assert "-m mco.cli wake --role opencode --exec" in xml
     assert "--instance opencode-beast" in xml
 
@@ -106,7 +140,9 @@ def test_windows_waker_install_uses_role_service_name_and_restart_xml(monkeypatc
     assert ok_flag
     assert "restart-on-failure" in detail
     assert xml_path.exists()
-    assert "<RestartOnFailure>" in xml_path.read_text(encoding="utf-16")
+    interval, count = _restart_on_failure_values(xml_path.read_text(encoding="utf-16"))
+    assert _task_scheduler_duration_seconds(interval) >= 60
+    assert 1 <= count <= 255
     assert calls[0] == [
         "schtasks",
         "/Create",
