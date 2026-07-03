@@ -67,7 +67,7 @@ class Waker:
             try:
                 async with websockets.connect(self.ws_url) as ws:
                     await self._authenticate(ws)
-                    logger.info("Connected to %s as %s/%s", self.ws_url, self.role, self.instance_id)
+                    logger.info("Connected to the broadcast socket")
                     backoff = 1.0
                     self.on_connected()
                     async for frame in ws:
@@ -77,7 +77,8 @@ class Waker:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("Disconnected from %s: %s; retrying in %ss", self.ws_url, exc, int(backoff))
+                logger.warning("Disconnected from the broadcast socket (%s); retrying in %ss",
+                               type(exc).__name__, int(backoff))
                 await self._sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
 
@@ -128,7 +129,7 @@ class Waker:
             self._dirty = False
             jobs = await asyncio.to_thread(self.client.inbox)
             if not jobs:
-                logger.debug("Waker drain found no pending jobs for %s/%s", self.role, self.instance_id)
+                logger.debug("Waker drain found no pending jobs")
                 return
             await self._enforce_min_interval()
             code = await self._run_exec()
