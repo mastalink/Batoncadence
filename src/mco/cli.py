@@ -39,6 +39,7 @@ from mco.orchestrator.routes import (
     version_router,
     register_broadcast_callback,
 )
+from mco.orchestrator.utils import get_approver_roles
 from mco.orchestrator.listener import AgentListener
 from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
 
@@ -138,7 +139,7 @@ class ConnectionManager:
         if identity.is_admin:
             return True
         if not job:
-            return True
+            return False
         target_role = str(job.get("target_agent_role") or "")
         if target_role.lower() != (identity.role or "").lower():
             return False
@@ -147,6 +148,10 @@ class ConnectionManager:
 
 
 ws_manager = ConnectionManager()
+
+
+def _is_admin_scope_role(role: Any) -> bool:
+    return str(role or "").lower() in get_approver_roles()
 
 
 async def server_broadcast_callback(event: str, job: dict) -> None:
@@ -335,7 +340,7 @@ def create_app() -> FastAPI:
                                 ConnectionIdentity(
                                     role=role or "",
                                     instance_id=instance_id or "",
-                                    is_admin=(str(role or "").lower() == "admin"),
+                                    is_admin=_is_admin_scope_role(role),
                                 ),
                             )
 

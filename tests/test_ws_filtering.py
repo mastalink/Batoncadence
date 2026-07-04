@@ -1,6 +1,6 @@
 import pytest
 
-from mco.cli import ConnectionIdentity, ConnectionManager
+from mco.cli import ConnectionIdentity, ConnectionManager, _is_admin_scope_role
 
 
 class FakeWebSocket:
@@ -57,3 +57,36 @@ async def test_broadcast_filters_non_admin_agent_to_its_mailbox():
         "wrong role job",
         "sibling instance job",
     ]
+
+
+@pytest.mark.parametrize("role", ["operator", "human"])
+def test_approver_roles_receive_firehose_events(role):
+    identity = ConnectionIdentity(
+        role=role,
+        instance_id=f"{role}-instance",
+        is_admin=_is_admin_scope_role(role),
+    )
+
+    assert ConnectionManager._can_receive(
+        identity,
+        {"target_agent_role": "codex", "target_agent_id": "codex-beast"},
+    )
+
+
+def test_jobless_events_fail_closed_for_non_admin_connections():
+    assert not ConnectionManager._can_receive(
+        ConnectionIdentity(role="codex", instance_id="codex-beast", is_admin=False),
+        None,
+    )
+    assert ConnectionManager._can_receive(
+        ConnectionIdentity(role="admin", instance_id="admin", is_admin=True),
+        None,
+    )
+    assert ConnectionManager._can_receive(
+        ConnectionIdentity(
+            role="operator",
+            instance_id="operator",
+            is_admin=_is_admin_scope_role("operator"),
+        ),
+        None,
+    )
