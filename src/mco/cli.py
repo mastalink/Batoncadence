@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -87,28 +88,62 @@ def setup_wizard(
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Serve Command (FastAPI HTTP + WebSocket server)
 # ─────────────────────────────────────────────────────────────────────────────
+@dataclass
+class ConnectionIdentity:
+    role: str = ""
+    instance_id: str = ""
+    is_admin: bool = False
+
+
+@dataclass
+class ManagedConnection:
+    websocket: WebSocket
+    identity: ConnectionIdentity
+
+
 class ConnectionManager:
     """Manages active WebSocket subscription channels."""
 
     def __init__(self):
-        self.active_connections: list[WebSocket] = []
+        self.active_connections: list[ManagedConnection] = []
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, identity: ConnectionIdentity):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.register(websocket, identity)
+
+    def register(self, websocket: WebSocket, identity: ConnectionIdentity):
+        self.active_connections.append(ManagedConnection(websocket, identity))
 
     def disconnect(self, websocket: WebSocket):
-        try:
-            self.active_connections.remove(websocket)
-        except ValueError:
-            pass  # already removed by a concurrent disconnect
+        self.active_connections = [
+            connection
+            for connection in self.active_connections
+            if connection.websocket is not websocket
+        ]
 
-    async def broadcast(self, message: dict):
+    async def broadcast(self, message: dict, job: Optional[dict] = None):
+        if job is None:
+            payload = message.get("payload") or {}
+            job = payload.get("job")
         for connection in self.active_connections:
+            if not self._can_receive(connection.identity, job):
+                continue
             try:
-                await connection.send_json(message)
+                await connection.websocket.send_json(message)
             except Exception:
                 pass
+
+    @staticmethod
+    def _can_receive(identity: ConnectionIdentity, job: Optional[dict]) -> bool:
+        if identity.is_admin:
+            return True
+        if not job:
+            return True
+        target_role = str(job.get("target_agent_role") or "")
+        if target_role.lower() != (identity.role or "").lower():
+            return False
+        target_id = job.get("target_agent_id")
+        return not target_id or target_id == identity.instance_id
 
 
 ws_manager = ConnectionManager()
@@ -123,7 +158,7 @@ async def server_broadcast_callback(event: str, job: dict) -> None:
             "job": job
         }
     }
-    await ws_manager.broadcast(payload)
+    await ws_manager.broadcast(payload, job)
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application server."""
@@ -201,6 +236,7 @@ def create_app() -> FastAPI:
         # Wait up to 5 seconds for authentication frame
         authenticated = False
         authenticated_instance_id = None
+        authenticated_role = None
         
         from mco.orchestrator.routes import get_db_client
         db_client = get_db_client()
@@ -230,7 +266,11 @@ def create_app() -> FastAPI:
                         pass
                     return
                 authenticated = True
-                ws_manager.active_connections.append(websocket)
+                authenticated_role = "admin"
+                ws_manager.register(
+                    websocket,
+                    ConnectionIdentity(role="admin", instance_id="", is_admin=True),
+                )
                 # Ack success so clients (console, `mco watch`) know they're in
                 # without waiting for the first broadcast.
                 try:
@@ -242,7 +282,11 @@ def create_app() -> FastAPI:
                 # No token configured: zero-config local use (loopback default).
                 logger.warning("No MCO_LOCAL_TOKEN set — accepting local WebSocket without auth.")
                 authenticated = True
-                ws_manager.active_connections.append(websocket)
+                authenticated_role = "admin"
+                ws_manager.register(
+                    websocket,
+                    ConnectionIdentity(role="admin", instance_id="", is_admin=True),
+                )
         else:
             try:
                 # 1. Read first message (should be authenticate)
@@ -276,6 +320,7 @@ def create_app() -> FastAPI:
                             role = row.get("role") or role
                             authenticated = True
                             authenticated_instance_id = instance_id
+                            authenticated_role = role
 
                             # Update status to online in database
                             from datetime import datetime, timezone
@@ -285,7 +330,14 @@ def create_app() -> FastAPI:
                             }).eq("instance_id", instance_id).execute()
 
                             # Register in ws_manager for broadcast receiving
-                            ws_manager.active_connections.append(websocket)
+                            ws_manager.register(
+                                websocket,
+                                ConnectionIdentity(
+                                    role=role or "",
+                                    instance_id=instance_id or "",
+                                    is_admin=(str(role or "").lower() == "admin"),
+                                ),
+                            )
 
                             # Send success frame
                             await websocket.send_json({
@@ -338,18 +390,18 @@ def create_app() -> FastAPI:
                         task_id = payload.get("task_id")
                         status = payload.get("status")
                         if task_id and status:
+                            job_update = {"id": task_id, "status": status, **payload}
                             await ws_manager.broadcast({
                                 "type": "event",
                                 "payload": {
                                     "event": "job_pending" if status == "pending" else "job_updated",
-                                    "job": {"id": task_id, "status": status, **payload}
+                                    "job": job_update
                                 }
-                            })
+                            }, job_update)
                 except Exception:
                     pass
         except WebSocketDisconnect:
-            if websocket in ws_manager.active_connections:
-                ws_manager.disconnect(websocket)
+            ws_manager.disconnect(websocket)
             
             # Set agent to offline on disconnect + ntfy notification
             if authenticated_instance_id and db_client:
@@ -361,8 +413,7 @@ def create_app() -> FastAPI:
                     
                     # NTFY addon: notify agent offline
                     try:
-                        # We don't have the role easily here, so use a generic notification
-                        notify_agent_offline("unknown", authenticated_instance_id)
+                        notify_agent_offline(authenticated_role or "unknown", authenticated_instance_id)
                     except Exception:
                         pass
                 except Exception as db_err:
@@ -1810,6 +1861,113 @@ def watch(
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Enterprise integrations
 # ─────────────────────────────────────────────────────────────────────────────
+def _tail_channel_matches(job: dict, role: str, instance_id: str) -> bool:
+    if role:
+        target_role = str(job.get("target_agent_role") or "")
+        if target_role.lower() != role.lower():
+            return False
+    if instance_id:
+        target_id = job.get("target_agent_id")
+        if target_id and target_id != instance_id:
+            return False
+    return True
+
+
+def _tail_channel_label(role: str, instance_id: str) -> str:
+    if role and instance_id:
+        return f"{role}/{instance_id}"
+    if role:
+        return f"{role}/*"
+    if instance_id:
+        return f"*/{instance_id}"
+    return "all channels"
+
+
+def _tail_event_line(event: str, job: dict) -> str:
+    ts = datetime.now().strftime("%H:%M:%S")
+    title = job.get("title") or str(job.get("id") or "")
+    source = job.get("source_agent_role") or "-"
+    target_role = job.get("target_agent_role") or "-"
+    target_id = job.get("target_agent_id") or "*"
+    return (
+        f"[dim]{ts}[/dim] [cyan]{event or '?'}[/cyan] "
+        f"[bold]{title}[/bold] [dim]{source} -> {target_role}/{target_id}[/dim]"
+    )
+
+
+@app.command("tail")
+def tail(
+    role: Optional[str] = typer.Option(None, "--role", help="Agent role mailbox to tail."),
+    instance: Optional[str] = typer.Option(None, "--instance", help="Agent instance mailbox to tail."),
+    gateway: Optional[str] = typer.Option(None, "--gateway", help="Gateway HTTP URL."),
+    token: Optional[str] = typer.Option(None, "--token", help="Agent or operator bearer token."),
+):
+    """Live-tail a filtered mailbox feed from the gateway broadcast socket."""
+    from mco.waker import websocket_url_from_gateway
+
+    config = get_config()
+    resolved_role = role or config.get("AGENT_ROLE") or os.environ.get("AGENT_ROLE") or ""
+    resolved_instance = instance or config.get("AGENT_INSTANCE_ID") or os.environ.get("AGENT_INSTANCE_ID") or ""
+    resolved_gateway = gateway or config.get("MCO_GATEWAY_URL") or os.environ.get("MCO_GATEWAY_URL") or None
+    resolved_token = (
+        token
+        or config.get("MCO_AGENT_TOKEN")
+        or os.environ.get("MCO_AGENT_TOKEN")
+        or config.get("MCO_LOCAL_TOKEN")
+        or os.environ.get("MCO_LOCAL_TOKEN")
+        or ""
+    )
+    ws_url = websocket_url_from_gateway(resolved_gateway)
+    channel = _tail_channel_label(resolved_role, resolved_instance)
+
+    async def _tail():
+        import websockets
+
+        backoff = 1.0
+        while True:
+            try:
+                async with websockets.connect(ws_url) as ws:
+                    await ws.send(json.dumps({
+                        "type": "authenticate",
+                        "payload": {"token": resolved_token},
+                    }))
+                    console.print(
+                        f"[green]Tailing {channel} at {ws_url}[/green] "
+                        f"[dim](Ctrl-C to stop)[/dim]"
+                    )
+                    backoff = 1.0
+                    async for frame in ws:
+                        try:
+                            msg = json.loads(frame)
+                        except (TypeError, ValueError):
+                            continue
+                        mtype = msg.get("type")
+                        payload = msg.get("payload") or {}
+                        if mtype == "authenticated":
+                            if payload.get("success") is False:
+                                console.print("[red][ERROR] WebSocket auth failed - "
+                                              "check MCO_AGENT_TOKEN / MCO_LOCAL_TOKEN.[/red]")
+                                return
+                            continue
+                        if mtype != "event":
+                            continue
+                        job = payload.get("job") or {}
+                        if not _tail_channel_matches(job, resolved_role, resolved_instance):
+                            continue
+                        console.print(_tail_event_line(payload.get("event", "?"), job))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                console.print(f"[yellow]Disconnected: {e} - retrying in {int(backoff)}s...[/yellow]")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+
+    try:
+        asyncio.run(_tail())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
+
+
 @app.command("wake")
 def wake(
     exec_command: str = typer.Option(..., "--exec", help="Shell command to run when this worker has pending jobs."),
