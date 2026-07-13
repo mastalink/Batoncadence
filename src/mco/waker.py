@@ -14,7 +14,11 @@ logger = logging.getLogger("mco.waker")
 
 
 class WakerAuthError(RuntimeError):
-    """Raised when the broadcast WebSocket rejects authentication."""
+    """Raised when the broadcast WebSocket persistently rejects authentication."""
+
+
+class _AuthRejected(RuntimeError):
+    """A single auth rejection; retried unless it proves persistent."""
 
 
 def websocket_url_from_gateway(gateway_url: Optional[str]) -> str:
@@ -39,6 +43,10 @@ class Waker:
         min_interval: float = 10.0,
         client: Optional[GatewayClient] = None,
         sleep: Callable[[float], Any] = asyncio.sleep,
+        auth_exit_threshold: int = 5,
+        auth_exit_window: float = 300.0,
+        connect: Optional[Callable[[str], Any]] = None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.exec_command = exec_command
         self.role = role or ""
@@ -54,26 +62,63 @@ class Waker:
             instance_id=self.instance_id,
         )
         self._sleep = sleep
+        self._connect = connect
+        self._clock = clock
+        # Auth rejections are only fatal when persistent: at machine boot the
+        # waker service can race the gateway service, which may briefly serve
+        # 401s (registry not yet loaded) before becoming healthy.
+        self.auth_exit_threshold = max(1, int(auth_exit_threshold))
+        self.auth_exit_window = max(0.0, float(auth_exit_window))
+        self._auth_failures = 0
+        self._first_auth_failure_at: Optional[float] = None
         self._drain_task: Optional[asyncio.Task] = None
         self._dirty = False
         self._last_spawn_start = 0.0
 
     async def run_forever(self) -> None:
-        """Connect to the broadcast socket and reconnect forever on failures."""
-        import websockets
+        """Connect to the broadcast socket and reconnect forever on failures.
+
+        Only a persistent auth failure (auth_exit_threshold consecutive
+        rejections spanning auth_exit_window seconds) raises WakerAuthError;
+        anything transient — including auth rejections while the gateway is
+        still starting up — is retried with backoff.
+        """
+        if self._connect is None:
+            import websockets
+
+            self._connect = websockets.connect
 
         backoff = 1.0
         while True:
             try:
-                async with websockets.connect(self.ws_url) as ws:
+                async with self._connect(self.ws_url) as ws:
                     await self._authenticate(ws)
                     logger.info("Connected to the broadcast socket")
                     backoff = 1.0
+                    self._auth_failures = 0
+                    self._first_auth_failure_at = None
                     self.on_connected()
                     async for frame in ws:
                         await self.handle_frame(frame)
-            except WakerAuthError:
-                raise
+            except _AuthRejected as exc:
+                self._auth_failures += 1
+                now = self._clock()
+                if self._first_auth_failure_at is None:
+                    self._first_auth_failure_at = now
+                elapsed = now - self._first_auth_failure_at
+                if (self._auth_failures >= self.auth_exit_threshold
+                        and elapsed >= self.auth_exit_window):
+                    raise WakerAuthError(
+                        f"{exc} — rejected {self._auth_failures} consecutive times "
+                        f"over {int(elapsed)}s; token appears to be invalid "
+                        "(check MCO_AGENT_TOKEN / MCO_LOCAL_TOKEN)"
+                    ) from exc
+                logger.warning(
+                    "WebSocket auth rejected (%s); attempt %d — gateway may still be "
+                    "starting up, retrying in %ss",
+                    exc, self._auth_failures, int(backoff))
+                await self._sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -96,8 +141,8 @@ class Waker:
         if msg.get("type") == "authenticated":
             payload = msg.get("payload") or {}
             if payload.get("success") is False:
-                detail = payload.get("error") or "check MCO_AGENT_TOKEN / MCO_LOCAL_TOKEN"
-                raise WakerAuthError(f"WebSocket authentication failed: {detail}")
+                detail = payload.get("error") or "authentication rejected"
+                raise _AuthRejected(f"WebSocket authentication failed: {detail}")
             return
         await self.handle_message(msg)
 
