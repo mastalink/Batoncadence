@@ -172,6 +172,13 @@ def create_app() -> FastAPI:
         description="FastAPI WebSocket and REST Hub for Agent Job Coordination."
     )
 
+    # Per-token (fallback per-IP) rate limiting - exempts /healthz, configured
+    # via MCO_RATE_LIMIT (requests/min, default 120; set to 0 to disable).
+    from mco.ratelimit import build_rate_limit_store, RateLimitMiddleware
+    _rl_store = build_rate_limit_store()
+    if _rl_store is not None:
+        app_server.add_middleware(RateLimitMiddleware, store=_rl_store)
+
     # Mount REST routing
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
@@ -1536,9 +1543,57 @@ def run_workflow(
         console.print(f"  {step_id} -> {job_id}")
 
 
+def _audit_verify(job_id: str) -> None:
+    """Walk a job's audit hash chain locally and print the verdict.
+
+    Verification reads the data plane directly (LocalStore or Supabase) rather
+    than going through the gateway, because integrity is a property of the
+    stored chain itself, not of any single API response.
+    """
+    from mco.orchestrator.audit import verify_chain
+    from mco.orchestrator.routes import get_db_client
+
+    db_client = get_db_client()
+    if db_client is None:
+        console.print("[red][ERROR] No data plane configured; cannot verify audit chain.[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        report = verify_chain(db_client, job_id)
+    except Exception as e:
+        console.print(f"[red][ERROR] Failed to verify audit chain: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    signed = " (HMAC-signed)" if report.get("signed") else ""
+    if report["ok"]:
+        console.print(
+            f"[bold green][OK][/bold green] Audit chain for job {job_id} is intact: "
+            f"{report['count']} event(s) verified{signed}."
+        )
+        return
+
+    console.print(
+        f"[bold red][TAMPERED][/bold red] Audit chain for job {job_id} is BROKEN "
+        f"at event #{report['broken_at']} of {report['count']}{signed}."
+    )
+    if report.get("reason"):
+        console.print(f"[red]  {report['reason']}[/red]")
+    raise typer.Exit(code=1)
+
+
 @app.command("audit")
-def audit_trail(job_id: str = typer.Argument(..., help="Job ID to inspect.")):
+def audit_trail(
+    job_id: str = typer.Argument(..., help="Job ID to inspect."),
+    verify: bool = typer.Option(
+        False, "--verify",
+        help="Walk the hash chain and report OK or the first broken link.",
+    ),
+):
     """Print a job's immutable audit trail (oldest event first)."""
+    if verify:
+        _audit_verify(job_id)
+        return
+
     try:
         events = _gateway_client().events(job_id)
     except Exception as e:
