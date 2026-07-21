@@ -190,6 +190,7 @@ def create_app() -> FastAPI:
     from mco.orchestrator.admin_routes import (
         agents_admin_router,
         governance_router,
+        llm_connections_router,
         settings_router,
         workflows_router,
     )
@@ -197,6 +198,7 @@ def create_app() -> FastAPI:
     app_server.include_router(governance_router)
     app_server.include_router(settings_router)
     app_server.include_router(workflows_router)
+    app_server.include_router(llm_connections_router)
 
     # Prometheus metrics (/metrics)
     from mco.orchestrator.metrics_routes import metrics_router

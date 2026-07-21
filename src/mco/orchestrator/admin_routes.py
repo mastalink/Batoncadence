@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from mco.config import get_config
 from mco.editions import edition_summary
+from mco.orchestrator import llm_connections
 from mco.orchestrator.auth import KNOWN_SCOPES, normalize_scopes, require_scopes
 
 logger = logging.getLogger("mco.orchestrator.admin")
@@ -43,6 +44,7 @@ agents_admin_router = APIRouter(prefix="/api/agents")
 settings_router = APIRouter(prefix="/api/settings")
 workflows_router = APIRouter(prefix="/api/workflows")
 governance_router = APIRouter(prefix="/api/governance")
+llm_connections_router = APIRouter(prefix="/api/llm-connections")
 
 
 def _db():
@@ -704,3 +706,144 @@ async def submit_workflow_api(payload: dict, caller: dict = Depends(require_scop
                                 detail=f"Step '{step_id}' failed to submit (created so far: {job_ids})")
         job_ids[step_id] = job["id"]
     return {"success": True, "workflow": name, "run": run_id, "jobs": job_ids}
+# ── LLM Provider Connections ("Model Connections" in the Control Panel) ──────
+#
+# Named, testable connections to LLM providers. See llm_connections.py for
+# why the API key is never stored in the llm_connections table itself.
+
+def _llm_public(row: dict, key_set: bool) -> dict:
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "provider": row.get("provider"),
+        "base_url": row.get("base_url"),
+        "model": row.get("model"),
+        "org_id": row.get("org_id") or "default",
+        "created_at": row.get("created_at"),
+        "key_set": key_set,
+    }
+
+
+def _get_llm_row(db, conn_id: str, caller: dict) -> dict:
+    res = db.table("llm_connections").select("*").eq("id", conn_id).execute()
+    rows = res.data or []
+    if not rows or (rows[0].get("org_id") or "default") != _caller_org(caller):
+        raise HTTPException(status_code=404, detail=f"Connection '{conn_id}' not found")
+    return rows[0]
+
+
+@llm_connections_router.get("/providers")
+async def list_llm_providers(caller: dict = Depends(require_scopes("admin"))):
+    """Provider metadata for the Add Connection form."""
+    return {p: {"label": m["label"], "base_url_editable": m["base_url"] is None}
+            for p, m in llm_connections.PROVIDERS.items()}
+
+
+@llm_connections_router.get("")
+async def list_llm_connections(caller: dict = Depends(require_scopes("admin"))):
+    db = _db()
+    res = db.table("llm_connections").select("*").execute()
+    rows = [r for r in (res.data or []) if (r.get("org_id") or "default") == _caller_org(caller)]
+    config = get_config()
+    return [_llm_public(r, bool(config.get(llm_connections.config_key_for(r["id"]))))
+            for r in rows]
+
+
+@llm_connections_router.post("")
+async def create_llm_connection(payload: dict, caller: dict = Depends(require_scopes("admin"))):
+    name = (payload.get("name") or "").strip()
+    provider = (payload.get("provider") or "").strip().lower()
+    base_url = (payload.get("base_url") or "").strip() or None
+    model = (payload.get("model") or "").strip() or None
+    api_key = (payload.get("api_key") or "").strip()
+
+    if not name or not provider:
+        raise HTTPException(status_code=400, detail="name and provider are required")
+    if not _IDENT_RE.match(name):
+        raise HTTPException(status_code=400,
+                            detail="name may contain only letters, digits, and . _ : - (max 64 chars)")
+    if provider not in llm_connections.PROVIDERS:
+        raise HTTPException(status_code=400,
+                            detail=f"Unknown provider '{provider}'. Valid: {', '.join(sorted(llm_connections.PROVIDERS))}")
+    if provider == "custom" and not base_url:
+        raise HTTPException(status_code=400, detail="base_url is required for a custom connection")
+    if provider != "custom":
+        # Built-in providers use a fixed URL - never let the client steer an
+        # outbound request an operator didn't intend (SSRF guard).
+        base_url = None
+
+    db = _db()
+    row = {"name": name, "provider": provider, "base_url": base_url, "model": model}
+    if _caller_org(caller) != "default":
+        row["org_id"] = _caller_org(caller)
+    res = db.table("llm_connections").insert(row).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Failed to persist connection")
+    saved = res.data[0]
+
+    if api_key:
+        get_config().set(llm_connections.config_key_for(saved["id"]), api_key)
+
+    logger.info(f"LLM connection '{name}' ({provider}) created by {caller.get('instance_id')}")
+    return {"success": True, "connection": _llm_public(saved, bool(api_key))}
+
+
+@llm_connections_router.patch("/{conn_id}")
+async def update_llm_connection(conn_id: str, payload: dict,
+                                caller: dict = Depends(require_scopes("admin"))):
+    """Edit name/model/base_url, and optionally rotate the API key. A blank
+    api_key leaves the stored key untouched (mirrors the Settings pattern)."""
+    db = _db()
+    row = _get_llm_row(db, conn_id, caller)
+    update = {}
+    if "name" in payload:
+        name = str(payload["name"]).strip()
+        if not _IDENT_RE.match(name):
+            raise HTTPException(status_code=400,
+                                detail="name may contain only letters, digits, and . _ : - (max 64 chars)")
+        update["name"] = name
+    if "model" in payload:
+        update["model"] = str(payload["model"]).strip() or None
+    if row.get("provider") == "custom" and "base_url" in payload:
+        base_url = str(payload["base_url"]).strip()
+        if not base_url:
+            raise HTTPException(status_code=400, detail="base_url is required for a custom connection")
+        update["base_url"] = base_url
+
+    api_key = str(payload.get("api_key") or "").strip()
+    if api_key:
+        get_config().set(llm_connections.config_key_for(conn_id), api_key)
+
+    if not update and not api_key:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    if update:
+        res = db.table("llm_connections").update(update).eq("id", conn_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Update failed to persist")
+        row = res.data[0]
+
+    key_set = bool(get_config().get(llm_connections.config_key_for(conn_id)))
+    return {"success": True, "connection": _llm_public(row, key_set)}
+
+
+@llm_connections_router.delete("/{conn_id}")
+async def delete_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
+    db = _db()
+    _get_llm_row(db, conn_id, caller)
+    db.table("llm_connections").delete().eq("id", conn_id).execute()
+    get_config().delete(llm_connections.config_key_for(conn_id))
+    logger.info(f"LLM connection '{conn_id}' deleted by {caller.get('instance_id')}")
+    return {"success": True, "id": conn_id}
+
+
+@llm_connections_router.post("/{conn_id}/test")
+async def test_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
+    """Make one cheap, real call to the provider to prove the key/base_url
+    actually authenticate. Never returns the key itself."""
+    db = _db()
+    row = _get_llm_row(db, conn_id, caller)
+    api_key = get_config().get(llm_connections.config_key_for(conn_id)) or ""
+    return llm_connections.test_connection(row.get("provider"), api_key, row.get("base_url"))
+
+
