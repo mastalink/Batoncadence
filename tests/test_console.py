@@ -45,3 +45,39 @@ def test_console_route_requires_no_auth_like_dashboard():
     http = TestClient(create_app())
     assert http.get("/console").status_code == 200
     assert http.get("/dashboard").status_code == 200
+
+
+# ── Flow Control page (/flow) ─────────────────────────────────────────────────
+
+def test_flow_html_is_served_and_self_contained():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    assert "<!DOCTYPE html>" in html
+    assert "Flow Control" in html
+    # Self-contained: an air-gapped install must render this identically, so no
+    # CDN scripts, stylesheets, or remote fonts.
+    for offender in ("http://cdn", "https://cdn", "unpkg.com", "jsdelivr", "googleapis.com"):
+        assert offender not in html, f"flow.html must not reference {offender}"
+
+
+def test_flow_html_reads_the_real_dependency_graph():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    # Edges are `depends_on`, i.e. gates the orchestrator actually enforces -
+    # not a decorative diagram drawn beside the data.
+    assert "depends_on" in html
+    assert "/api/jobs" in html
+
+
+def test_flow_html_exposes_governance_actions():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    for verb in ("approve", "reject", "retry", "cancel"):
+        assert f"/{verb}" in html or f'"{verb}"' in html
+
+
+def test_flow_route_is_registered():
+    from mco.cli import create_app
+    routes = {getattr(r, "path", None) for r in create_app().routes}
+    assert "/flow" in routes
+    assert "/console" in routes
