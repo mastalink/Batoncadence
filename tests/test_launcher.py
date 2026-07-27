@@ -292,3 +292,83 @@ def test_run_forever_survives_a_broken_tick(tmp_path, monkeypatch):
     monkeypatch.setattr("mco.launcher.time.sleep", lambda _: None)
     missing = tmp_path / "nope.yaml"
     run_forever(FakeClient(), missing, tmp_path / "state.json", interval=0, max_ticks=3)
+
+
+# ── condition-based loop stops (until_empty) ──────────────────────────────────
+
+def _drain_config():
+    return _base_config(schedules={}, loops={
+        "drain": {
+            "launcher": "audit", "every": "1m",
+            "until_empty": "codex", "max_iterations": 20,
+        }
+    })
+
+
+def test_loop_keeps_firing_while_the_queue_has_work(tmp_path):
+    config = _write_config(tmp_path, _drain_config())
+    client = FakeClient(board=[
+        {"id": "other", "target_agent_role": "codex", "status": "pending"},
+    ])
+    report = tick(client, config, tmp_path / "state.json", now=_utc(2026, 7, 1, 12))
+    assert [r["action"] for r in report] == ["fired"]
+
+
+def test_loop_completes_when_the_queue_drains(tmp_path):
+    config = _write_config(tmp_path, _drain_config())
+    state_path = tmp_path / "state.json"
+    client = FakeClient(board=[
+        {"id": "other", "target_agent_role": "codex", "status": "pending"},
+    ])
+    tick(client, config, state_path, now=_utc(2026, 7, 1, 12))
+
+    client.board = [{"id": "other", "target_agent_role": "codex", "status": "completed"}]
+    report = tick(client, config, state_path, now=_utc(2026, 7, 1, 12, 1))
+
+    assert [r["action"] for r in report] == ["complete"]
+    assert "queue is empty" in report[0]["detail"]
+
+
+def test_a_drained_loop_stays_finished_when_the_queue_refills(tmp_path):
+    # Completion is sticky: new work arriving must not resurrect a loop that
+    # already declared itself done.
+    config = _write_config(tmp_path, _drain_config())
+    state_path = tmp_path / "state.json"
+    client = FakeClient(board=[])
+
+    tick(client, config, state_path, now=_utc(2026, 7, 1, 12))          # completes
+    client.board = [{"id": "new", "target_agent_role": "codex", "status": "pending"}]
+    report = tick(client, config, state_path, now=_utc(2026, 7, 1, 12, 5))
+
+    assert report == []
+    assert client.sends == []
+
+
+def test_unreachable_gateway_does_not_end_the_loop_early(tmp_path):
+    # "unknown" must mean "keep going" - declaring victory on a failed lookup
+    # would silently end the loop.
+    class Broken(FakeClient):
+        def jobs(self, include_archived=False):
+            raise ConnectionError("gateway down")
+
+    config = _write_config(tmp_path, _drain_config())
+    report = tick(Broken(), config, tmp_path / "state.json", now=_utc(2026, 7, 1, 12))
+    assert [r["action"] for r in report] == ["fired"]
+
+
+def test_queue_is_empty_ignores_other_roles():
+    client = FakeClient(board=[
+        {"id": "a", "target_agent_role": "claude", "status": "pending"},
+    ])
+    from mco.launcher import queue_is_empty
+    assert queue_is_empty(client, "codex") is True
+    assert queue_is_empty(client, "claude") is False
+
+
+def test_queue_is_empty_returns_none_when_unreachable():
+    class Broken(FakeClient):
+        def jobs(self, include_archived=False):
+            raise ConnectionError("down")
+
+    from mco.launcher import queue_is_empty
+    assert queue_is_empty(Broken(), "codex") is None

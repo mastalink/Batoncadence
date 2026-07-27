@@ -57,13 +57,32 @@ class LaunchError(RuntimeError):
 
 # ── state persistence ─────────────────────────────────────────────────────────
 
-def load_state(path: Path = SCHEDULE_STATE_PATH) -> dict[str, ScheduleState]:
+def _state_path(path: Optional[Path]) -> Path:
+    """Resolve the state path at call time, not at import time.
+
+    Binding these as default arguments would freeze whatever the module-level
+    constant was when this module was first imported, which makes the path
+    impossible to redirect (for tests, or for an alternate MCO home).
+    """
+    return path if path is not None else SCHEDULE_STATE_PATH
+
+
+def _config_path(path: Optional[Path]) -> Path:
+    """Resolve the schedules.yaml path at call time. See `_state_path`."""
+    if path is not None:
+        return path
+    from mco import scheduler
+    return scheduler.SCHEDULES_CONFIG_PATH
+
+
+def load_state(path: Optional[Path] = None) -> dict[str, ScheduleState]:
     """Read runtime state. A missing or corrupt file yields empty state.
 
     Corrupt state must never wedge the scheduler: the worst case of starting
     fresh is one duplicate run, while refusing to start means silent downtime
     nobody notices until the nightly job hasn't run for a week.
     """
+    path = _state_path(path)
     if not path.is_file():
         return {}
     try:
@@ -82,8 +101,9 @@ def load_state(path: Path = SCHEDULE_STATE_PATH) -> dict[str, ScheduleState]:
     return states
 
 
-def save_state(states: dict[str, ScheduleState], path: Path = SCHEDULE_STATE_PATH) -> None:
+def save_state(states: dict[str, ScheduleState], path: Optional[Path] = None) -> None:
     """Write state atomically, so a crash mid-write can't corrupt the file."""
+    path = _state_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": 1,
@@ -210,10 +230,30 @@ def has_active_jobs(client: Any, job_ids: list[str]) -> bool:
     return False
 
 
+def queue_is_empty(client: Any, role: str) -> Optional[bool]:
+    """Is this role's queue clear of unfinished work?
+
+    Returns None when the gateway can't be reached - the caller must treat
+    "unknown" as "keep going" rather than silently declaring victory and
+    ending a loop early.
+    """
+    try:
+        board = client.jobs(include_archived=False)
+    except Exception as exc:
+        logger.debug(f"until_empty check could not reach the gateway: {exc}")
+        return None
+    for job in board or []:
+        if not isinstance(job, dict):
+            continue
+        if job.get("target_agent_role") == role and job.get("status") in _ACTIVE_STATUSES:
+            return False
+    return True
+
+
 def tick(
     client: Any,
-    config_path: Path = SCHEDULES_CONFIG_PATH,
-    state_path: Path = SCHEDULE_STATE_PATH,
+    config_path: Optional[Path] = None,
+    state_path: Optional[Path] = None,
     now: Optional[datetime] = None,
     dry_run: bool = False,
 ) -> list[dict]:
@@ -223,6 +263,7 @@ def tick(
     fired / skipped-overlap / exhausted / error / would-fire (dry run).
     """
     now = now or datetime.now(timezone.utc)
+    config_path, state_path = _config_path(config_path), _state_path(state_path)
     launchers, schedules = load_config(config_path)
     states = load_state(state_path)
     report: list[dict] = []
@@ -231,6 +272,24 @@ def tick(
     for schedule in due_schedules(schedules.values(), states, now):
         state = states.setdefault(schedule.name, ScheduleState(name=schedule.name))
         launcher = launchers[schedule.launcher]
+
+        # Condition-based stop: the "work the backlog until it's clear" loop.
+        # Checked before overlap so a drained queue ends the loop cleanly rather
+        # than looking like a skipped tick forever.
+        if schedule.until_empty:
+            empty = queue_is_empty(client, schedule.until_empty)
+            if empty is True:
+                state.exhausted_reason = f"{schedule.until_empty} queue is empty"
+                dirty = True
+                report.append({
+                    "schedule": schedule.name,
+                    "action": "complete",
+                    "detail": f"{schedule.until_empty} queue is empty - loop finished",
+                    "job_ids": [],
+                })
+                continue
+            # empty is None (gateway unreachable): fall through and keep going.
+            # Declaring victory on a failed lookup would silently end the loop.
 
         if schedule.overlap == "skip" and state.last_job_ids and has_active_jobs(client, state.last_job_ids):
             report.append({
@@ -297,8 +356,8 @@ def tick(
 
 def run_forever(
     client: Any,
-    config_path: Path = SCHEDULES_CONFIG_PATH,
-    state_path: Path = SCHEDULE_STATE_PATH,
+    config_path: Optional[Path] = None,
+    state_path: Optional[Path] = None,
     interval: float = 30.0,
     on_report: Optional[Callable[[list[dict]], None]] = None,
     max_ticks: Optional[int] = None,
