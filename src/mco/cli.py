@@ -2015,6 +2015,82 @@ def retry(job_id: str = typer.Argument(..., help="Failed/rejected job ID to re-q
         raise typer.Exit(code=1)
 
 
+@app.command("cancel")
+def cancel(
+    job_id: str = typer.Argument(..., help="Non-terminal job ID to call off."),
+    reason: str = typer.Option("", "--reason", help="Why the job was cancelled."),
+):
+    """Call off a job that hasn't finished yet (approver-role token)."""
+    try:
+        res = _gateway_client().cancel(job_id, reason)
+        console.print(f"[bold yellow][OK] Job {job_id} cancelled -> {res['job']['status']}[/bold yellow]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Cancel failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("archive")
+def archive(job_id: str = typer.Argument(..., help="Terminal job ID to hide from the default board view.")):
+    """Archive a completed/failed/rejected/cancelled job (reversible)."""
+    try:
+        res = _gateway_client().archive(job_id)
+        console.print(f"[bold green][OK] Job {job_id} archived[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Archive failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("unarchive")
+def unarchive(job_id: str = typer.Argument(..., help="Archived job ID to restore to the default board view.")):
+    """Undo archive."""
+    try:
+        res = _gateway_client().unarchive(job_id)
+        console.print(f"[bold green][OK] Job {job_id} unarchived[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Unarchive failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("duplicates")
+def duplicates(job_id: str = typer.Argument(..., help="Job ID to check for look-alike or linked jobs.")):
+    """List other jobs that look like the same work as this one."""
+    try:
+        dups = _gateway_client().duplicates(job_id)
+    except Exception as e:
+        console.print(f"[red][ERROR] Duplicate check failed: {e}[/red]")
+        raise typer.Exit(code=1)
+    if not dups:
+        console.print("[dim]No look-alike or linked jobs found.[/dim]")
+        return
+    table = Table(title=f"Possible duplicates of {job_id}", show_header=True, header_style="bold magenta")
+    table.add_column("ID", style="cyan")
+    table.add_column("Title", style="white")
+    table.add_column("Status", style="green")
+    table.add_column("Relation", style="dim")
+    for d in dups:
+        table.add_row(str(d.get("id")), str(d.get("title")), str(d.get("status")), str(d.get("relation")))
+    console.print(table)
+
+
+@app.command("reassign")
+def reassign(
+    job_id: str = typer.Argument(..., help="Failed/rejected/cancelled job ID to redo elsewhere."),
+    to_role: str = typer.Option(..., "--to-role", help="Target agent role for the new job."),
+    to_instance: str = typer.Option("", "--to-instance", help="Target agent instance (optional)."),
+    instructions: str = typer.Option("", "--instructions", help="Override instructions (default: reuse the original)."),
+):
+    """Clone a failed job onto a new target, link both rows, and archive the
+    old one (approver-role token)."""
+    try:
+        res = _gateway_client().reassign(job_id, to_role, target_agent_id=to_instance or None,
+                                          instructions=instructions or None)
+        new_id = res["job"]["id"]
+        console.print(f"[bold green][OK] Job {job_id} reassigned -> new job {new_id} ({to_role})[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Reassign failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 5b. Drumline & admin parity
 # ─────────────────────────────────────────────────────────────────────────────

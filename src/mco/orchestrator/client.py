@@ -125,6 +125,51 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
+    def cancel(self, task_id: str, reason: str = "") -> dict:
+        """Call off a not-yet-finished job (approver roles only)."""
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/cancel", json={"reason": reason})
+            r.raise_for_status()
+            return r.json()
+
+    def archive(self, task_id: str) -> dict:
+        """Hide a terminal job from the default board view (reversible)."""
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/archive")
+            r.raise_for_status()
+            return r.json()
+
+    def unarchive(self, task_id: str) -> dict:
+        """Undo archive()."""
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/unarchive")
+            r.raise_for_status()
+            return r.json()
+
+    def duplicates(self, task_id: str) -> List[dict]:
+        """Other jobs that look like the same work (same title/role, or
+        already linked via reassignment)."""
+        with self._client() as c:
+            r = c.get(f"/api/jobs/{task_id}/duplicates")
+            r.raise_for_status()
+            return r.json()
+
+    def reassign(self, task_id: str, target_agent_role: str, target_agent_id: Optional[str] = None,
+                 instructions: Optional[str] = None, title: Optional[str] = None) -> dict:
+        """Clone a failed/rejected/cancelled job onto a new target, link both
+        rows both ways, and archive the old one (approver roles only)."""
+        payload: dict[str, Any] = {"target_agent_role": target_agent_role}
+        if target_agent_id:
+            payload["target_agent_id"] = target_agent_id
+        if instructions is not None:
+            payload["instructions"] = instructions
+        if title:
+            payload["title"] = title
+        with self._client() as c:
+            r = c.post(f"/api/jobs/{task_id}/reassign", json=payload)
+            r.raise_for_status()
+            return r.json()
+
     def events(self, task_id: str) -> List[dict]:
         """Immutable audit trail for a job, oldest first."""
         with self._client() as c:
@@ -132,10 +177,11 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
-    def jobs(self) -> List[dict]:
-        """Most recent jobs on the board (any status)."""
+    def jobs(self, include_archived: bool = False) -> List[dict]:
+        """Most recent jobs on the board (any status). Archived jobs are
+        hidden by default - pass include_archived=True to see everything."""
         with self._client() as c:
-            r = c.get("/api/jobs")
+            r = c.get("/api/jobs", params={"include_archived": include_archived} if include_archived else None)
             r.raise_for_status()
             return r.json()
 
