@@ -230,6 +230,14 @@ def create_app() -> FastAPI:
     async def console_ui() -> str:
         return get_console_html()
 
+    # Flow Control - the live DAG of the board: design intent, run state,
+    # approval gates, and the audit trail on one canvas.
+    from mco.console import get_flow_html
+
+    @app_server.get("/flow", response_class=HTMLResponse, include_in_schema=False)
+    async def flow_ui() -> str:
+        return get_flow_html()
+
     # Register broadcast callback
     register_broadcast_callback(server_broadcast_callback)
 
