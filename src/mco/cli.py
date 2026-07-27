@@ -704,6 +704,173 @@ app.add_typer(service_app, name="service")
 fleet_app = typer.Typer(help="Apply declarative per-worker service run modes.")
 app.add_typer(fleet_app, name="fleet")
 
+schedule_app = typer.Typer(help="Schedules and loops: what work gets created, and when.")
+app.add_typer(schedule_app, name="schedule")
+
+
+def _print_schedules_missing(path):
+    from mco import scheduler
+    console.print(f"[yellow]No schedules config found at {path}.[/yellow]")
+    console.print("[dim]Create one with:[/dim] [bold]mco schedule init[/bold]")
+    console.print(f"[dim]Or write it yourself:[/dim]\n{scheduler.sample_config()}")
+
+
+def _load_schedules_or_exit(path=None):
+    """Load schedules.yaml, printing the friendly guidance on failure."""
+    from mco import scheduler
+    path = path or scheduler.SCHEDULES_CONFIG_PATH
+    try:
+        return scheduler.load_config(path)
+    except scheduler.ScheduleConfigMissing as exc:
+        _print_schedules_missing(exc)
+        raise typer.Exit(code=0)
+    except scheduler.ScheduleConfigError as exc:
+        console.print(f"[red][X] Invalid schedules config:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+
+@schedule_app.command("init")
+def schedule_init(
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing config."),
+):
+    """Write a starter ~/.mco/schedules.yaml."""
+    from mco import scheduler
+    path = scheduler.SCHEDULES_CONFIG_PATH
+    if path.exists() and not force:
+        console.print(f"[yellow]{path} already exists.[/yellow] Use --force to overwrite.")
+        raise typer.Exit(code=1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(scheduler.sample_config(), encoding="utf-8")
+    console.print(f"[green][OK][/green] Wrote {path}")
+    console.print("[dim]Edit it, then run:[/dim] [bold]mco schedule list[/bold]")
+
+
+@schedule_app.command("list")
+def schedule_list():
+    """Show every schedule and loop with its next fire time."""
+    from mco import launcher as launcher_mod
+    from mco import scheduler
+    launchers, schedules = _load_schedules_or_exit()
+    if not schedules:
+        console.print("[yellow]No schedules or loops defined.[/yellow]")
+        return
+
+    states = launcher_mod.load_state()
+    now = datetime.now(timezone.utc)
+    table = Table(title="BatonCadence Schedules")
+    for column in ("Name", "Kind", "Trigger", "Launches", "Next run", "Runs", "Bound"):
+        table.add_column(column)
+
+    for name in sorted(schedules):
+        schedule = schedules[name]
+        state = states.get(name)
+        next_run = scheduler.next_run_at(schedule, state, now)
+        if not schedule.enabled:
+            next_text = "[dim]disabled[/dim]"
+        elif next_run is None:
+            reason = scheduler.exhaustion_reason(schedule, state, now) or "finished"
+            next_text = f"[dim]{reason}[/dim]"
+        elif next_run <= now:
+            next_text = "[green]due now[/green]"
+        else:
+            next_text = next_run.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        runs = str(state.iterations) if state else "0"
+        table.add_row(
+            name,
+            "loop" if schedule.is_loop else "schedule",
+            schedule.describe_trigger(),
+            launchers[schedule.launcher].describe(),
+            next_text,
+            runs,
+            schedule.describe_bound(),
+        )
+    console.print(table)
+
+
+@schedule_app.command("tick")
+def schedule_tick(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would fire without creating jobs."),
+):
+    """Run one scheduler pass (what `mco schedule run` does on a timer).
+
+    Use this to drive BatonCadence from an existing cron/Task Scheduler entry
+    instead of running the daemon.
+    """
+    from mco import launcher as launcher_mod
+    _load_schedules_or_exit()  # validate + friendly errors before touching the gateway
+    try:
+        report = launcher_mod.tick(_gateway_client(), dry_run=dry_run)
+    except Exception as exc:
+        console.print(f"[red][X] Scheduler tick failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+    _print_tick_report(report)
+
+
+def _print_tick_report(report: list) -> None:
+    if not report:
+        console.print("[dim]Nothing due.[/dim]")
+        return
+    styles = {
+        "fired": "green", "would-fire": "cyan",
+        "skipped-overlap": "yellow", "error": "red",
+    }
+    for row in report:
+        action = str(row["action"])
+        colour = styles.get(action, "white")
+        jobs = f" -> {', '.join(row['job_ids'])}" if row.get("job_ids") else ""
+        console.print(f"[{colour}]{action:<16}[/{colour}] {row['schedule']}: {row['detail']}{jobs}")
+
+
+@schedule_app.command("run")
+def schedule_run(
+    interval: float = typer.Option(30.0, "--interval", help="Seconds between scheduler passes."),
+):
+    """Run the scheduler in the foreground, ticking until interrupted."""
+    from mco import launcher as launcher_mod
+    _load_schedules_or_exit()
+    console.print(f"[cyan]Scheduler running[/cyan] (tick every {interval:g}s). Ctrl+C to stop.")
+    try:
+        launcher_mod.run_forever(
+            _gateway_client(), interval=interval, on_report=_print_tick_report
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Scheduler stopped.[/yellow]")
+
+
+@app.command("launch")
+def launch_now(
+    name: str = typer.Argument(..., help="Launcher name from ~/.mco/schedules.yaml."),
+    approve: bool = typer.Option(
+        None, "--approve/--no-approve",
+        help="Override the launcher's approval gate for this run.",
+    ),
+):
+    """Fire a launcher right now, by name.
+
+    Identical to what a schedule does at 3am - same code path, same governance -
+    so testing a launcher by hand proves the scheduled run too.
+    """
+    from mco import launcher as launcher_mod
+    launchers, _ = _load_schedules_or_exit()
+    if name not in launchers:
+        console.print(f"[red][X] Unknown launcher '{name}'.[/red]")
+        if launchers:
+            console.print(f"[dim]Defined:[/dim] {', '.join(sorted(launchers))}")
+        raise typer.Exit(code=1)
+
+    try:
+        job_ids = launcher_mod.launch(
+            launchers[name], _gateway_client(),
+            trigger="manual", requires_approval_override=approve,
+        )
+    except Exception as exc:
+        console.print(f"[red][X] Launch failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+    plural = "s" if len(job_ids) != 1 else ""
+    console.print(f"[green][OK][/green] Launched '{name}' -> {len(job_ids)} job{plural}")
+    for job_id in job_ids:
+        console.print(f"  [dim]{job_id}[/dim]")
+
 
 def _print_fleet_missing(path):
     from mco import fleet
