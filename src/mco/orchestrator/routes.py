@@ -5,9 +5,15 @@ import logging
 import importlib.metadata as importlib_metadata
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
-from mco.orchestrator.contracts import JobStatus
+from mco.orchestrator.contracts import (
+    ARCHIVABLE_STATUSES,
+    CANCELLABLE_STATUSES,
+    JobStatus,
+    REASSIGNABLE_STATUSES,
+)
 from mco.orchestrator.auth import require_agent, require_scopes
 from mco.orchestrator.audit import record_event, get_events
 from mco.config import get_config
@@ -23,6 +29,10 @@ from mco.orchestrator import utils as utils_mod
 # Re-exported for back-compat: these used to live here (now in utils to
 # break the routes <-> auth import cycle).
 from mco.orchestrator.utils import DEFAULT_APPROVER_ROLES, get_approver_roles  # noqa: F401
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def agent_org(agent: dict) -> str:
@@ -261,8 +271,13 @@ def get_db_client(force_new: bool = False):
 
 
 @router.get("")
-async def get_jobs(agent: dict = Depends(require_scopes("jobs:read"))):
-    """Retrieve job list from the Supabase database."""
+async def get_jobs(include_archived: bool = False, agent: dict = Depends(require_scopes("jobs:read"))):
+    """Retrieve job list from the Supabase database.
+
+    Archived jobs (soft-hidden terminal jobs - see POST /{job_id}/archive) are
+    excluded by default so a long-running board doesn't drown in old Done/
+    Problems rows; pass ?include_archived=true to see everything.
+    """
     db_client = get_db_client()
     if not db_client:
         return []
@@ -272,7 +287,10 @@ async def get_jobs(agent: dict = Depends(require_scopes("jobs:read"))):
             .eq("org_id", agent_org(agent))
             .order("created_at", desc=True).limit(100).execute()
         )
-        return res.data or []
+        jobs = res.data or []
+        if not include_archived:
+            jobs = [j for j in jobs if not j.get("archived")]
+        return jobs
     except Exception as e:
         logger.error(f"Error fetching jobs: {e}")
         return []
@@ -738,6 +756,269 @@ async def reject_job(job_id: str, payload: dict = None, agent: dict = Depends(re
     """Reject a NEEDS_APPROVAL job. Terminal: the job moves to REJECTED."""
     reason = (payload or {}).get("reason", "")
     return await _decide_approval(job_id, agent, approve=False, reason=reason)
+
+
+def _load_job_in_org(db_client, job_id: str, agent: dict) -> dict:
+    """Fetch a job, 404-ing (not leaking existence) across org boundaries."""
+    job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    if not job_res.data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = job_res.data[0]
+    if job_org(job) != agent_org(agent):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.post("/{job_id}/cancel")
+async def cancel_job(job_id: str, payload: dict = None, agent: dict = Depends(require_scopes("jobs:approve"))):
+    """Call off a job that hasn't finished yet (waiting/needs_approval/pending/
+    leased/in_progress -> cancelled). Distinct from reject: reject is only for
+    jobs paused at the approval gate; cancel works on any non-terminal job,
+    e.g. one you posted to the wrong role or that's no longer needed.
+    Approver roles only, same as retry/reject."""
+    db_client = get_db_client()
+    if not db_client:
+        raise HTTPException(status_code=400, detail="Database not configured")
+    if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
+        raise HTTPException(status_code=403, detail="Your role is not permitted to cancel jobs")
+
+    job = _load_job_in_org(db_client, job_id, agent)
+    if job.get("status") not in CANCELLABLE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Job is already terminal (status: {job.get('status')})")
+
+    reason = (payload or {}).get("reason", "")
+    res = db_client.table("agent_jobs").update({
+        "status": JobStatus.CANCELLED.value,
+        "leased_by_instance_id": None,
+        "error_message": f"Cancelled by {agent['instance_id']}" + (f": {reason}" if reason else ""),
+    }).eq("id", job_id).eq("status", job.get("status")).execute()
+    if not res.data:
+        raise HTTPException(
+            status_code=409,
+            detail="Job changed state before cancellation; refresh and retry",
+        )
+    cancelled_job = res.data[0]
+
+    record_event(db_client, job_id, "cancelled", agent["instance_id"], agent["role"],
+                 {"reason": reason, "previous_status": job.get("status")} if reason else {"previous_status": job.get("status")})
+
+    if _broadcast_callback:
+        try:
+            await _broadcast_callback("job_updated", cancelled_job)
+        except Exception as e:
+            logger.warning(f"Error executing broadcast callback after cancel: {e}")
+
+    return {"success": True, "job": cancelled_job}
+
+
+@router.post("/{job_id}/archive")
+async def archive_job(job_id: str, agent: dict = Depends(require_scopes("jobs:write"))):
+    """Hide a terminal job (completed/failed/rejected/cancelled) from the
+    default board view. Non-destructive and reversible (see /unarchive) - the
+    job keeps its status and full audit trail, it just stops cluttering
+    'All'/'Done'/'Problems'. Any authenticated agent may archive (it's tidying,
+    not a decision), but only terminal jobs qualify so in-flight work can
+    never be hidden by mistake."""
+    db_client = get_db_client()
+    if not db_client:
+        raise HTTPException(status_code=400, detail="Database not configured")
+
+    job = _load_job_in_org(db_client, job_id, agent)
+    if job.get("status") not in ARCHIVABLE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Only terminal jobs can be archived (status: {job.get('status')})")
+    if job.get("archived"):
+        return {"success": True, "job": job}
+
+    res = db_client.table("agent_jobs").update({
+        "archived": True,
+        "archived_at": _utc_now_iso(),
+        "archived_by": agent["instance_id"],
+    }).eq("id", job_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Archive failed to persist")
+    archived_job = res.data[0]
+
+    record_event(db_client, job_id, "archived", agent["instance_id"], agent["role"])
+
+    if _broadcast_callback:
+        try:
+            await _broadcast_callback("job_updated", archived_job)
+        except Exception as e:
+            logger.warning(f"Error executing broadcast callback after archive: {e}")
+
+    return {"success": True, "job": archived_job}
+
+
+@router.post("/{job_id}/unarchive")
+async def unarchive_job(job_id: str, agent: dict = Depends(require_scopes("jobs:write"))):
+    """Undo /archive - brings a job back into the default board view."""
+    db_client = get_db_client()
+    if not db_client:
+        raise HTTPException(status_code=400, detail="Database not configured")
+
+    job = _load_job_in_org(db_client, job_id, agent)
+    if not job.get("archived"):
+        return {"success": True, "job": job}
+
+    res = db_client.table("agent_jobs").update({
+        "archived": False,
+        "archived_at": None,
+        "archived_by": None,
+    }).eq("id", job_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Unarchive failed to persist")
+    unarchived_job = res.data[0]
+
+    record_event(db_client, job_id, "unarchived", agent["instance_id"], agent["role"])
+
+    if _broadcast_callback:
+        try:
+            await _broadcast_callback("job_updated", unarchived_job)
+        except Exception as e:
+            logger.warning(f"Error executing broadcast callback after unarchive: {e}")
+
+    return {"success": True, "job": unarchived_job}
+
+
+@router.get("/{job_id}/duplicates")
+async def get_job_duplicates(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
+    """Best-effort duplicate check: other jobs with the same title and target
+    role, plus anything already linked via reassignment. Use before manually
+    reposting a failed job's work, or to answer 'did someone already redo
+    this?' Heuristic (exact-title match) - not a substitute for reading the
+    jobs, just a pointer to look closer."""
+    db_client = get_db_client()
+    if not db_client:
+        return []
+    job = _load_job_in_org(db_client, job_id, agent)
+
+    res = db_client.table("agent_jobs").select("*").order("created_at", desc=True).limit(500).execute()
+    all_jobs = [j for j in (res.data or []) if job_org(j) == agent_org(agent)]
+
+    linked_ids = {job.get("reassigned_from_job_id"), job.get("reassigned_to_job_id")} - {None}
+    title = (job.get("title") or "").strip().lower()
+
+    out = []
+    for j in all_jobs:
+        if j.get("id") == job_id:
+            continue
+        same_title = title and (j.get("title") or "").strip().lower() == title \
+            and j.get("target_agent_role") == job.get("target_agent_role")
+        linked = j.get("id") in linked_ids
+        if same_title or linked:
+            out.append({
+                "id": j.get("id"),
+                "title": j.get("title"),
+                "status": j.get("status"),
+                "created_at": j.get("created_at"),
+                "target_agent_role": j.get("target_agent_role"),
+                "relation": "reassignment_link" if linked else "same_title",
+            })
+    return out
+
+
+@router.post("/{job_id}/reassign")
+async def reassign_job(job_id: str, payload: dict, agent: dict = Depends(require_scopes("jobs:approve"))):
+    """Redo a failed/rejected/cancelled job with a different target (or the
+    same target, for a plain retry-elsewhere). Unlike /retry, which re-queues
+    the SAME job row in place, this clones a NEW job so the failed attempt's
+    history stays intact, links the two rows both directions
+    (reassigned_from_job_id / reassigned_to_job_id), and auto-archives the old
+    one - so 'did a new one get done in its place?' has a direct answer:
+    follow reassigned_to_job_id, or call GET /{job_id}/duplicates.
+    Approver roles only, same as retry."""
+    db_client = get_db_client()
+    if not db_client:
+        raise HTTPException(status_code=400, detail="Database not configured")
+    if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
+        raise HTTPException(status_code=403, detail="Your role is not permitted to reassign jobs")
+
+    job = _load_job_in_org(db_client, job_id, agent)
+    if job.get("status") not in REASSIGNABLE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Only failed/rejected/cancelled jobs can be reassigned (status: {job.get('status')})")
+
+    target_agent_role = payload.get("target_agent_role") or job.get("target_agent_role")
+    target_agent_id = payload.get("target_agent_id")
+    instructions = payload.get("instructions")
+    if not target_agent_role:
+        raise HTTPException(status_code=400, detail="target_agent_role is required")
+    requires_approval = bool(job.get("requires_approval")) or target_agent_role.lower() in get_gated_roles()
+    status = (
+        JobStatus.NEEDS_APPROVAL.value
+        if requires_approval
+        else JobStatus.PENDING.value
+    )
+
+    new_data = {
+        "title": payload.get("title") or job.get("title"),
+        "description": instructions if instructions is not None else job.get("description"),
+        "source_agent_id": agent["instance_id"],
+        "source_agent_role": agent["role"],
+        "target_agent_role": target_agent_role,
+        "target_agent_id": target_agent_id,
+        "status": status,
+        "depends_on": [],
+        "input_payload": (
+            {**job.get("input_payload", {}), "prompt": instructions}
+            if instructions is not None else job.get("input_payload") or {}
+        ),
+        "reassigned_from_job_id": job_id,
+    }
+    if agent_org(agent) != "default":
+        new_data["org_id"] = agent_org(agent)
+    if job.get("max_retries") is not None:
+        new_data["max_retries"] = job.get("max_retries")
+    if job.get("escalate_to_role"):
+        new_data["escalate_to_role"] = job.get("escalate_to_role")
+    if requires_approval:
+        new_data["requires_approval"] = True
+
+    ins = db_client.table("agent_jobs").insert(new_data).execute()
+    if not ins.data:
+        raise HTTPException(status_code=500, detail="Reassign failed to create the new job")
+    new_job = ins.data[0]
+
+    record_event(db_client, new_job.get("id"), "created", agent["instance_id"], agent["role"],
+                 {"status": status, "target_agent_role": target_agent_role,
+                  "reassigned_from_job_id": job_id})
+
+    upd = db_client.table("agent_jobs").update({
+        "reassigned_to_job_id": new_job.get("id"),
+        "archived": True,
+        "archived_at": _utc_now_iso(),
+        "archived_by": agent["instance_id"],
+    }).eq("id", job_id).execute()
+    old_job = upd.data[0] if upd.data else job
+
+    record_event(db_client, job_id, "reassigned", agent["instance_id"], agent["role"],
+                 {"reassigned_to_job_id": new_job.get("id")})
+
+    if _broadcast_callback:
+        try:
+            await _broadcast_callback(
+                "job_needs_approval" if requires_approval else "job_pending",
+                new_job,
+            )
+            await _broadcast_callback("job_updated", old_job)
+        except Exception as e:
+            logger.warning(f"Error executing broadcast callback after reassign: {e}")
+    try:
+        if requires_approval:
+            notify_job_needs_approval(
+                job_id=new_job.get("id", "unknown"),
+                title=new_job.get("title", "Untitled job"),
+                to_role=target_agent_role,
+            )
+        else:
+            notify_job_created(
+                job_id=new_job.get("id", "unknown"),
+                title=new_job.get("title", "Untitled job"),
+                to_role=target_agent_role,
+            )
+    except Exception as ntfy_err:
+        logger.debug(f"ntfy addon skipped: {ntfy_err}")
+
+    return {"success": True, "job": new_job, "superseded_job": old_job}
 
 
 @agents_router.get("")
