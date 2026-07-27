@@ -787,6 +787,113 @@ def schedule_list():
     console.print(table)
 
 
+def _set_schedule_enabled(name: str, enabled: bool) -> None:
+    """Flip `enabled` on one schedule/loop, preserving the rest of the file byte-for-byte.
+
+    Deliberately a surgical text edit rather than parse-and-redump: PyYAML's
+    safe_dump discards every comment, so a one-word toggle would silently
+    destroy the explanatory config the user (or `schedule init`) wrote.
+    """
+    from mco import scheduler
+    path = scheduler.SCHEDULES_CONFIG_PATH
+    _, schedules = _load_schedules_or_exit(path)  # validate + friendly errors first
+    if name not in schedules:
+        console.print(f"[red][X] No schedule or loop named '{name}'.[/red]")
+        if schedules:
+            console.print(f"[dim]Defined:[/dim] {', '.join(sorted(schedules))}")
+        raise typer.Exit(code=1)
+
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    section, entry_indent, entry_line = None, None, None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            section = stripped.rstrip(":") if stripped.endswith(":") else None
+            continue
+        if section in ("schedules", "loops") and stripped.rstrip(":") == name and stripped.endswith(":"):
+            entry_indent, entry_line = indent, index
+            break
+
+    if entry_line is None:  # validated above, so this means an unusual layout
+        console.print(f"[red][X] Could not locate '{name}' in {path}.[/red]")
+        console.print("[dim]Edit the file directly to set 'enabled'.[/dim]")
+        raise typer.Exit(code=1)
+
+    value = "true" if enabled else "false"
+    field_indent = entry_indent + 2
+    # Walk the entry's own block looking for an existing `enabled:` to replace.
+    cursor = entry_line + 1
+    while cursor < len(lines):
+        line = lines[cursor]
+        if line.strip() and (len(line) - len(line.lstrip())) <= entry_indent:
+            break  # left this entry's block
+        if line.strip().startswith("enabled:"):
+            lines[cursor] = f"{' ' * (len(line) - len(line.lstrip()))}enabled: {value}\n"
+            break
+        if line.strip():
+            field_indent = len(line) - len(line.lstrip())
+        cursor += 1
+    else:
+        cursor = len(lines)
+    if cursor >= len(lines) or not lines[cursor].strip().startswith("enabled:"):
+        lines.insert(entry_line + 1, f"{' ' * field_indent}enabled: {value}\n")
+
+    path.write_text("".join(lines), encoding="utf-8")
+    kind = "loop" if schedules[name].is_loop else "schedule"
+    console.print(f"[green][OK][/green] {kind} '{name}' is now {'enabled' if enabled else 'disabled'}.")
+
+
+@schedule_app.command("enable")
+def schedule_enable(name: str = typer.Argument(..., help="Schedule or loop name.")):
+    """Enable a schedule or loop (without hand-editing YAML)."""
+    _set_schedule_enabled(name, True)
+
+
+@schedule_app.command("disable")
+def schedule_disable(name: str = typer.Argument(..., help="Schedule or loop name.")):
+    """Disable a schedule or loop, leaving its definition and history intact."""
+    _set_schedule_enabled(name, False)
+
+
+@schedule_app.command("reset")
+def schedule_reset(
+    name: str = typer.Argument(..., help="Schedule or loop name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+):
+    """Clear a schedule's run history so a finished loop can run again.
+
+    Completion is sticky by design - a loop that ended because its queue
+    drained must not resurrect when the queue refills. This is the deliberate
+    undo.
+    """
+    from mco import launcher as launcher_mod
+    _, schedules = _load_schedules_or_exit()
+    if name not in schedules:
+        console.print(f"[red][X] No schedule or loop named '{name}'.[/red]")
+        raise typer.Exit(code=1)
+
+    states = launcher_mod.load_state()
+    state = states.get(name)
+    if not state or (not state.iterations and not state.exhausted_reason):
+        console.print(f"[yellow]'{name}' has no run history to clear.[/yellow]")
+        return
+    if not yes:
+        console.print(
+            f"[yellow]'{name}' has run {state.iterations} time(s)"
+            + (f" and is marked finished ({state.exhausted_reason})" if state.exhausted_reason else "")
+            + ".[/yellow]"
+        )
+        if not typer.confirm("Clear its history so it can run again?"):
+            console.print("[dim]Left unchanged.[/dim]")
+            return
+    states.pop(name, None)
+    launcher_mod.save_state(states)
+    console.print(f"[green][OK][/green] Cleared run history for '{name}'.")
+
+
 @schedule_app.command("tick")
 def schedule_tick(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would fire without creating jobs."),

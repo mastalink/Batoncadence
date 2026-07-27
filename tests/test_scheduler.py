@@ -304,3 +304,43 @@ def test_format_duration_is_human_readable():
     assert format_duration(30) == "30s"
     assert format_duration(5400) == "1h 30m"
     assert format_duration(86400) == "1d"
+
+
+# ── condition-based loop stops (until_empty) ──────────────────────────────────
+
+def test_until_empty_requires_a_hard_iteration_cap():
+    # A queue that never drains would otherwise loop forever - the condition is
+    # a stop *hint*, max_iterations is the guarantee.
+    with pytest.raises(ScheduleConfigError, match="also needs 'max_iterations'"):
+        parse_config(_config(schedules={}, loops={
+            "drain": {"launcher": "audit", "every": "5m", "until_empty": "codex"}
+        }))
+
+
+def test_until_empty_is_accepted_with_a_cap():
+    _, schedules = parse_config(_config(schedules={}, loops={
+        "drain": {
+            "launcher": "audit", "every": "5m",
+            "until_empty": "codex", "max_iterations": 20,
+        }
+    }))
+    assert schedules["drain"].until_empty == "codex"
+    assert "codex queue empty" in schedules["drain"].describe_bound()
+
+
+def test_until_empty_is_rejected_on_a_plain_schedule():
+    with pytest.raises(ScheduleConfigError, match="only applies to loops"):
+        parse_config(_config(schedules={
+            "s": {"launcher": "audit", "every": "5m", "until_empty": "codex"}
+        }))
+
+
+def test_a_recorded_completion_is_sticky():
+    # A loop that ended because its queue drained must not resurrect when the
+    # queue refills; only `mco schedule reset` clears it.
+    schedule = _one(every="1m")
+    state = ScheduleState(name="s", iterations=1, exhausted_reason="codex queue is empty")
+    now = _utc(2026, 7, 1, 12)
+    assert exhaustion_reason(schedule, state, now) == "codex queue is empty"
+    assert next_run_at(schedule, state, now) is None
+    assert is_due(schedule, state, now) is False

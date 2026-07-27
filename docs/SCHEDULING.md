@@ -21,12 +21,21 @@ Two config files, two different questions:
 ## Quick start
 
 ```bash
-mco schedule init      # write a starter ~/.mco/schedules.yaml
-mco schedule list      # see every schedule and its next fire time
-mco launch <name>      # fire one by hand, right now
+mco schedule init             # write a starter ~/.mco/schedules.yaml
+mco schedule list             # every schedule + its next fire time
+mco launch <name>             # fire one by hand, right now
 mco schedule tick --dry-run   # show what would fire, create nothing
-mco schedule run       # run the scheduler in the foreground
+mco schedule run              # run the scheduler in the foreground
+
+mco schedule disable <name>   # pause without deleting the definition
+mco schedule enable  <name>
+mco schedule reset   <name>   # clear history so a finished loop can rerun
+
+mco service install-scheduler # survive reboot (see "Running", below)
 ```
+
+`enable`/`disable` edit the config surgically, preserving your comments and
+formatting — they are not a parse-and-rewrite.
 
 ---
 
@@ -89,7 +98,23 @@ loops:
     every: 30m
     max_iterations: 10
     until: "2026-12-31T00:00:00Z"
+
+  drain-codex-queue:
+    launcher: nightly-audit
+    every: 5m
+    until_empty: codex        # stop when that role's queue is clear
+    max_iterations: 20        # required alongside until_empty
 ```
+
+**`until_empty`** is the "work the backlog until it's done" loop — it stops as
+soon as the named role has no unfinished jobs. It *always* requires
+`max_iterations` as a hard cap, because a queue that never drains would
+otherwise loop forever: the condition is a stop *hint*, the count is the
+guarantee.
+
+If the gateway can't be reached during that check, the loop **keeps going**
+rather than declaring victory — silently ending a loop on a failed lookup is
+the worse failure.
 
 An unbounded self-repeating agent task is how fleets burn budget and drift, so
 the parser **refuses to build one**:
@@ -101,6 +126,12 @@ An unbounded loop is just a schedule - define it under 'schedules:' if that's wh
 
 The bound is enforced at runtime too, not just documented — once a loop hits its
 limit it stops firing and `mco schedule list` shows *why*.
+
+**Completion is sticky.** A loop that finished stays finished, even if the
+condition that ended it reverses (a drained queue refilling, say). That's
+deliberate — an "until done" loop that quietly resurrects isn't bounded. Use
+`mco schedule reset <name>` to deliberately clear its history and let it run
+again.
 
 ---
 
@@ -142,6 +173,17 @@ mco schedule run --interval 30
 ```bash
 mco schedule tick
 ```
+
+**As a boot-persistent service** — the one you actually want in production:
+```bash
+mco service install-scheduler --interval 30
+mco service status BatonCadence-scheduler
+mco service logs   BatonCadence-scheduler
+```
+
+This installs through the same machinery as the gateway and wakers, so it works
+identically on Windows Task Scheduler, systemd, and launchd, and restarts on
+failure.
 
 A bad config or an unreachable gateway won't kill the daemon; it logs and keeps
 ticking. The failure operators actually suffer is a scheduler that quietly died

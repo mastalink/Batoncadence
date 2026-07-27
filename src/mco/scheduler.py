@@ -350,6 +350,10 @@ class Schedule:
     kind: str = "schedule"
     max_iterations: Optional[int] = None
     until: Optional[datetime] = None
+    # Stop when this role's queue is clear - the "work the backlog until it's
+    # done" loop. Always paired with max_iterations as a hard cap, because a
+    # condition that never comes true is an unbounded loop wearing a disguise.
+    until_empty: Optional[str] = None
     # Governance override: force an approval gate on everything this fires,
     # even when the launcher itself doesn't require one.
     requires_approval: Optional[bool] = None
@@ -372,6 +376,8 @@ class Schedule:
             bits.append(f"max {self.max_iterations}")
         if self.until is not None:
             bits.append(f"until {self.until.isoformat()}")
+        if self.until_empty:
+            bits.append(f"until {self.until_empty} queue empty")
         return ", ".join(bits) or "-"
 
 
@@ -427,7 +433,7 @@ _LAUNCHER_FIELDS = {
 }
 _SCHEDULE_FIELDS = {
     "launcher", "cron", "every", "timezone", "enabled", "overlap",
-    "max_iterations", "until", "requires_approval",
+    "max_iterations", "until", "until_empty", "requires_approval",
 }
 
 
@@ -571,6 +577,19 @@ def _parse_schedule(name: str, raw: Any, kind: str) -> Schedule:
         if max_iterations < 1:
             raise ScheduleConfigError(f"{label}: max_iterations must be at least 1")
     until = parse_timestamp(raw["until"], f"{label}.until") if raw.get("until") else None
+    until_empty = _opt_str(raw.get("until_empty"))
+
+    if until_empty and kind != "loop":
+        raise ScheduleConfigError(
+            f"{label}: 'until_empty' is a stop condition, so it only applies to loops"
+        )
+    # A condition that never comes true is an unbounded loop wearing a disguise,
+    # so until_empty always needs a hard iteration cap behind it.
+    if until_empty and max_iterations is None:
+        raise ScheduleConfigError(
+            f"{label}: 'until_empty' also needs 'max_iterations' as a hard cap - "
+            "a queue that never drains would otherwise loop forever."
+        )
 
     # The whole point of the loop/schedule distinction: a loop must be able to end.
     if kind == "loop" and max_iterations is None and until is None:
@@ -591,6 +610,7 @@ def _parse_schedule(name: str, raw: Any, kind: str) -> Schedule:
         kind=kind,
         max_iterations=max_iterations,
         until=until,
+        until_empty=until_empty,
         requires_approval=None if requires_approval is None else bool(requires_approval),
     )
 
@@ -645,6 +665,11 @@ def exhaustion_reason(
 ) -> Optional[str]:
     """Why this schedule is finished, or None if it's still live."""
     now = now or datetime.now(timezone.utc)
+    # A recorded completion is authoritative and sticky: a loop that ended
+    # because its queue drained must not resurrect when the queue refills.
+    # Clear it with `mco schedule reset <name>`.
+    if state and state.exhausted_reason:
+        return state.exhausted_reason
     if schedule.until and now > schedule.until:
         return f"passed its until ({schedule.until.isoformat()})"
     if schedule.max_iterations is not None and state and state.iterations >= schedule.max_iterations:
