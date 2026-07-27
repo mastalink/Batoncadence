@@ -949,6 +949,26 @@ def fleet_set(
     console.print(f"[green][OK][/green] {message}")
 
 
+@service_app.command("install-scheduler")
+def service_install_scheduler(
+    interval: float = typer.Option(30.0, "--interval", help="Seconds between scheduler passes."),
+):
+    """Install the schedule/loop scheduler as a boot-persistent OS service.
+
+    Without this the scheduler only runs while a terminal is open - and a
+    scheduler that quietly died on reboot is the failure nobody notices until
+    the nightly job hasn't run for a week.
+    """
+    from mco import service
+    ok, message = service.install_scheduler(interval=interval)
+    if ok:
+        console.print(f"[green][OK][/green] {message}")
+        console.print("[dim]Check it with:[/dim] mco service status BatonCadence-scheduler")
+    else:
+        console.print(f"[red][X] {message}[/red]")
+        raise typer.Exit(code=1)
+
+
 @service_app.command("install")
 def service_install(
     host: str = typer.Option("127.0.0.1", help="Host the service binds to."),
