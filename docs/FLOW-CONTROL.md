@@ -57,6 +57,41 @@ Every one confirms first, then round-trips through the same authenticated REST
 API the CLI uses. There is no privileged path here: the canvas is a client, and
 the server enforces exactly what it enforces for `mco approve`.
 
+## Designing a workflow
+
+Switch to **Design workflow** to author the same schema accepted by
+`mco workflow` and `POST /api/workflows`.
+
+1. Drag **New step** from the drafting rail onto the canvas. Press Enter on the
+   stencil for the keyboard equivalent.
+2. Select the card and edit its id, role, title, instructions, approval gate,
+   retry budget, and escalation role in the inspector.
+3. Draw from one step's **then** output port to another step's **needs** input
+   port. That creates `depends_on` on the receiving step. Remove dependencies
+   from the inspector.
+4. Validate, then **Export YAML**. The download contains workflow data, not
+   canvas positions.
+
+Import accepts the workflow subset BatonCadence owns: `name`, `steps`, and the
+documented step fields. It supports inline or indented `depends_on` lists and
+literal-block instructions. Unsupported fields fail visibly instead of being
+silently discarded.
+
+Validation runs before export and mirrors the runtime's important checks:
+workflow name, a non-empty step list, unique ids, roles, useful title or
+instructions, known dependencies, and an acyclic graph. The gateway validates
+again if the workflow is eventually run.
+
+### Export is not execution
+
+**Export YAML** only opens a reviewable file and never calls the gateway.
+**Run workflow** is a separate, red action. It names how many real jobs will be
+created, requires explicit confirmation, then submits through
+`POST /api/workflows`. Import also changes only the local draft.
+
+That separation is deliberate. A workflow can be reviewed, versioned, or handed
+to another operator without creating work by accident.
+
 ## Origin — "what created this?"
 
 If a job came from the scheduler, the panel shows its stamp:
@@ -80,10 +115,5 @@ See [SCHEDULING.md](SCHEDULING.md) for where those stamps come from.
   `localStorage`; the page itself is public, every API call is not.
 - Polls every 5s. Toggle **active only** to hide finished work.
 - `Esc` closes the panel.
-
-## Not yet
-
-Design mode — dragging nodes to *author* a flow and exporting it as workflow
-YAML — is the next step. The renderer and the layout engine here are the
-prerequisite for it; today you author in YAML (`mco workflow`) or
-`schedules.yaml` and watch it run here.
+- Design mode is browser-local until export or explicit execution. Moving a card
+  changes only the drafting layout; positions are not part of workflow YAML.

@@ -76,6 +76,56 @@ def test_flow_html_exposes_governance_actions():
         assert f"/{verb}" in html or f'"{verb}"' in html
 
 
+def test_flow_design_mode_authors_the_runtime_workflow_schema():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    for field in (
+        "id", "role", "title", "instructions", "depends_on",
+        "requires_approval", "max_retries", "escalate_to_role",
+    ):
+        assert field in html
+    assert 'draggable="true"' in html
+    assert "port out" in html
+    assert "port in" in html
+    assert "parseWorkflowYaml" in html
+    assert "workflowToYaml" in html
+
+
+def test_flow_design_mode_validates_ids_dependencies_and_cycles_before_export():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    validation = html[html.index("function validateDraft"):html.index("function yamlScalar")]
+    assert "Duplicate step id" in validation
+    assert "depends on unknown step" in validation
+    assert "dependency cycle" in validation
+    assert "depends_on must be a YAML list" in html
+    assert "Workflow is missing 'steps'" in html
+    export_handler = html[html.index('$("design-export").onclick'):html.index('$("design-import").onclick')]
+    assert "showValidation" in export_handler
+
+
+def test_flow_yaml_export_is_distinct_from_confirmed_execution():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    exporter = html[html.index("function workflowToYaml"):html.index("function stripYamlComment")]
+    assert "/api/workflows" not in exporter
+    runner = html[html.index("async function submitDraftWorkflow"):html.index('$("design-stage").addEventListener')]
+    assert 'confirm(' in runner
+    assert 'api("/api/workflows"' in runner
+    assert "This creates" in runner
+    assert "real" in runner
+    assert "Exporting YAML does not" in runner
+
+
+def test_flow_yaml_import_never_submits_jobs():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    importer = html[html.index('$("yaml-apply").onclick'):html.index('$("yaml-copy").onclick')]
+    assert "parseWorkflowYaml" in importer
+    assert "/api/workflows" not in importer
+    assert "No jobs were created" in importer
+
+
 def test_flow_route_is_registered():
     from mco.cli import create_app
     routes = {getattr(r, "path", None) for r in create_app().routes}
