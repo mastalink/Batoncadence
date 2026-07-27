@@ -43,7 +43,8 @@ formatting — they are not a parse-and-rewrite.
 
 ### Launcher — *what* to run
 
-A named, reusable launch target. Either a single job or a whole workflow file.
+A named, reusable launch target. One of four kinds — a job, a workflow, a local
+program, or a URL.
 
 ```yaml
 launchers:
@@ -58,10 +59,51 @@ launchers:
 
   release:
     workflow: workflows/release-pipeline.yaml   # a whole DAG instead
+
+  # Local GUI/app kinds — see the caveat below
+  console:
+    url: http://127.0.0.1:18789/console         # opens in the default browser
+  claude-desktop:
+    app: "C:/Program Files/Claude/Claude.exe"   # a local program
+  editor:
+    app: code
+    args: ["--new-window", "."]
 ```
 
 `mco launch nightly-audit` fires it immediately. This is **the same code path** a
 scheduled fire uses — so testing a launcher by hand proves the 3am run too.
+
+#### GUI and app launchers — read this
+
+`app` and `url` launchers start something **on this machine**. They are local
+conveniences, and three things follow from that:
+
+1. **They create no board job and no audit entry.** Governed work goes through
+   `role`/`workflow` launchers; these do not. Don't use them for work you need
+   to prove happened.
+2. **Processes are started fully detached** — a GUI app outlives the tick that
+   started it, and a long-running app never holds the scheduler open or dies
+   with it.
+3. **A GUI launched by the scheduler *service* may not appear on your desktop.**
+   Boot services run in their own session (notably Windows session 0), so
+   windows they open can be invisible to the logged-in user. Schedule GUI
+   launchers only when you run the scheduler in your own session
+   (`mco schedule run`), not as an installed service.
+
+`url` accepts only `http://`, `https://`, and `file://`. Schemes like
+`javascript:` and `data:` are rejected at parse time — handing arbitrary schemes
+to a browser from a config file a scheduler executes is a foot-gun.
+
+**Just want the console?** There's a direct command, no config needed:
+
+```bash
+mco gui                 # open the full console in your browser
+mco gui --dashboard     # the minimal dashboard instead
+mco gui --print         # print the URL, don't open anything
+```
+
+It checks the port first and tells you to run `mco start` rather than opening a
+dead tab.
 
 ### Schedule — *when* to run it
 
