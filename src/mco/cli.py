@@ -239,6 +239,14 @@ def create_app() -> FastAPI:
     async def console_ui() -> str:
         return get_console_html()
 
+    # Flow Control - the live DAG of the board: design intent, run state,
+    # approval gates, and the audit trail on one canvas.
+    from mco.console import get_flow_html
+
+    @app_server.get("/flow", response_class=HTMLResponse, include_in_schema=False)
+    async def flow_ui() -> str:
+        return get_flow_html()
+
     # Register broadcast callback
     register_broadcast_callback(server_broadcast_callback)
 
@@ -960,6 +968,7 @@ def _port_is_open(base_url: str, timeout: float = 2.0) -> bool:
 
 @app.command("gui")
 def open_gui(
+    flow: bool = typer.Option(False, "--flow", help="Open Flow Control (the live job-dependency canvas)."),
     dashboard: bool = typer.Option(False, "--dashboard", help="Open the minimal dashboard instead of the full console."),
     print_only: bool = typer.Option(False, "--print", help="Print the URL instead of opening a browser."),
 ):
@@ -971,7 +980,8 @@ def open_gui(
     import webbrowser
     config = get_config()
     base = (config.get("MCO_GATEWAY_URL") or "http://127.0.0.1:18789").rstrip("/")
-    url = f"{base}/{'dashboard' if dashboard else 'console'}"
+    page = "flow" if flow else ("dashboard" if dashboard else "console")
+    url = f"{base}/{page}"
 
     # Say plainly when nothing is listening, rather than opening a dead tab.
     # A TCP probe rather than an HTTP GET: it needs no particular endpoint to
