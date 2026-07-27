@@ -160,13 +160,13 @@ def test_parse_config_happy_path():
     assert schedules["nightly"].kind == "schedule"
 
 
-def test_launcher_requires_role_or_workflow():
-    with pytest.raises(ScheduleConfigError, match="needs a 'role'"):
+def test_launcher_requires_a_target_kind():
+    with pytest.raises(ScheduleConfigError, match="needs one of 'role'"):
         parse_config({"launchers": {"x": {"title": "no target"}}, "schedules": {}})
 
 
 def test_launcher_rejects_both_role_and_workflow():
-    with pytest.raises(ScheduleConfigError, match="not both"):
+    with pytest.raises(ScheduleConfigError, match="exactly one of"):
         parse_config({
             "launchers": {"x": {"role": "codex", "workflow": "w.yaml", "title": "t"}},
             "schedules": {},
@@ -344,3 +344,70 @@ def test_a_recorded_completion_is_sticky():
     assert exhaustion_reason(schedule, state, now) == "codex queue is empty"
     assert next_run_at(schedule, state, now) is None
     assert is_due(schedule, state, now) is False
+
+
+# ── app / url launchers (local GUI actions) ───────────────────────────────────
+
+def test_url_launcher_parses_and_describes():
+    launchers, _ = parse_config(_config(launchers={
+        "console": {"url": "http://127.0.0.1:18789/console"},
+        "audit": {"role": "reviewer", "title": "t"},
+    }))
+    assert launchers["console"].is_local is True
+    assert launchers["console"].describe().startswith("open http://")
+
+
+def test_app_launcher_parses_with_args():
+    launchers, _ = parse_config(_config(launchers={
+        "editor": {"app": "code", "args": ["--new-window", "."]},
+        "audit": {"role": "reviewer", "title": "t"},
+    }))
+    launcher = launchers["editor"]
+    assert launcher.app == "code" and launcher.args == ("--new-window", ".")
+    assert launcher.is_local is True
+    assert "run code" in launcher.describe()
+
+
+def test_launcher_rejects_two_target_kinds():
+    with pytest.raises(ScheduleConfigError, match="exactly one of"):
+        parse_config(_config(launchers={
+            "x": {"role": "codex", "title": "t", "app": "notepad"},
+        }))
+
+
+@pytest.mark.parametrize("bad_url", [
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "custom-handler://do-a-thing",
+    "not-a-url",
+])
+def test_url_launcher_rejects_dangerous_schemes(bad_url):
+    # A scheduler executing a config file must not hand arbitrary schemes to a
+    # browser.
+    with pytest.raises(ScheduleConfigError, match="must start with"):
+        parse_config(_config(launchers={"x": {"url": bad_url}}))
+
+
+def test_url_launcher_accepts_safe_schemes():
+    for good in ("http://x.test/a", "https://x.test/a", "file:///tmp/report.html"):
+        launchers, _ = parse_config(_config(launchers={
+            "x": {"url": good}, "audit": {"role": "r", "title": "t"},
+        }))
+        assert launchers["x"].url == good
+
+
+def test_args_requires_an_app_launcher():
+    with pytest.raises(ScheduleConfigError, match="only applies to an 'app'"):
+        parse_config(_config(launchers={
+            "x": {"url": "http://x.test", "args": ["--nope"]},
+        }))
+
+
+def test_args_must_be_a_list():
+    with pytest.raises(ScheduleConfigError, match="must be a list"):
+        parse_config(_config(launchers={"x": {"app": "code", "args": "--new-window"}}))
+
+
+def test_job_launcher_is_not_local():
+    launchers, _ = parse_config(_config())
+    assert launchers["audit"].is_local is False

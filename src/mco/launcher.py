@@ -149,9 +149,57 @@ def launch(
     if iteration is not None:
         origin["iteration"] = iteration
 
+    if launcher.url:
+        return _launch_url(launcher)
+    if launcher.app:
+        return _launch_app(launcher)
     if launcher.is_workflow:
         return _launch_workflow(launcher, client, origin)
     return _launch_job(launcher, client, origin, requires_approval_override)
+
+
+def _launch_url(launcher: Launcher) -> list[str]:
+    """Open a URL in the default browser. Returns no job ids - nothing is queued."""
+    import webbrowser
+
+    if not webbrowser.open(launcher.url or ""):
+        raise LaunchError(
+            f"launcher '{launcher.name}': no browser available to open {launcher.url}"
+        )
+    logger.info(f"launcher '{launcher.name}' opened {launcher.url}")
+    return []
+
+
+def _launch_app(launcher: Launcher) -> list[str]:
+    """Start a local program, fully detached from the scheduler.
+
+    Detaching matters twice over: a GUI app outlives the tick that started it,
+    and a long-running app must not hold the scheduler open or die with it.
+    """
+    import subprocess
+
+    argv = [launcher.app or "", *launcher.args]
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        kwargs["creationflags"] = 0x00000008 | 0x00000200
+    else:
+        kwargs["start_new_session"] = True
+
+    try:
+        process = subprocess.Popen(argv, **kwargs)
+    except FileNotFoundError as exc:
+        raise LaunchError(
+            f"launcher '{launcher.name}': program not found: {launcher.app}"
+        ) from exc
+    except OSError as exc:
+        raise LaunchError(f"launcher '{launcher.name}': could not start {launcher.app}: {exc}") from exc
+    logger.info(f"launcher '{launcher.name}' started {launcher.app} (pid {process.pid})")
+    return []
 
 
 def _launch_job(

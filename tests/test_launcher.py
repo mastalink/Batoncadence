@@ -372,3 +372,80 @@ def test_queue_is_empty_returns_none_when_unreachable():
 
     from mco.launcher import queue_is_empty
     assert queue_is_empty(Broken(), "codex") is None
+
+
+# ── app / url launchers (local GUI actions) ───────────────────────────────────
+
+def test_url_launcher_opens_a_browser_and_queues_nothing(monkeypatch):
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
+    client = FakeClient()
+
+    job_ids = launch(Launcher(name="console", url="http://127.0.0.1:18789/console"), client)
+
+    assert opened == ["http://127.0.0.1:18789/console"]
+    assert job_ids == []          # local action - nothing queued
+    assert client.sends == []     # and nothing sent to the board
+
+
+def test_url_launcher_raises_when_no_browser_is_available(monkeypatch):
+    monkeypatch.setattr("webbrowser.open", lambda url: False)
+    with pytest.raises(LaunchError, match="no browser available"):
+        launch(Launcher(name="console", url="http://x.test"), FakeClient())
+
+
+def test_app_launcher_starts_a_detached_process(monkeypatch):
+    calls = {}
+
+    class _FakeProc:
+        pid = 4242
+
+    def _fake_popen(argv, **kwargs):
+        calls["argv"] = argv
+        calls["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr("subprocess.Popen", _fake_popen)
+    job_ids = launch(Launcher(name="editor", app="code", args=("--new-window", ".")), FakeClient())
+
+    assert job_ids == []
+    assert calls["argv"] == ["code", "--new-window", "."]
+    # Detached both ways: a GUI app must outlive the tick that started it, and
+    # must not hold the scheduler open or die with it.
+    kwargs = calls["kwargs"]
+    assert kwargs.get("start_new_session") or kwargs.get("creationflags")
+
+
+def test_app_launcher_reports_a_missing_program(monkeypatch):
+    def _boom(argv, **kwargs):
+        raise FileNotFoundError(argv[0])
+
+    monkeypatch.setattr("subprocess.Popen", _boom)
+    with pytest.raises(LaunchError, match="program not found"):
+        launch(Launcher(name="ghost", app="definitely-not-installed"), FakeClient())
+
+
+def test_app_launcher_reports_an_os_error(monkeypatch):
+    def _boom(argv, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("subprocess.Popen", _boom)
+    with pytest.raises(LaunchError, match="could not start"):
+        launch(Launcher(name="blocked", app="/root/thing"), FakeClient())
+
+
+def test_a_scheduled_app_launcher_fires_without_creating_jobs(tmp_path, monkeypatch):
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
+    config = _write_config(tmp_path, {
+        "launchers": {"console": {"url": "http://127.0.0.1:18789/console"}},
+        "schedules": {"morning": {"launcher": "console", "every": "1h"}},
+    })
+    client = FakeClient()
+
+    report = tick(client, config, tmp_path / "state.json", now=_utc(2026, 7, 1, 8))
+
+    assert [r["action"] for r in report] == ["fired"]
+    assert report[0]["job_ids"] == []
+    assert opened == ["http://127.0.0.1:18789/console"]
+    assert client.sends == []

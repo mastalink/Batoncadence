@@ -306,7 +306,18 @@ def parse_timestamp(value: Any, where: str) -> datetime:
 
 @dataclass(frozen=True)
 class Launcher:
-    """A named, reusable launch target: one job, or a whole workflow file."""
+    """A named, reusable launch target.
+
+    Four kinds, exactly one per launcher:
+      - `role`     -> one job on the governed board
+      - `workflow` -> a whole DAG of jobs
+      - `app`      -> a local program or GUI (detached from the scheduler)
+      - `url`      -> a page in the default browser
+
+    `app` and `url` are local convenience actions: they start something on this
+    machine and produce **no board job and no audit entry**. Use them to open
+    the console or a desktop agent app, not to do governed work.
+    """
 
     name: str
     role: Optional[str] = None
@@ -317,14 +328,27 @@ class Launcher:
     requires_approval: bool = False
     max_retries: int = 0
     escalate_to_role: Optional[str] = None
+    app: Optional[str] = None
+    args: tuple[str, ...] = ()
+    url: Optional[str] = None
 
     @property
     def is_workflow(self) -> bool:
         return bool(self.workflow)
 
+    @property
+    def is_local(self) -> bool:
+        """True for `app`/`url` launchers - local actions, not board work."""
+        return bool(self.app or self.url)
+
     def describe(self) -> str:
         if self.is_workflow:
             return f"workflow {self.workflow}"
+        if self.url:
+            return f"open {self.url}"
+        if self.app:
+            extra = f" {' '.join(self.args)}" if self.args else ""
+            return f"run {self.app}{extra}"
         target = self.role or "?"
         if self.instance:
             target = f"{target}/{self.instance}"
@@ -430,7 +454,10 @@ def format_duration(seconds: float) -> str:
 _LAUNCHER_FIELDS = {
     "role", "title", "instructions", "instance", "workflow",
     "requires_approval", "max_retries", "escalate_to_role",
+    "app", "args", "url",
 }
+# Exactly one of these decides what a launcher *is*.
+_LAUNCHER_TARGETS = ("role", "workflow", "app", "url")
 _SCHEDULE_FIELDS = {
     "launcher", "cron", "every", "timezone", "enabled", "overlap",
     "max_iterations", "until", "until_empty", "requires_approval",
@@ -453,6 +480,13 @@ launchers:
     instructions: |
       Audit project dependencies for newly published CVEs.
       Open a PR if any are found; report "clean" otherwise.
+
+  # `url` and `app` launchers open things on THIS machine. They are local
+  # conveniences - they create no board job and no audit entry.
+  # console:
+  #   url: http://127.0.0.1:18789/console
+  # claude-desktop:
+  #   app: "C:/Program Files/Claude/Claude.exe"
 
 schedules:
   nightly-audit:
@@ -519,30 +553,52 @@ def _parse_launchers(raw_all: Any) -> dict[str, Launcher]:
             raise ScheduleConfigError(
                 f"launchers.{name}: unknown field(s) {', '.join(sorted(unknown))}"
             )
-        workflow = raw.get("workflow")
-        role = raw.get("role")
-        if workflow and role:
+        present = [field for field in _LAUNCHER_TARGETS if raw.get(field)]
+        if len(present) > 1:
             raise ScheduleConfigError(
-                f"launchers.{name}: set either 'workflow' or 'role', not both"
+                f"launchers.{name}: set exactly one of "
+                f"{', '.join(_LAUNCHER_TARGETS)} - got {', '.join(present)}"
             )
-        if not workflow and not role:
+        if not present:
             raise ScheduleConfigError(
-                f"launchers.{name}: needs a 'role' (single job) or a 'workflow' (multi-step)"
+                f"launchers.{name}: needs one of 'role' (a job), 'workflow' "
+                "(multi-step), 'app' (a local program), or 'url' (a page)"
             )
-        if role and not (raw.get("title") or raw.get("instructions")):
+        kind = present[0]
+        if kind == "role" and not (raw.get("title") or raw.get("instructions")):
             raise ScheduleConfigError(
                 f"launchers.{name}: a job launcher needs a 'title' or 'instructions'"
             )
+
+        args = raw.get("args") or []
+        if args and not raw.get("app"):
+            raise ScheduleConfigError(f"launchers.{name}: 'args' only applies to an 'app' launcher")
+        if not isinstance(args, (list, tuple)):
+            raise ScheduleConfigError(
+                f"launchers.{name}: 'args' must be a list, e.g. [--flag, value]"
+            )
+
+        url = _opt_str(raw.get("url"))
+        if url and not re.match(r"^(https?|file)://", url, re.IGNORECASE):
+            # Anything else (javascript:, data:, custom handlers) is a foot-gun
+            # to hand a browser from a config file that a scheduler executes.
+            raise ScheduleConfigError(
+                f"launchers.{name}: 'url' must start with http://, https://, or file://"
+            )
+
         launchers[name] = Launcher(
             name=name,
-            role=str(role) if role else None,
+            role=_opt_str(raw.get("role")),
             title=_opt_str(raw.get("title")),
             instructions=_opt_str(raw.get("instructions")),
             instance=_opt_str(raw.get("instance")),
-            workflow=_opt_str(workflow),
+            workflow=_opt_str(raw.get("workflow")),
             requires_approval=bool(raw.get("requires_approval", False)),
             max_retries=int(raw.get("max_retries") or 0),
             escalate_to_role=_opt_str(raw.get("escalate_to_role")),
+            app=_opt_str(raw.get("app")),
+            args=tuple(str(a) for a in args),
+            url=url,
         )
     return launchers
 
