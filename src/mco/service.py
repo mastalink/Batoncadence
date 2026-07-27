@@ -21,6 +21,7 @@ from typing import Iterable
 from xml.sax.saxutils import escape
 
 SERVICE_NAME = "BatonCadence-gateway"
+SCHEDULER_SERVICE_NAME = "BatonCadence-scheduler"
 SYSTEMD_UNIT_NAME = "batoncadence-gateway.service"
 LAUNCHD_LABEL = "com.batoncadence.gateway"
 WINDOWS_RESTART_INTERVAL = "PT1M"
@@ -109,6 +110,14 @@ def _poll_argv(exec_command: str) -> list[str]:
     return shlex.split(exec_command, posix=os.name != "nt")
 
 
+def _scheduler_argv(interval: float = 30.0) -> list[str]:
+    """Argv that runs the schedule/loop scheduler in the foreground."""
+    return [
+        sys.executable, "-m", "mco.cli", "schedule", "run",
+        "--interval", _format_interval(interval),
+    ]
+
+
 def _format_interval(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else str(value)
 
@@ -136,6 +145,19 @@ def _waker_spec(
         instance=instance,
         argv=_wake_argv(role, exec_command, instance=instance, min_interval=min_interval),
         description=f"BatonCadence waker for {role}{('/' + instance) if instance else ''}",
+        restart_on_failure=True,
+    )
+
+
+def _scheduler_spec(interval: float = 30.0) -> ServiceSpec:
+    # restart_on_failure=True: a scheduler that quietly died is the failure
+    # operators actually suffer - nobody notices until the nightly job hasn't
+    # run for a week.
+    return ServiceSpec(
+        name=SCHEDULER_SERVICE_NAME,
+        kind="scheduler",
+        argv=_scheduler_argv(interval),
+        description="BatonCadence scheduler (schedules and loops)",
         restart_on_failure=True,
     )
 
@@ -735,6 +757,16 @@ def install_waker(
     return _linux_install_service(spec)
 
 
+def install_scheduler(interval: float = 30.0) -> tuple[bool, str]:
+    """Install the schedule/loop scheduler as a boot-persistent OS service."""
+    spec = _scheduler_spec(interval)
+    if os.name == "nt":
+        return _win_install_service(spec)
+    if sys.platform == "darwin":
+        return _mac_install_service(spec)
+    return _linux_install_service(spec)
+
+
 def install_poll(
     role: str,
     exec_command: str,
@@ -817,6 +849,8 @@ def _selector_matches_name(selector: str, name: str) -> bool:
 def _target_from_name(name: str) -> ServiceSpec:
     if name == SERVICE_NAME or _slug(name) == "batoncadence-gateway":
         return _gateway_spec("127.0.0.1", 18789)
+    if name == SCHEDULER_SERVICE_NAME or _slug(name) == "batoncadence-scheduler":
+        return _scheduler_spec()
     kind = "poll" if _slug(name).startswith("batoncadence-poll-") else "wake"
     return ServiceSpec(
         name=name,

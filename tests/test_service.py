@@ -319,3 +319,54 @@ def test_install_dispatch_matches_platform(monkeypatch):
     monkeypatch.setattr(service, "_linux_install", lambda h, p: seen.setdefault("linux", True) and (True, ""))
     service.install("127.0.0.1", 18789)
     assert len(seen) == 1  # exactly one backend was dispatched to
+
+
+# ── scheduler service (schedules and loops) ───────────────────────────────────
+
+def test_scheduler_argv_runs_the_schedule_daemon():
+    argv = service._scheduler_argv(45.0)
+    assert argv[0] == sys.executable
+    assert argv[1:] == ["-m", "mco.cli", "schedule", "run", "--interval", "45"]
+
+
+def test_scheduler_spec_restarts_on_failure():
+    # A scheduler that quietly died on reboot is the failure nobody notices
+    # until the nightly job hasn't run for a week.
+    spec = service._scheduler_spec()
+    assert spec.name == service.SCHEDULER_SERVICE_NAME
+    assert spec.kind == "scheduler"
+    assert spec.restart_on_failure is True
+
+
+def test_scheduler_service_name_round_trips_through_resolution():
+    # `mco service status/restart/uninstall BatonCadence-scheduler` must find it
+    # rather than falling through to the waker-name guess.
+    resolved = service._target_from_name(service.SCHEDULER_SERVICE_NAME)
+    assert resolved.kind == "scheduler"
+    assert resolved.restart_on_failure is True
+
+
+def test_scheduler_has_its_own_log_and_labels_per_platform():
+    spec = service._scheduler_spec()
+    assert spec.log_path.name == "batoncadence-scheduler.log"
+    assert spec.launchd_label == "com.batoncadence.scheduler"
+    assert spec.unit_name == "batoncadence-scheduler.service"
+
+
+def test_windows_scheduler_task_xml_has_valid_restart_settings():
+    # PR #27's bug class: XML that installs fine but silently never restarts.
+    xml = service._service_windows_task_xml(service._scheduler_spec())
+    interval, count = _restart_on_failure_values(xml)
+    assert _task_scheduler_duration_seconds(interval) > 0
+    assert count >= 1
+
+
+def test_launchd_scheduler_plist_is_valid_xml():
+    plist = service._service_launchd_plist_xml(service._scheduler_spec())
+    minidom.parseString(plist.encode("utf-8"))
+    assert "com.batoncadence.scheduler" in plist
+
+
+def test_systemd_scheduler_unit_renders_execstart():
+    unit = service._service_systemd_unit_text(service._scheduler_spec())
+    assert "schedule" in unit and "run" in unit
