@@ -71,6 +71,23 @@ class TestCreate:
         row = ctx.db.table("llm_connections").select("*").eq("id", conn["id"]).execute().data[0]
         assert "api_key" not in row
         assert ctx.cfg.get(llm_connections.config_key_for(conn["id"])) == "sk-ant-secret123"
+        assert ctx.cfg.set_calls[-1] == (
+            llm_connections.config_key_for(conn["id"]),
+            "sk-ant-secret123",
+            True,
+        )
+
+    def test_locked_local_vault_returns_503_and_removes_metadata(self, ctx):
+        def locked_set(key, value, encrypt=False):
+            raise RuntimeError("locked")
+
+        ctx.cfg.set = locked_set
+        resp = ctx.http.post("/api/llm-connections", json={
+            "name": "cannot-save", "provider": "openai", "api_key": "sk-secret",
+        })
+
+        assert resp.status_code == 503
+        assert ctx.db.table("llm_connections").select("*").execute().data == []
 
     def test_list_never_echoes_key(self, ctx):
         ctx.http.post("/api/llm-connections", json={
@@ -212,3 +229,29 @@ class TestApiEndpointCallsTestConnection:
         resp = ctx.http.post(f"/api/llm-connections/{conn['id']}/test")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+
+
+class TestSharedDatabaseVaultRoute:
+    def test_key_is_shared_as_ciphertext_and_resolves_server_side(self, ctx, monkeypatch):
+        import base64
+
+        ctx.cfg.values["MCO_SECRET_VAULT_BACKEND"] = "database"
+        ctx.cfg.values["MCO_VAULT_MASTER_KEY"] = base64.urlsafe_b64encode(b"K" * 32).decode()
+        conn = ctx.http.post("/api/llm-connections", json={
+            "name": "shared-openai",
+            "provider": "openai",
+            "api_key": "sk-shared-secret",
+        }).json()["connection"]
+
+        records = ctx.db.table("secret_records").select("*").execute().data
+        assert len(records) == 1
+        assert "sk-shared-secret" not in str(records)
+        assert ctx.http.get("/api/llm-connections").json()[0]["key_set"] is True
+
+        def fake_test(provider, api_key, base_url=None):
+            assert provider == "openai"
+            assert api_key == "sk-shared-secret"
+            return {"ok": True, "detail": "Connection OK", "latency_ms": 1}
+
+        monkeypatch.setattr(admin_mod.llm_connections, "test_connection", fake_test)
+        assert ctx.http.post(f"/api/llm-connections/{conn['id']}/test").json()["ok"] is True

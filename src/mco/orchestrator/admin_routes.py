@@ -31,6 +31,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from mco.config import get_config
 from mco.editions import edition_summary
 from mco.orchestrator import llm_connections
+from mco.secret_vault import (
+    SecretNotFoundError,
+    SecretRef,
+    VaultError,
+    build_secret_vault,
+)
 from mco.orchestrator.auth import KNOWN_SCOPES, normalize_scopes, require_scopes
 
 logger = logging.getLogger("mco.orchestrator.admin")
@@ -355,10 +361,7 @@ async def put_settings(payload: dict, caller: dict = Depends(require_scopes("adm
     if unknown:
         raise HTTPException(status_code=400,
                             detail=f"Not settable via API: {', '.join(unknown)}")
-    from mco.config import SENSITIVE_KEYS
-    from mco.security import get_secret_store
     config = get_config()
-    store_unlocked = get_secret_store().is_unlocked
     applied = {}
     touched_connector = False
     for key, value in payload.items():
@@ -376,10 +379,18 @@ async def put_settings(payload: dict, caller: dict = Depends(require_scopes("adm
             config.delete(key)
             applied[key] = None
         else:
-            # Secrets ride the encrypted store when it's unlocked, mirroring the
-            # terminal wizard; otherwise they land in ~/.mco/.env like any value.
-            encrypt = key in SENSITIVE_KEYS and store_unlocked
-            config.set(key, value, encrypt=encrypt)
+            # A setting labelled secret must never silently downgrade to
+            # plaintext because the local vault happens to be locked.
+            try:
+                config.set(key, value, encrypt=meta["type"] == "secret")
+            except RuntimeError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "The encrypted secret store is locked. Unlock it in "
+                        "`mco setup --menu` before saving credentials."
+                    ),
+                ) from exc
             applied[key] = True if meta["type"] == "secret" else value
         if key in _CONNECTOR_KEYS:
             touched_connector = True
@@ -732,6 +743,23 @@ def _get_llm_row(db, conn_id: str, caller: dict) -> dict:
     return rows[0]
 
 
+def _llm_secret_ref(conn_id: str, caller: dict) -> SecretRef:
+    return SecretRef(
+        org_id=_caller_org(caller),
+        scope=conn_id,
+        name="api_key",
+        legacy_config_key=llm_connections.config_key_for(conn_id),
+    )
+
+
+def _llm_vault(db):
+    return build_secret_vault(get_config(), db)
+
+
+def _vault_http_error(exc: VaultError) -> HTTPException:
+    return HTTPException(status_code=503, detail=str(exc))
+
+
 @llm_connections_router.get("/providers")
 async def list_llm_providers(caller: dict = Depends(require_scopes("admin"))):
     """Provider metadata for the Add Connection form."""
@@ -744,9 +772,12 @@ async def list_llm_connections(caller: dict = Depends(require_scopes("admin"))):
     db = _db()
     res = db.table("llm_connections").select("*").execute()
     rows = [r for r in (res.data or []) if (r.get("org_id") or "default") == _caller_org(caller)]
-    config = get_config()
-    return [_llm_public(r, bool(config.get(llm_connections.config_key_for(r["id"]))))
-            for r in rows]
+    try:
+        vault = _llm_vault(db)
+        return [_llm_public(r, vault.exists(_llm_secret_ref(r["id"], caller)))
+                for r in rows]
+    except VaultError as exc:
+        raise _vault_http_error(exc)
 
 
 @llm_connections_router.post("")
@@ -782,7 +813,13 @@ async def create_llm_connection(payload: dict, caller: dict = Depends(require_sc
     saved = res.data[0]
 
     if api_key:
-        get_config().set(llm_connections.config_key_for(saved["id"]), api_key)
+        try:
+            _llm_vault(db).put(_llm_secret_ref(saved["id"], caller), api_key)
+        except VaultError as exc:
+            # Do not leave metadata claiming a usable connection when secret
+            # custody failed (for example because the local vault is locked).
+            db.table("llm_connections").delete().eq("id", saved["id"]).execute()
+            raise _vault_http_error(exc)
 
     logger.info(f"LLM connection '{name}' ({provider}) created by {caller.get('instance_id')}")
     return {"success": True, "connection": _llm_public(saved, bool(api_key))}
@@ -812,7 +849,10 @@ async def update_llm_connection(conn_id: str, payload: dict,
 
     api_key = str(payload.get("api_key") or "").strip()
     if api_key:
-        get_config().set(llm_connections.config_key_for(conn_id), api_key)
+        try:
+            _llm_vault(db).put(_llm_secret_ref(conn_id, caller), api_key)
+        except VaultError as exc:
+            raise _vault_http_error(exc)
 
     if not update and not api_key:
         raise HTTPException(status_code=400, detail="Nothing to update")
@@ -823,7 +863,10 @@ async def update_llm_connection(conn_id: str, payload: dict,
             raise HTTPException(status_code=500, detail="Update failed to persist")
         row = res.data[0]
 
-    key_set = bool(get_config().get(llm_connections.config_key_for(conn_id)))
+    try:
+        key_set = _llm_vault(db).exists(_llm_secret_ref(conn_id, caller))
+    except VaultError as exc:
+        raise _vault_http_error(exc)
     return {"success": True, "connection": _llm_public(row, key_set)}
 
 
@@ -831,8 +874,11 @@ async def update_llm_connection(conn_id: str, payload: dict,
 async def delete_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
     db = _db()
     _get_llm_row(db, conn_id, caller)
+    try:
+        _llm_vault(db).delete(_llm_secret_ref(conn_id, caller))
+    except VaultError as exc:
+        raise _vault_http_error(exc)
     db.table("llm_connections").delete().eq("id", conn_id).execute()
-    get_config().delete(llm_connections.config_key_for(conn_id))
     logger.info(f"LLM connection '{conn_id}' deleted by {caller.get('instance_id')}")
     return {"success": True, "id": conn_id}
 
@@ -843,7 +889,10 @@ async def test_llm_connection(conn_id: str, caller: dict = Depends(require_scope
     actually authenticate. Never returns the key itself."""
     db = _db()
     row = _get_llm_row(db, conn_id, caller)
-    api_key = get_config().get(llm_connections.config_key_for(conn_id)) or ""
+    try:
+        api_key = _llm_vault(db).get(_llm_secret_ref(conn_id, caller))
+    except SecretNotFoundError:
+        api_key = ""
+    except VaultError as exc:
+        raise _vault_http_error(exc)
     return llm_connections.test_connection(row.get("provider"), api_key, row.get("base_url"))
-
-

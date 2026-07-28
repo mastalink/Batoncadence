@@ -37,12 +37,14 @@ class FakeConfig:
     def __init__(self, **values):
         self.values = dict(values)
         self.deleted = []
+        self.set_calls = []
 
     def get(self, key, default=None):
         return self.values.get(key, default)
 
     def set(self, key, value, encrypt=False):
         self.values[key] = value
+        self.set_calls.append((key, value, encrypt))
 
     def delete(self, key):
         self.values.pop(key, None)
@@ -289,6 +291,33 @@ class TestSettings:
         resp = _ctx().http.put("/api/settings", json={"MCO_KILL_SWITCH": True})
         assert resp.status_code == 200
         assert _ctx().cfg.values["MCO_KILL_SWITCH"] == "true"
+
+    def test_put_secret_requires_encrypted_storage(self):
+        resp = _ctx().http.put(
+            "/api/settings",
+            json={"MCO_TRUSTED_HEADER_SECRET": "proxy-secret"},
+        )
+        assert resp.status_code == 200
+        assert _ctx().cfg.set_calls[-1] == (
+            "MCO_TRUSTED_HEADER_SECRET",
+            "proxy-secret",
+            True,
+        )
+
+    def test_locked_secret_store_fails_closed(self):
+        def locked_set(key, value, encrypt=False):
+            if encrypt:
+                raise RuntimeError("locked")
+            _ctx().cfg.values[key] = value
+
+        _ctx().cfg.set = locked_set
+        resp = _ctx().http.put(
+            "/api/settings",
+            json={"MCO_WEBHOOK_SECRET": "must-not-be-plaintext"},
+        )
+
+        assert resp.status_code == 503
+        assert "MCO_WEBHOOK_SECRET" not in _ctx().cfg.values
 
     def test_put_unknown_key_rejected(self):
         resp = _ctx().http.put("/api/settings", json={"SUPABASE_KEY": "sneaky"})

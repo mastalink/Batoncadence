@@ -19,8 +19,11 @@ CI builds and tests every push (`.github/workflows/ci.yml`, Python 3.11/3.12 + i
 
 - **Liveness/readiness:** `GET /healthz` (unauthenticated, no secrets) - wire it
   to your LB/orchestrator health checks; Docker `HEALTHCHECK` is preconfigured.
-- **Secrets:** env vars in your cloud secret manager, or mount the AES-256-GCM
-  secret store volume. The container runs as a non-root user.
+- **Secrets:** for one host, mount the AES-256-GCM local secret-store volume.
+  For Saved Instances or multiple replicas, set
+  `MCO_SECRET_VAULT_BACKEND=database` and inject `MCO_VAULT_MASTER_KEY` from
+  your cloud secret manager. The database receives ciphertext only. The
+  container runs as a non-root user.
 - **Workers anywhere:** `mco listen` workers run in customer/edge networks and
   make outbound-only connections to the gateway - the hybrid control-plane/
   data-plane split enterprises expect from credential-holding tools.

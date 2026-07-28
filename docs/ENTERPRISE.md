@@ -5,6 +5,53 @@ runs the same code; the edition decides which surfaces are active. Drumline
 (shared context) is first-class in **every** edition — collective memory is
 the product, not an upsell.
 
+## Enterprise identity foundation
+
+BatonCadence distinguishes human identity from agent credentials:
+
+- Humans will sign in through OIDC (Okta, Microsoft Entra ID, Auth0, Ping,
+  Keycloak), SAML, or a trusted authentication proxy. LDAP directories should
+  normally feed one of those identity providers; direct LDAPS is reserved for
+  fully self-hosted deployments.
+- External groups grant nothing by themselves. An Organization must map each
+  allowed group to BatonCadence roles and scopes.
+- SCIM 2.0 is the durable provisioning contract for users, groups, and
+  immediate deactivation.
+- Browser Sessions, native Device Credentials, and agent tokens remain
+  separate and independently revocable.
+
+The durable Organization, Saved Instance, Membership, Identity Provider,
+Session, Device Credential, Role Mapping, and Secret Reference model ships in
+`2026-07_enterprise_identity_foundation.sql`. OIDC/SAML/SCIM handlers are
+being built on that model; until they land, trusted-header SSO remains the
+available compatibility Adapter rather than a complete account system.
+
+### Shared secret vault
+
+Model-provider keys are server-side secrets. Browsers and apps can configure
+or use a Model Connection but never receive its key back.
+
+For an encrypted vault local to one host:
+
+```bash
+MCO_SECRET_VAULT_BACKEND=local
+mco setup --menu  # initialize/unlock the encrypted SecretStore
+```
+
+For a Saved Instance shared by multiple gateway replicas:
+
+```bash
+MCO_SECRET_VAULT_BACKEND=database
+MCO_VAULT_MASTER_KEY=<base64-or-64-character-hex-256-bit-key>
+MCO_VAULT_KEY_VERSION=1
+```
+
+The database stores only AES-256-GCM ciphertext. Keep
+`MCO_VAULT_MASTER_KEY` in the deployment secret manager, never in the
+database, repository, browser, or BatonCadence settings screen. A later KMS
+Adapter can supply the same vault Seam without changing Model Connection
+callers.
+
 ## Editions
 
 | Capability | community | team | enterprise |

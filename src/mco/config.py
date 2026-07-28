@@ -33,6 +33,11 @@ SENSITIVE_KEYS = {
     "SERVICENOW_PASSWORD",
     "SERVICENOW_TOKEN",
     "DYNATRACE_API_TOKEN",
+    "MCO_AGENT_TOKEN",
+    "MCO_LOCAL_TOKEN",
+    "MCO_METRICS_TOKEN",
+    "MCO_TRUSTED_HEADER_SECRET",
+    "MCO_VAULT_MASTER_KEY",
     "MCO_WEBHOOK_SECRET",
 }
 
@@ -53,6 +58,21 @@ def is_sensitive_key(key: str) -> bool:
     """
     name = (key or "").upper()
     return key in SENSITIVE_KEYS or any(marker in name for marker in SENSITIVE_KEY_MARKERS)
+
+
+def is_sensitive_key(key: str) -> bool:
+    """Return whether a configuration name carries secret material.
+
+    Dynamic model-connection keys cannot be enumerated in ``SENSITIVE_KEYS``;
+    treating well-known secret suffixes as sensitive keeps masking and
+    encrypted-store lookups consistent for both static and generated names.
+    """
+    upper = str(key or "").upper()
+    return (
+        upper in SENSITIVE_KEYS
+        or upper.startswith("MCO_SECRET_")
+        or upper.endswith(("_API_KEY", "_PASSWORD", "_SECRET", "_TOKEN"))
+    )
 
 
 # The global config home: works from any directory, any terminal. Lives next
@@ -227,6 +247,10 @@ class ConfigManager:
 
     def _update_dotenv_file(self, key: str, value: Optional[str]) -> None:
         """Write or remove a key in the local .env file atomically."""
+        if any(ch in str(key) for ch in ("\r", "\n", "=")):
+            raise ValueError("Configuration keys may not contain newlines or '='")
+        if value is not None and any(ch in str(value) for ch in ("\r", "\n")):
+            raise ValueError("Configuration values may not contain newlines")
         lines = []
         if self._env_path.is_file():
             lines = self._env_path.read_text(encoding="utf-8").splitlines()
