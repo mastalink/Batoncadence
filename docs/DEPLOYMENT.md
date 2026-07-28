@@ -28,6 +28,11 @@ CI builds and tests every push (`.github/workflows/ci.yml`, Python 3.11/3.12 + i
   make outbound-only connections to the gateway - the hybrid control-plane/
   data-plane split enterprises expect from credential-holding tools.
 
+For native enterprise OIDC, also inject `MCO_SESSION_SECRET`, keep
+`MCO_SESSION_COOKIE_SECURE=true`, and expose the gateway only through HTTPS.
+The callback URL registered in Okta/Entra/Auth0 is
+`https://<gateway>/api/auth/oidc/<provider-id>/callback`.
+
 ## Multi-tenancy (hosted SaaS mode)
 
 Run `docs/migrations/2026-06_multi_tenancy.sql` (idempotent). Every agent,

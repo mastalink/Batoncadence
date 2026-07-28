@@ -58,6 +58,7 @@ FEATURE_MATRIX = {
     "rbac_management": TEAM,
     # Enterprise (runtime-enforced)
     "connectors": ENTERPRISE,
+    "identity_federation": ENTERPRISE,
     "trusted_header_auth": ENTERPRISE,
     "audit_export": ENTERPRISE,
 }

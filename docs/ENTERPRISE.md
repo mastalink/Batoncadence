@@ -22,9 +22,51 @@ BatonCadence distinguishes human identity from agent credentials:
 
 The durable Organization, Saved Instance, Membership, Identity Provider,
 Session, Device Credential, Role Mapping, and Secret Reference model ships in
-`2026-07_enterprise_identity_foundation.sql`. OIDC/SAML/SCIM handlers are
-being built on that model; until they land, trusted-header SSO remains the
-available compatibility Adapter rather than a complete account system.
+`2026-07_enterprise_identity_foundation.sql`. OIDC Authorization Code with
+PKCE is the first native federation Adapter. SAML, SCIM, and direct LDAPS are
+still follow-on work; trusted-header SSO remains available as a compatibility
+Adapter.
+
+### Native OIDC login (Okta, Entra ID, Auth0, Ping, Keycloak)
+
+Apply the enterprise identity migration, initialize either vault Adapter, and
+configure:
+
+```bash
+MCO_EDITION=enterprise
+MCO_SESSION_SECRET=<random-signing-secret-from-your-deployment-secret-manager>
+MCO_SESSION_COOKIE_SECURE=true
+```
+
+An existing BatonCadence administrator creates an Identity Provider through
+`POST /api/identity-providers` with its HTTPS issuer, client id, client secret,
+and an explicit `group_mappings` object. The client secret goes straight into
+the vault and is never returned. Example shape:
+
+```json
+{
+  "name": "Acme Okta",
+  "issuer": "https://acme.okta.com/oauth2/default",
+  "client_id": "configured-in-okta",
+  "client_secret": "write-only",
+  "group_mappings": {
+    "Baton-Admins": "admin",
+    "Change-Approvers": "approver",
+    "Audit-Readers": "auditor"
+  }
+}
+```
+
+Start login at `/api/auth/oidc/{provider_id}/login`. Provider discovery,
+signed token and nonce validation, and PKCE are handled by Authlib. The PKCE
+verifier and nonce remain in the server-side authorization cache; the
+temporary browser cookie holds only a signed state marker. A successful
+callback creates or updates the User and Membership, then issues an opaque
+eight-hour `HttpOnly`, `SameSite=Lax`, secure cookie whose hash—not value—is
+stored in `user_sessions`.
+
+Unknown groups grant nothing. Deactivated Users, Memberships, expired
+Sessions, and revoked Sessions fail closed on every request.
 
 ### Shared secret vault
 

@@ -93,6 +93,7 @@ create table if not exists external_identities (
 );
 
 create table if not exists org_memberships (
+  id           uuid primary key default gen_random_uuid(),
   org_id       text not null references organizations(id) on delete cascade,
   user_id      uuid not null references users(id) on delete cascade,
   role         text not null default 'viewer',
@@ -101,7 +102,7 @@ create table if not exists org_memberships (
   scim_external_id text,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
-  primary key (org_id, user_id)
+  unique (org_id, user_id)
 );
 
 create table if not exists role_mappings (
@@ -120,7 +121,7 @@ create table if not exists user_sessions (
   org_id           text not null references organizations(id) on delete cascade,
   user_id          uuid not null references users(id) on delete cascade,
   instance_id      uuid references saved_instances(id) on delete cascade,
-  refresh_token_hash text not null,
+  session_token_hash text not null unique,
   device_name      text,
   ip_address       inet,
   user_agent       text,
@@ -128,6 +129,13 @@ create table if not exists user_sessions (
   last_seen_at     timestamptz not null default now(),
   expires_at       timestamptz not null,
   revoked_at       timestamptz
+);
+
+create table if not exists oidc_transactions (
+  id          text primary key,
+  value       text not null,
+  expires_at  timestamptz not null,
+  created_at  timestamptz not null default now()
 );
 
 create table if not exists device_credentials (
@@ -162,6 +170,7 @@ create index if not exists idx_saved_instances_org on saved_instances (org_id);
 create unique index if not exists idx_users_email_lower on users (lower(email));
 create index if not exists idx_memberships_user on org_memberships (user_id);
 create index if not exists idx_sessions_user_active on user_sessions (user_id, revoked_at, expires_at);
+create index if not exists idx_oidc_transactions_expiry on oidc_transactions (expires_at);
 create index if not exists idx_device_credentials_org on device_credentials (org_id, revoked_at);
 create index if not exists idx_secret_records_org on secret_records (org_id, scope);
 create index if not exists idx_security_events_org_time on security_events (org_id, occurred_at desc);
