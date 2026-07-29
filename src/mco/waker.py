@@ -5,16 +5,115 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from mco.orchestrator.client import DEFAULT_GATEWAY, GatewayClient
 
 logger = logging.getLogger("mco.waker")
 
+# Per-instance agent tokens live here, one file per instance id.
+AGENT_TOKEN_DIR = Path.home() / ".mco" / "tokens"
+
 
 class WakerAuthError(RuntimeError):
     """Raised when the broadcast WebSocket rejects authentication."""
+
+
+class WakerTokenError(RuntimeError):
+    """Raised when no usable agent token could be resolved for this instance."""
+
+
+def agent_token_path(instance_id: str) -> Path:
+    """Where this instance's bearer token is stored."""
+    return AGENT_TOKEN_DIR / f"{instance_id}.token"
+
+
+def read_agent_token_file(instance_id: str) -> Optional[str]:
+    """Read `~/.mco/tokens/<instance>.token`, or None if absent/empty/unreadable."""
+    if not instance_id:
+        return None
+    path = agent_token_path(instance_id)
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return token or None
+
+
+def resolve_agent_token(
+    instance_id: str,
+    explicit: Optional[str] = None,
+    config: Any = None,
+    strict: bool = True,
+) -> str:
+    """Resolve the bearer token a waker should authenticate with.
+
+    Order, most specific first:
+
+      1. an explicit `--token`
+      2. `MCO_AGENT_TOKEN` in the environment
+      3. `~/.mco/tokens/<instance>.token`   <-- per-instance, the multi-agent case
+      4. `MCO_AGENT_TOKEN` from the config/.env
+      5. `MCO_LOCAL_TOKEN` (single-agent convenience only)
+
+    Step 3 exists because a machine running several agents cannot express more
+    than one identity through a single global `MCO_AGENT_TOKEN`. Without it every
+    waker on a multi-agent host silently falls back to the *operator* token,
+    fails role authentication, and exits 1 - which reads as "the fleet is down"
+    with no indication that the cause is identity, not connectivity.
+
+    `strict` refuses the MCO_LOCAL_TOKEN fallback when an instance id is set:
+    the operator token cannot authenticate as a named agent, so using it is a
+    guaranteed failure that is better reported here, by name, than as a generic
+    rejection from the far end of a WebSocket.
+    """
+    explicit = (explicit or "").strip()
+    if explicit:
+        return explicit
+
+    env_token = (os.environ.get("MCO_AGENT_TOKEN") or "").strip()
+    if env_token:
+        return env_token
+
+    file_token = read_agent_token_file(instance_id)
+    if file_token:
+        logger.debug(f"using per-instance token file for '{instance_id}'")
+        return file_token
+
+    cfg_token = ""
+    if config is not None:
+        cfg_token = (config.get("MCO_AGENT_TOKEN") or "").strip()
+    if cfg_token:
+        return cfg_token
+
+    local = ""
+    if config is not None:
+        local = (config.get("MCO_LOCAL_TOKEN") or "").strip()
+    local = local or (os.environ.get("MCO_LOCAL_TOKEN") or "").strip()
+
+    if local and not (strict and instance_id):
+        return local
+
+    if strict:
+        raise WakerTokenError(
+            f"No agent token for instance '{instance_id or '(unset)'}'.\n"
+            f"  Looked for, in order:\n"
+            f"    1. --token\n"
+            f"    2. MCO_AGENT_TOKEN in the environment\n"
+            f"    3. {agent_token_path(instance_id) if instance_id else '~/.mco/tokens/<instance>.token'}\n"
+            f"    4. MCO_AGENT_TOKEN in ~/.mco/.env\n"
+            + (
+                "  MCO_LOCAL_TOKEN was found but is the operator token - it cannot\n"
+                "  authenticate as a named agent, so it was not used.\n"
+                if local else ""
+            )
+            + f"  Fix: mco reset-token {instance_id or '<instance>'}  then save it to\n"
+            f"       {agent_token_path(instance_id) if instance_id else '~/.mco/tokens/<instance>.token'}"
+        )
+    return local
 
 
 def websocket_url_from_gateway(gateway_url: Optional[str]) -> str:

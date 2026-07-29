@@ -141,3 +141,110 @@ async def test_nonzero_exec_does_not_kill_waker(tmp_path):
 
     assert marker.read_text() == "x"
     assert client.calls == 2
+
+
+# ── token resolution (the multi-agent identity bug) ───────────────────────────
+
+import mco.waker as waker_mod
+from mco.waker import (
+    WakerTokenError,
+    agent_token_path,
+    read_agent_token_file,
+    resolve_agent_token,
+)
+
+
+class _Cfg:
+    def __init__(self, **values):
+        self._v = values
+
+    def get(self, key, default=None):
+        return self._v.get(key, default)
+
+
+def _token_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    return tmp_path
+
+
+def _clear_env(monkeypatch):
+    monkeypatch.delenv("MCO_AGENT_TOKEN", raising=False)
+    monkeypatch.delenv("MCO_LOCAL_TOKEN", raising=False)
+
+
+def test_explicit_token_wins(tmp_path, monkeypatch):
+    _clear_env(monkeypatch); _token_dir(tmp_path, monkeypatch)
+    (tmp_path / "codex-beast.token").write_text("from-file", encoding="utf-8")
+    monkeypatch.setenv("MCO_AGENT_TOKEN", "from-env")
+    assert resolve_agent_token("codex-beast", explicit="explicit") == "explicit"
+
+
+def test_env_beats_the_token_file(tmp_path, monkeypatch):
+    _clear_env(monkeypatch); _token_dir(tmp_path, monkeypatch)
+    (tmp_path / "codex-beast.token").write_text("from-file", encoding="utf-8")
+    monkeypatch.setenv("MCO_AGENT_TOKEN", "from-env")
+    assert resolve_agent_token("codex-beast") == "from-env"
+
+
+def test_per_instance_token_file_is_actually_read(tmp_path, monkeypatch):
+    """The regression this whole change exists for.
+
+    `~/.mco/tokens/<instance>.token` was a documented convention that NOTHING
+    consumed - operators wrote tokens there and wakers ignored them.
+    """
+    _clear_env(monkeypatch); _token_dir(tmp_path, monkeypatch)
+    (tmp_path / "codex-beast.token").write_text("  file-token\n", encoding="utf-8")
+    assert resolve_agent_token("codex-beast") == "file-token"
+
+
+def test_each_instance_gets_its_own_identity(tmp_path, monkeypatch):
+    # One machine, several agents: a single global MCO_AGENT_TOKEN cannot
+    # express more than one identity.
+    _clear_env(monkeypatch); _token_dir(tmp_path, monkeypatch)
+    (tmp_path / "codex-beast.token").write_text("codex-tok", encoding="utf-8")
+    (tmp_path / "grok-beast.token").write_text("grok-tok", encoding="utf-8")
+    assert resolve_agent_token("codex-beast") == "codex-tok"
+    assert resolve_agent_token("grok-beast") == "grok-tok"
+
+
+def test_operator_token_is_refused_for_a_named_agent(tmp_path, monkeypatch):
+    """The silent failure that killed the fleet for days.
+
+    MCO_LOCAL_TOKEN is the operator token; it cannot authenticate as a named
+    agent. Previously the waker used it anyway and died with a generic
+    "Authentication failed" from the far end of a WebSocket.
+    """
+    _clear_env(monkeypatch); _token_dir(tmp_path, monkeypatch)
+    cfg = _Cfg(MCO_LOCAL_TOKEN="operator-token")
+    with pytest.raises(WakerTokenError) as exc:
+        resolve_agent_token("codex-beast", config=cfg)
+    message = str(exc.value)
+    assert "codex-beast" in message
+    assert "operator token" in message
+    assert "mco reset-token" in message   # tells you how to fix it
+
+
+def test_local_token_still_works_for_a_single_agent_host(tmp_path, monkeypatch):
+    # No instance id => single-agent convenience path stays intact.
+    _clear_env(monkeypatch); _token_dir(tmp_path, monkeypatch)
+    cfg = _Cfg(MCO_LOCAL_TOKEN="operator-token")
+    assert resolve_agent_token("", config=cfg) == "operator-token"
+
+
+def test_config_token_used_when_no_file_exists(tmp_path, monkeypatch):
+    _clear_env(monkeypatch); _token_dir(tmp_path, monkeypatch)
+    cfg = _Cfg(MCO_AGENT_TOKEN="cfg-token")
+    assert resolve_agent_token("codex-beast", config=cfg) == "cfg-token"
+
+
+def test_missing_or_empty_token_file_is_not_a_crash(tmp_path, monkeypatch):
+    _token_dir(tmp_path, monkeypatch)
+    assert read_agent_token_file("nope") is None
+    (tmp_path / "blank.token").write_text("   \n", encoding="utf-8")
+    assert read_agent_token_file("blank") is None
+    assert read_agent_token_file("") is None
+
+
+def test_token_path_is_per_instance(tmp_path, monkeypatch):
+    _token_dir(tmp_path, monkeypatch)
+    assert agent_token_path("codex-beast").name == "codex-beast.token"
