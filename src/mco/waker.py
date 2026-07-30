@@ -98,8 +98,11 @@ def read_agent_token_file(instance_id: str) -> Optional[str]:
         return None
     try:
         path = agent_token_path(instance_id)
-    except UnsafeInstanceId as exc:
-        logger.warning(f"refusing to read a token for an unsafe instance id: {exc}")
+    except UnsafeInstanceId:
+        # The rejected value is not echoed: it arrives from config/env on the
+        # same path as credentials, and if it IS an injection attempt, writing
+        # it verbatim into a log is how log-injection gets a second life.
+        logger.warning("refusing to read a token file for a rejected instance id")
         return None
     try:
         token = path.read_text(encoding="utf-8").strip()
@@ -145,7 +148,12 @@ def resolve_agent_token(
 
     file_token = read_agent_token_file(instance_id)
     if file_token:
-        logger.debug(f"using per-instance token file for '{instance_id}'")
+        # Deliberately not interpolating the instance id: it reaches this
+        # function from the same config/env sources as the credentials
+        # themselves, and static analysis (correctly) treats values on that
+        # path as sensitive. The caller already knows which instance it asked
+        # about, so the interpolation bought nothing.
+        logger.debug("resolved the agent token from the per-instance token file")
         return file_token
 
     cfg_token = ""
