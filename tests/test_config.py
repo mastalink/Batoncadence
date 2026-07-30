@@ -138,3 +138,82 @@ def test_sentinel_in_store_does_not_shadow_real_env_value():
         assert manager.get("SUPABASE_URL") == "https://real.example.co"
         assert manager.get("SUPABASE_KEY") == "real_key_123"
 
+
+
+# ── credentials are encrypted by default ──────────────────────────────────────
+
+from mco.config import SENSITIVE_KEY_MARKERS, is_sensitive_key
+import mco.security as security_mod
+
+
+@pytest.fixture
+def fresh_config(tmp_path, monkeypatch):
+    """A ConfigManager with its own .env and secret store.
+
+    `get_secret_store()` is a process-wide singleton that ignores its
+    store_path once created, so without resetting it every test inherits the
+    previous test's store.
+    """
+    from mco.config import ConfigManager
+
+    def _make(with_store: bool):
+        monkeypatch.setattr(security_mod, "_store", None, raising=False)
+        env = tmp_path / f"{'enc' if with_store else 'plain'}.env"
+        store = tmp_path / f"{'enc' if with_store else 'plain'}.enc"
+        cfg = ConfigManager(env_path=env, store_path=store)
+        if with_store:
+            cfg._store.initialize(b"0" * 32)
+        return cfg, env
+
+    return _make
+
+
+@pytest.mark.parametrize("key", [
+    "SUPABASE_KEY", "SERVICENOW_PASSWORD", "DYNATRACE_API_TOKEN", "MCO_WEBHOOK_SECRET",
+    # Runtime-named secrets can never live in a static set - and these are
+    # exactly what got written to .env in clear text.
+    "LLM_CONN_abc123_API_KEY", "LLM_CONN_xyz_API_KEY",
+    "SOME_PRIVATE_KEY", "CUSTOM_PASSWORD", "X_SECRET",
+])
+def test_credential_shaped_keys_are_sensitive(key):
+    assert is_sensitive_key(key) is True
+
+
+@pytest.mark.parametrize("key", ["OPERATOR_NAME", "MCO_PROFILE", "MCO_GATEWAY_URL", "NTFY_URL"])
+def test_ordinary_settings_are_not_sensitive(key):
+    assert is_sensitive_key(key) is False
+
+
+def test_secret_is_encrypted_without_the_caller_asking(fresh_config):
+    """The regression this change exists for.
+
+    `config.set(key, api_key)` with no `encrypt=` used to write clear text.
+    Every caller had to remember; the LLM connections route did not.
+    """
+    cfg, env = fresh_config(with_store=True)
+    cfg.set("LLM_CONN_abc_API_KEY", "sk-super-secret-value")
+
+    on_disk = env.read_text(encoding="utf-8")
+    assert "sk-super-secret-value" not in on_disk, "credential leaked into .env"
+    assert "encrypted_in_secret_store" in on_disk
+    assert cfg._store.get("LLM_CONN_abc_API_KEY") == "sk-super-secret-value"
+
+
+def test_plaintext_fallback_still_works_when_no_store(fresh_config):
+    """No store? Still installable - the exposure is warned about, not fatal."""
+    cfg, env = fresh_config(with_store=False)
+    cfg.set("LLM_CONN_abc_API_KEY", "sk-plain")
+    assert "sk-plain" in env.read_text(encoding="utf-8")
+
+
+def test_non_secret_values_stay_readable_in_env(fresh_config):
+    cfg, env = fresh_config(with_store=True)
+    cfg.set("OPERATOR_NAME", "joe")
+    assert "OPERATOR_NAME=joe" in env.read_text(encoding="utf-8")
+
+
+def test_encrypt_false_still_forces_plaintext(fresh_config):
+    """Explicit opt-out remains available for callers that need it."""
+    cfg, env = fresh_config(with_store=True)
+    cfg.set("MCO_WEBHOOK_SECRET", "shhh", encrypt=False)
+    assert "shhh" in env.read_text(encoding="utf-8")
