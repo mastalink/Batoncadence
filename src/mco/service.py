@@ -93,7 +93,15 @@ def _serve_argv(host: str, port: int) -> list[str]:
 
 
 def _wake_argv(role: str, exec_command: str, instance: str | None = None, min_interval: float = 10.0) -> list[str]:
-    """Argv that runs the event-driven worker waker in the foreground."""
+    """Argv that runs the event-driven worker waker in the foreground.
+
+    Deliberately carries no `--token`: the waker resolves its own identity from
+    `~/.mco/tokens/<instance>.token` (see `mco.waker.resolve_agent_token`). A
+    secret in argv would be readable by `schtasks /query`, `ps`, and any process
+    listing on the box, and it would go stale the moment the token is rotated -
+    the service definition would then need rewriting, which is exactly the kind
+    of two-place update that strands fleets.
+    """
     argv = [
         sys.executable,
         "-m",
