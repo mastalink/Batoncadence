@@ -9,7 +9,7 @@ argv without touching the real host service manager.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 import re
 import shlex
@@ -21,6 +21,13 @@ from typing import Iterable
 from xml.sax.saxutils import escape
 
 SERVICE_NAME = "BatonCadence-gateway"
+
+# Installs from before the name was standardised registered the gateway task as
+# "BatonCadenceGateway". Those machines still exist, and on them every
+# `mco restart` / `service restart|status|logs|uninstall` silently addressed a
+# task that does not exist - reporting "cannot find the file specified" while a
+# perfectly healthy gateway ran under the old name. Resolve the legacy name too.
+LEGACY_GATEWAY_NAMES = ("BatonCadenceGateway",)
 SYSTEMD_UNIT_NAME = "batoncadence-gateway.service"
 LAUNCHD_LABEL = "com.batoncadence.gateway"
 WINDOWS_RESTART_INTERVAL = "PT1M"
@@ -105,8 +112,28 @@ def _wake_argv(role: str, exec_command: str, instance: str | None = None, min_in
 
 
 def _poll_argv(exec_command: str) -> list[str]:
-    """Argv that runs the configured worker wrapper once."""
-    return shlex.split(exec_command, posix=os.name != "nt")
+    """Argv that runs the configured worker wrapper once.
+
+    On Windows, a poll worker is usually a `.cmd`/`.bat`, and Task Scheduler
+    always allocates a console for one - so every poll interval flashes a
+    black window across whatever the operator is doing. A worker that runs
+    every 30 minutes, forever, makes that a permanent visual tic on the
+    machine.
+
+    Routing through `conhost.exe --headless` gives the batch file its console
+    without ever showing it. The scripts themselves already hide their inner
+    PowerShell; this covers the outer window Task Scheduler creates, which the
+    script cannot suppress from inside itself.
+    """
+    argv = shlex.split(exec_command, posix=os.name != "nt")
+    if os.name == "nt" and argv and _is_console_script(argv[0]):
+        return ["conhost.exe", "--headless", *argv]
+    return argv
+
+
+def _is_console_script(path: str) -> bool:
+    """True for the batch-file types Windows opens a console window for."""
+    return path.lower().endswith((".cmd", ".bat"))
 
 
 def _format_interval(value: float) -> str:
@@ -794,9 +821,30 @@ def backend_name() -> str:
     return "systemd --user"
 
 
+def installed_gateway_task_name() -> str:
+    """The gateway's task name as actually registered on this machine.
+
+    Prefers the current name, falls back to a legacy one if that is what is
+    really installed. Without this, service commands on an older install
+    address a task that does not exist.
+    """
+    if os.name != "nt":
+        return SERVICE_NAME
+    installed = {str(r.get("name", "")) for r in list_status()}
+    if SERVICE_NAME in installed:
+        return SERVICE_NAME
+    for legacy in LEGACY_GATEWAY_NAMES:
+        if legacy in installed:
+            return legacy
+    return SERVICE_NAME
+
+
 def _resolve_target(selector: str | None) -> ServiceSpec:
-    if not selector or selector == "gateway" or selector == SERVICE_NAME:
-        return _gateway_spec("127.0.0.1", 18789)
+    if not selector or selector == "gateway" or selector == SERVICE_NAME or selector in LEGACY_GATEWAY_NAMES:
+        spec = _gateway_spec("127.0.0.1", 18789)
+        actual = installed_gateway_task_name()
+        # Keep the spec's identity but address the task that is really there.
+        return spec if actual == SERVICE_NAME else replace(spec, name=actual)
     for record in list_status():
         name = str(record.get("name", ""))
         if _selector_matches_name(selector, name):

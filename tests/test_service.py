@@ -319,3 +319,58 @@ def test_install_dispatch_matches_platform(monkeypatch):
     monkeypatch.setattr(service, "_linux_install", lambda h, p: seen.setdefault("linux", True) and (True, ""))
     service.install("127.0.0.1", 18789)
     assert len(seen) == 1  # exactly one backend was dispatched to
+
+
+# ── service hygiene: hidden poll windows + legacy gateway task name ───────────
+
+def test_windows_poll_argv_hides_the_console_window(monkeypatch):
+    """A poll worker that runs forever must not flash a window every interval.
+
+    Task Scheduler allocates a console for any .cmd/.bat. The script's own
+    inner `-WindowStyle Hidden` cannot suppress the outer window, so the wrap
+    has to happen here.
+    """
+    monkeypatch.setattr(service.os, "name", "nt")
+    argv = service._poll_argv("C:/Users/x/.mco/bin/reviewer-run.cmd")
+    assert argv[0] == "conhost.exe"
+    assert "--headless" in argv
+    assert argv[-1].endswith("reviewer-run.cmd")
+
+
+def test_non_batch_poll_commands_are_left_alone(monkeypatch):
+    monkeypatch.setattr(service.os, "name", "nt")
+    argv = service._poll_argv("python.exe worker.py")
+    assert argv[0] == "python.exe"
+
+
+def test_poll_argv_unchanged_off_windows(monkeypatch):
+    monkeypatch.setattr(service.os, "name", "posix")
+    argv = service._poll_argv("/usr/local/bin/worker.sh --once")
+    assert argv == ["/usr/local/bin/worker.sh", "--once"]
+
+
+def test_legacy_gateway_task_name_is_resolved(monkeypatch):
+    """Older installs registered the gateway as 'BatonCadenceGateway'.
+
+    On those machines every service command addressed a task that did not
+    exist, reporting "cannot find the file specified" while a healthy gateway
+    ran under the old name.
+    """
+    monkeypatch.setattr(service.os, "name", "nt")
+    monkeypatch.setattr(service, "list_status", lambda: [{"name": "BatonCadenceGateway"}])
+    assert service.installed_gateway_task_name() == "BatonCadenceGateway"
+    assert service._resolve_target(None).name == "BatonCadenceGateway"
+    assert service._resolve_target("gateway").name == "BatonCadenceGateway"
+
+
+def test_current_gateway_name_wins_when_both_exist(monkeypatch):
+    monkeypatch.setattr(service.os, "name", "nt")
+    monkeypatch.setattr(service, "list_status",
+                        lambda: [{"name": "BatonCadenceGateway"}, {"name": service.SERVICE_NAME}])
+    assert service.installed_gateway_task_name() == service.SERVICE_NAME
+
+
+def test_gateway_name_defaults_when_nothing_installed(monkeypatch):
+    monkeypatch.setattr(service.os, "name", "nt")
+    monkeypatch.setattr(service, "list_status", lambda: [])
+    assert service.installed_gateway_task_name() == service.SERVICE_NAME
