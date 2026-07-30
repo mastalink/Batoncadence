@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -26,16 +27,80 @@ class WakerTokenError(RuntimeError):
     """Raised when no usable agent token could be resolved for this instance."""
 
 
+# Instance ids are registry identifiers (e.g. "codex-beast"), so a
+# conservative charset is safe and keeps them usable as filenames.
+_SAFE_INSTANCE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+class UnsafeInstanceId(ValueError):
+    """Raised when an instance id could not be used safely as a filename."""
+
+
+def _validate_instance_id(instance_id: str) -> str:
+    """Reject instance ids that would escape the token directory.
+
+    `instance_id` reaches us from `--instance`, `AGENT_INSTANCE_ID`, or a config
+    file, and is interpolated into a filename. Without this, a value like
+    `../../../../etc/passwd` would read an arbitrary file as a bearer token
+    (CWE-22). `workflows.py` guards the same class of problem on its own input.
+    """
+    candidate = (instance_id or "").strip()
+    if not candidate:
+        raise UnsafeInstanceId("instance id is empty")
+    # Reject traversal and separators outright rather than trying to sanitise
+    # them away - a legitimate instance id never contains these.
+    if not _SAFE_INSTANCE_ID.match(candidate) or candidate in {".", ".."}:
+        raise UnsafeInstanceId(
+            f"instance id {instance_id!r} is not a valid identifier "
+            "(letters, digits, dot, dash and underscore only)"
+        )
+    return candidate
+
+
 def agent_token_path(instance_id: str) -> Path:
-    """Where this instance's bearer token is stored."""
-    return AGENT_TOKEN_DIR / f"{instance_id}.token"
+    """Where this instance's bearer token is stored.
+
+    Raises UnsafeInstanceId for anything that would resolve outside
+    AGENT_TOKEN_DIR.
+    """
+    safe = _validate_instance_id(instance_id)
+    path = (AGENT_TOKEN_DIR / f"{safe}.token").resolve()
+    # Belt and braces: confirm containment after resolution, so a symlinked or
+    # otherwise surprising token dir cannot widen the blast radius either.
+    token_dir = AGENT_TOKEN_DIR.resolve()
+    if token_dir not in path.parents:
+        raise UnsafeInstanceId(
+            f"resolved token path for {instance_id!r} escapes {token_dir}"
+        )
+    return path
+
+
+def describe_token_path(instance_id: str) -> str:
+    """A displayable token path for diagnostics; never raises.
+
+    Error messages must not blow up while being built, so an id that fails
+    validation is described rather than resolved.
+    """
+    try:
+        return str(agent_token_path(instance_id))
+    except UnsafeInstanceId:
+        return f"~/.mco/tokens/<invalid instance id {instance_id!r}>"
 
 
 def read_agent_token_file(instance_id: str) -> Optional[str]:
-    """Read `~/.mco/tokens/<instance>.token`, or None if absent/empty/unreadable."""
+    """Read `~/.mco/tokens/<instance>.token`, or None if absent/empty/unreadable.
+
+    A rejected instance id is treated as "no token here" rather than an
+    exception: this is one probe in a resolution chain, and the caller reports
+    the overall failure with full context.
+    """
     if not instance_id:
         return None
-    path = agent_token_path(instance_id)
+    try:
+        path = agent_token_path(instance_id)
+    except UnsafeInstanceId as exc:
+        logger.warning(f"refusing to read a token for an unsafe instance id: {exc}")
+        return None
     try:
         token = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
@@ -103,7 +168,7 @@ def resolve_agent_token(
             f"  Looked for, in order:\n"
             f"    1. --token\n"
             f"    2. MCO_AGENT_TOKEN in the environment\n"
-            f"    3. {agent_token_path(instance_id) if instance_id else '~/.mco/tokens/<instance>.token'}\n"
+            f"    3. {describe_token_path(instance_id) if instance_id else '~/.mco/tokens/<instance>.token'}\n"
             f"    4. MCO_AGENT_TOKEN in ~/.mco/.env\n"
             + (
                 "  MCO_LOCAL_TOKEN was found but is the operator token - it cannot\n"
@@ -111,7 +176,7 @@ def resolve_agent_token(
                 if local else ""
             )
             + f"  Fix: mco reset-token {instance_id or '<instance>'}  then save it to\n"
-            f"       {agent_token_path(instance_id) if instance_id else '~/.mco/tokens/<instance>.token'}"
+            f"       {describe_token_path(instance_id) if instance_id else '~/.mco/tokens/<instance>.token'}"
         )
     return local
 

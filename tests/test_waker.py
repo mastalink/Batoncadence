@@ -248,3 +248,57 @@ def test_missing_or_empty_token_file_is_not_a_crash(tmp_path, monkeypatch):
 def test_token_path_is_per_instance(tmp_path, monkeypatch):
     _token_dir(tmp_path, monkeypatch)
     assert agent_token_path("codex-beast").name == "codex-beast.token"
+
+
+# ── path traversal in instance ids (CWE-22) ───────────────────────────────────
+
+from mco.waker import UnsafeInstanceId, describe_token_path
+
+
+@pytest.mark.parametrize("evil", [
+    "../../../../etc/passwd",
+    r"..\..\..\windows\win.ini",
+    "a/b",
+    "a\b",
+    "..",
+    ".",
+    "with space",
+    "semi;colon",
+    "",
+    "   ",
+])
+def test_token_path_rejects_traversal_and_separators(evil, tmp_path, monkeypatch):
+    """instance_id is interpolated into a filename and comes from --instance,
+    AGENT_INSTANCE_ID, or a config file. Unvalidated, it reads arbitrary files."""
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    with pytest.raises(UnsafeInstanceId):
+        agent_token_path(evil)
+
+
+@pytest.mark.parametrize("ok", ["codex-beast", "grok_beast", "agent.1", "A1"])
+def test_token_path_accepts_real_instance_ids(ok, tmp_path, monkeypatch):
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    path = agent_token_path(ok)
+    assert path.name == f"{ok}.token"
+    assert tmp_path.resolve() in path.parents
+
+
+def test_resolved_path_stays_inside_the_token_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    assert tmp_path.resolve() in agent_token_path("codex-beast").parents
+
+
+def test_reading_an_unsafe_id_returns_none_rather_than_raising(tmp_path, monkeypatch):
+    # One probe in a resolution chain: a bad id means "no token here".
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    assert read_agent_token_file("../../../../etc/passwd") is None
+
+
+def test_error_message_construction_never_raises(tmp_path, monkeypatch):
+    """The diagnostic must not blow up while being built for a bad id."""
+    _clear_env(monkeypatch)
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    assert "invalid instance id" in describe_token_path("../evil")
+    with pytest.raises(WakerTokenError) as exc:
+        resolve_agent_token("../evil", config=_Cfg(MCO_LOCAL_TOKEN="op"))
+    assert "../evil" in str(exc.value)
