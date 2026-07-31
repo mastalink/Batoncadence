@@ -92,6 +92,44 @@ created, requires explicit confirmation, then submits through
 That separation is deliberate. A workflow can be reviewed, versioned, or handed
 to another operator without creating work by accident.
 
+## Inline in an MCP host
+
+With the MCP Python SDK 2.x, call `mco_flow_control` and a host that supports
+MCP Apps can render this same canvas inside the conversation. The server
+publishes it as `ui://mco/flow-control.html` with the official
+`text/html;profile=mcp-app` media type. SDK 1.x has no Apps extension, so it
+keeps the existing 21-tool stdio server and the standalone `/flow` page.
+
+The iframe does not receive or ask for a bearer token. It uses the MCP Apps
+`postMessage` bridge to call `mco_jobs`, `mco_audit`, the governance tools, and
+`mco_run_workflow`. The host sends those calls over the already-authenticated
+MCP connection; for stdio, that connection still gets its identity from
+`MCO_AGENT_TOKEN`, `AGENT_ROLE`, and `AGENT_INSTANCE_ID`. If an embedded host
+does not provide the server-tool bridge, live reads and controls fail closed.
+Local workflow design and YAML export still work, and no token prompt appears.
+
+The app resource requests a CSP whose `connectDomains` contains only the origin
+of `MCO_GATEWAY_URL`. There are still no remote scripts, fonts, styles, or
+images. CSP metadata is a restriction a conforming host enforces when it builds
+the sandbox; it is not a network filter implemented by the Python server.
+
+### What app-only visibility does — and does not — guarantee
+
+MCP Apps defines `visibility: ["app"]` so a conforming host can keep a tool out
+of the model's tool list while allowing the iframe to call it. The important
+boundary is that enforcement belongs to the host:
+
+- MCP Python SDK 2.0.0 includes an app-only tool in the server's `tools/list`.
+- The same server accepts a direct `tools/call` for that tool.
+- The Apps specification requires the host to hide it from the model and police
+  calls coming from the iframe.
+
+That is useful host policy, but it is not server-side protocol enforcement. Flow
+Control therefore does not label `mco_approve`, `mco_reject`, or `mco_cancel`
+app-only and does not claim that the metadata makes self-approval structurally
+impossible. The gateway's role/scope checks remain the authority for every
+mutation.
+
 ## Origin — "what created this?"
 
 If a job came from the scheduler, the panel shows its stamp:
@@ -111,8 +149,9 @@ See [SCHEDULING.md](SCHEDULING.md) for where those stamps come from.
 - **Self-contained** — one HTML file, no build step, no CDN, no `node_modules`.
   It renders identically on an air-gapped install. (A test asserts no remote
   references creep in.)
-- **Auth is the same model as the console** — the bearer token lives in browser
-  `localStorage`; the page itself is public, every API call is not.
+- **Standalone auth is the same model as the console** — at `/flow`, the bearer
+  token lives in browser `localStorage`; the page itself is public, every API
+  call is not. The MCP App path uses the host bridge described above instead.
 - Polls every 5s. Toggle **active only** to hide finished work.
 - `Esc` closes the panel.
 - Design mode is browser-local until export or explicit execution. Moving a card

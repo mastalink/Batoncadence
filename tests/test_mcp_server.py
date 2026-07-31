@@ -53,6 +53,10 @@ class FakeGatewayClient:
         self.calls.append(("events", task_id))
         return self._responses.get("events", [])
 
+    def run_workflow(self, yaml: str):
+        self.calls.append(("run_workflow", yaml))
+        return self._responses.get("run_workflow", {"success": True})
+
     def agents(self):
         self.calls.append(("agents",))
         return self._responses.get("agents", [])
@@ -179,6 +183,14 @@ def test_mco_audit_delegates(monkeypatch):
     assert fake.calls == [("events", "j1")]
 
 
+def test_mco_run_workflow_delegates_yaml(monkeypatch):
+    from mco.mcp_server import mco_run_workflow
+    fake = _fake(monkeypatch, run_workflow={"success": True, "jobs": {"build": "j1"}})
+    result = mco_run_workflow("name: release\nsteps: []\n")
+    assert result["success"] is True
+    assert fake.calls == [("run_workflow", "name: release\nsteps: []\n")]
+
+
 # ── SDK major compatibility (mcp 1.x and 2.x) ─────────────────────────────────
 
 def test_server_constructs_on_whichever_sdk_major_is_installed():
@@ -217,3 +229,70 @@ def test_tool_schemas_mark_the_right_args_required():
 
     assert schema(tools["mco_lease"]).get("required") == ["task_id"]
     assert set(schema(tools["mco_complete"]).get("required", [])) == {"task_id", "output"}
+
+
+def test_mcp_1_keeps_the_existing_21_tool_surface():
+    """Apps is additive: an mcp 1.x install keeps every pre-Apps tool."""
+    import asyncio
+    from mco import mcp_server
+
+    if mcp_server._MCP_APPS_AVAILABLE:
+        return
+    names = {tool.name for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    assert len(names) == 21
+    assert "mco_flow_control" not in names
+    assert "mco_run_workflow" not in names
+
+
+def test_mcp_2_registers_flow_app_resource_with_gateway_only_csp():
+    import asyncio
+    from mco import mcp_server
+
+    if not mcp_server._MCP_APPS_AVAILABLE:
+        return
+
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    flow_meta = tools["mco_flow_control"].meta["ui"]
+    assert flow_meta == {
+        "resourceUri": mcp_server._FLOW_APP_URI,
+        "visibility": ["model"],
+    }
+    assert "mco_run_workflow" in tools
+
+    resources = asyncio.run(mcp_server.mcp.list_resources())
+    flow = next(resource for resource in resources if str(resource.uri) == mcp_server._FLOW_APP_URI)
+    assert flow.mime_type == "text/html;profile=mcp-app"
+    assert flow.meta["ui"]["csp"]["connectDomains"] == [mcp_server._gateway_origin()]
+    assert flow.meta["ui"]["prefersBorder"] is True
+
+
+def test_mcp_2_app_visibility_is_metadata_not_server_enforcement():
+    """Pin the security boundary discovered against mcp 2.0.0.
+
+    The server advertises app-only metadata but neither filters tools/list nor
+    rejects a direct tools/call. A conforming host must enforce visibility.
+    """
+    import asyncio
+    import pytest
+
+    pytest.importorskip("mcp.server.apps")
+    from mcp.server.apps import Apps
+    from mcp.server.mcpserver import MCPServer
+
+    apps = Apps()
+
+    def app_only() -> str:
+        return "called"
+
+    apps.tool(
+        resource_uri="ui://visibility/probe.html",
+        visibility=["app"],
+    )(app_only)
+    apps.add_html_resource("ui://visibility/probe.html", "<!doctype html><title>probe</title>")
+    server = MCPServer("visibility-probe", extensions=[apps])
+
+    listed = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+    assert listed["app_only"].meta["ui"]["visibility"] == ["app"]
+    result = asyncio.run(server.call_tool("app_only", {}))
+    assert result.is_error is False
+    assert result.content[0].text == "called"

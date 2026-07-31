@@ -290,13 +290,123 @@ let draftSelected = null, stepCounter = 1, nodeDrag = null, connectionDraft = nu
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const $ = id => document.getElementById(id);
 
+/* ── MCP Apps bridge ---------------------------------------------------------
+   The same file is served two ways:
+   - /flow is a standalone gateway page and uses its existing REST/token path.
+   - ui://mco/flow-control.html is a sandboxed MCP App. It calls server tools
+     through the host's postMessage bridge, so the iframe never receives,
+     stores, or prompts for a bearer token.
+
+   This is the small wire-level subset the page needs; keeping it inline
+   preserves the no-CDN/no-node_modules guarantee. */
+const mcpBridge = {
+  embedded: window.parent !== window,
+  state: window.parent !== window ? "connecting" : "standalone",
+  nextId: 1,
+  pending: new Map(),
+
+  onMessage(event) {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== "2.0" || message.id === undefined) return;
+    const waiter = mcpBridge.pending.get(message.id);
+    if (!waiter) return;
+    mcpBridge.pending.delete(message.id);
+    clearTimeout(waiter.timer);
+    if (message.error) waiter.reject(new Error(message.error.message || "MCP host request failed"));
+    else waiter.resolve(message.result);
+  },
+
+  request(method, params, timeoutMs = 5000) {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error("MCP host did not answer " + method));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+    });
+  },
+
+  notify(method, params = {}) {
+    window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*");
+  },
+
+  async connect() {
+    if (!this.embedded) return false;
+    window.addEventListener("message", this.onMessage);
+    try {
+      const initialized = await this.request("ui/initialize", {
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "BatonCadence Flow Control", version: "1.0.0" },
+        appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+      }, 3000);
+      if (!initialized?.hostCapabilities?.serverTools) {
+        throw new Error("This MCP host does not proxy server tools to apps");
+      }
+      this.state = "connected";
+      this.notify("ui/notifications/initialized");
+      return true;
+    } catch (error) {
+      // An embedded page must never fall through to the standalone token
+      // prompt. It remains useful for local workflow design/export, while live
+      // reads and mutations fail closed with a visible status message.
+      this.state = "unavailable";
+      this.error = error;
+      return false;
+    }
+  },
+
+  async callTool(name, args = {}) {
+    const result = await this.request("tools/call", { name, arguments: args }, 30000);
+    const text = (result?.content || []).find(item => item.type === "text")?.text;
+    if (result?.isError) throw new Error(text || `${name} failed`);
+    if (result?.structuredContent !== undefined) {
+      const structured = result.structuredContent;
+      if (structured && Object.keys(structured).length === 1 && "result" in structured) {
+        return structured.result;
+      }
+      return structured;
+    }
+    if (text === undefined) return null;
+    try { return JSON.parse(text); } catch { return text; }
+  },
+};
+
 function token() {
   let t = localStorage.getItem("mco_token");
   if (!t) { t = prompt("Paste your BatonCadence access token\n(Settings → Connection in the console)"); if (t) localStorage.setItem("mco_token", t.trim()); }
   return t;
 }
 
+async function mcpApi(path, opts = {}) {
+  const method = (opts.method || "GET").toUpperCase();
+  const body = opts.body ? JSON.parse(opts.body) : {};
+  let match;
+  if (method === "GET" && path === "/api/jobs") {
+    return mcpBridge.callTool("mco_jobs", { include_archived: false });
+  }
+  if (method === "GET" && (match = path.match(/^\/api\/jobs\/([^/]+)\/events$/))) {
+    return mcpBridge.callTool("mco_audit", { task_id: match[1] });
+  }
+  if (method === "POST" && (match = path.match(/^\/api\/jobs\/([^/]+)\/(approve|reject|retry|cancel)$/))) {
+    const [, task_id, action] = match;
+    const args = { task_id };
+    if (action === "reject" || action === "cancel") args.reason = body.reason || "";
+    return mcpBridge.callTool(`mco_${action}`, args);
+  }
+  if (method === "POST" && path === "/api/workflows") {
+    return mcpBridge.callTool("mco_run_workflow", { yaml: body.yaml || "" });
+  }
+  throw new Error(`MCP App route is not bridged: ${method} ${path}`);
+}
+
 async function api(path, opts = {}) {
+  if (mcpBridge.state === "connected") return mcpApi(path, opts);
+  if (mcpBridge.state !== "standalone") {
+    throw new Error(mcpBridge.error?.message || "MCP host bridge unavailable — live controls are read-only");
+  }
   const res = await fetch(path, {
     ...opts,
     headers: { "Authorization": "Bearer " + (token() || ""), "Content-Type": "application/json", ...(opts.headers || {}) },
@@ -1095,7 +1205,10 @@ $("mode-live").onclick = () => setMode("live");
 $("mode-design").onclick = () => setMode("design");
 $("refresh").onclick = load;
 $("only-active").onchange = render;
-$("settings").onclick = () => { localStorage.removeItem("mco_token"); token(); load(); };
+$("settings").onclick = () => {
+  if (mcpBridge.embedded) return;
+  localStorage.removeItem("mco_token"); token(); load();
+};
 $("a-approve").onclick = () => act("approve");
 $("a-reject").onclick = () => act("reject");
 $("a-retry").onclick = () => act("retry");
@@ -1107,8 +1220,19 @@ document.addEventListener("keydown", e => {
   else { selected = null; $("pane").classList.add("hidden"); render(); }
 });
 
-load();
-timer = setInterval(load, 5000);
+async function start() {
+  const connected = await mcpBridge.connect();
+  if (mcpBridge.embedded) {
+    $("settings").hidden = true;
+    if (!connected) {
+      $("status").textContent = mcpBridge.error?.message || "MCP host bridge unavailable";
+      $("pulse").classList.add("stale");
+    }
+  }
+  await load();
+  timer = setInterval(load, 5000);
+}
+start();
 </script>
 </body>
 </html>

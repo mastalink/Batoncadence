@@ -24,6 +24,8 @@ class Recorder:
             return httpx.Response(200, json={"success": True})
         if path == "/api/jobs" and request.method == "POST":
             return httpx.Response(200, json={"success": True, "job": {"id": "j2"}})
+        if path == "/api/workflows" and request.method == "POST":
+            return httpx.Response(200, json={"success": True, "jobs": {"build": "j3"}})
         if path == "/api/agents":
             return httpx.Response(200, json=[{"instance_id": "coding-beast-codex", "role": "codex", "status": "online"}])
         if path == "/api/settings" and request.method == "GET":
@@ -100,6 +102,15 @@ def test_agents_lists():
     rec = Recorder()
     agents = _client(rec).agents()
     assert agents[0]["role"] == "codex"
+
+
+def test_run_workflow_posts_yaml():
+    rec = Recorder()
+    result = _client(rec).run_workflow("name: release\nsteps: []\n")
+    assert result == {"success": True, "jobs": {"build": "j3"}}
+    assert rec.last.method == "POST"
+    assert rec.last.url.path == "/api/workflows"
+    assert json.loads(rec.last.content) == {"yaml": "name: release\nsteps: []\n"}
 
 
 def test_settings_get_and_put():

@@ -8,7 +8,9 @@ scheduler instead of running a `mco listen` daemon. Identity comes from env
 IMPORTANT: stdio is the MCP transport — never print to stdout here.
 """
 
+import os
 from typing import List
+from urllib.parse import urlsplit
 
 try:
     # mcp >= 2.0 (the 2026-07-28 spec): FastMCP was replaced by MCPServer.
@@ -17,13 +19,69 @@ except ImportError:  # pragma: no cover - depends on the installed SDK major
     # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
+try:
+    # MCP Apps is a 2.x extension. Keeping this import independent from the
+    # server-class shim is deliberate: mcp 1.x must retain its plain 21-tool
+    # stdio surface without importing or emulating any Apps types.
+    from mcp.server.apps import Apps, ResourceCsp
+except ImportError:  # pragma: no cover - exercised by the primary mcp 1.x venv
+    Apps = ResourceCsp = None
+
 from mco.orchestrator.client import GatewayClient
+
+_FLOW_APP_URI = "ui://mco/flow-control.html"
+_MCP_APPS_AVAILABLE = Apps is not None
+
+
+def _gateway_origin() -> str:
+    """Return the configured gateway's origin for MCP Apps CSP metadata."""
+    configured = os.environ.get("MCO_GATEWAY_URL") or "http://127.0.0.1:18789"
+    parsed = urlsplit(configured)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+_apps = Apps() if Apps is not None else None
+
+if _apps is not None:
+    from mco.console import get_flow_html
+
+    @_apps.tool(
+        resource_uri=_FLOW_APP_URI,
+        visibility=["model"],
+        description="Open Flow Control, the live governed job-dependency canvas.",
+    )
+    def mco_flow_control() -> str:
+        """Open the inline Flow Control canvas.
+
+        The canvas reads and mutates the board through this MCP connection, so
+        it never asks the iframe for a bearer token. Text-only clients still get
+        a useful answer instead of an empty UI placeholder.
+        """
+        return (
+            "Flow Control is ready. It shows the live job dependency graph, "
+            "approval gates, and immutable audit trail."
+        )
+
+    gateway_origin = _gateway_origin()
+    _apps.add_html_resource(
+        _FLOW_APP_URI,
+        get_flow_html(),
+        name="mco-flow-control",
+        title="Flow Control",
+        description="Live governed job graph and workflow design canvas.",
+        csp=ResourceCsp(connect_domains=[gateway_origin] if gateway_origin else []),
+        prefers_border=True,
+    )
 
 # Both classes take the server name positionally and expose .tool()/.run(), so
 # every tool below is written once and works on either SDK major. Verified
 # against mcp 2.0.0: all 21 tools register and their input schemas (including
-# required-vs-defaulted args) come out identical.
-mcp = _Server("mco")
+# required-vs-defaulted args) come out identical. MCP 2.x adds the optional
+# mco_flow_control Apps tool; mcp 1.x constructs the same 21-tool server as
+# before.
+mcp = _Server("mco", extensions=[_apps]) if _apps is not None else _Server("mco")
 
 
 def _client() -> GatewayClient:
@@ -209,6 +267,23 @@ def mco_platform_action(name: str, action: str, params: dict = None) -> dict:
     servicenow create_incident / resolve_incident, dynatrace add_comment /
     close_problem). Requires an approver-role token."""
     return _client().platform_action(name, action, params or {})
+
+
+def mco_run_workflow(yaml: str) -> dict:
+    """Validate and submit workflow YAML, creating its governed job DAG.
+
+    Flow Control calls this through the MCP host after an explicit operator
+    confirmation. The gateway remains the authority for schema validation,
+    authorization, and job creation.
+    """
+    return _client().run_workflow(yaml)
+
+
+if _MCP_APPS_AVAILABLE:
+    # The standalone Flow page already submits over REST. This extra bridge
+    # tool only exists where an MCP App can use it, leaving the mcp 1.x surface
+    # at the same 21 tools it had before Apps existed.
+    mcp.tool()(mco_run_workflow)
 
 
 def run() -> None:

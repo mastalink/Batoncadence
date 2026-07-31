@@ -697,6 +697,47 @@ def restart(
     start(host=host, port=port)
 
 
+def _port_is_open(base_url: str, timeout: float = 2.0) -> bool:
+    """Can we open a TCP connection to this base URL's host:port?"""
+    import socket
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+@app.command("gui")
+def open_gui(
+    flow: bool = typer.Option(False, "--flow", help="Open Flow Control (the live job-dependency canvas)."),
+    dashboard: bool = typer.Option(False, "--dashboard", help="Open the minimal dashboard instead of the full console."),
+    print_only: bool = typer.Option(False, "--print", help="Print the URL instead of opening a browser."),
+):
+    """Open the BatonCadence console in your browser."""
+    import webbrowser
+    config = get_config()
+    base = (config.get("MCO_GATEWAY_URL") or "http://127.0.0.1:18789").rstrip("/")
+    page = "flow" if flow else ("dashboard" if dashboard else "console")
+    url = f"{base}/{page}"
+
+    if print_only:
+        console.print(url)
+        return
+    if not _port_is_open(base):
+        console.print(f"[yellow]Nothing is listening at {base}.[/yellow]")
+        console.print("[dim]Start it with:[/dim] [bold]mco start[/bold]  [dim](or `mco serve` in the foreground)[/dim]")
+        console.print(f"[dim]The console will be at:[/dim] {url}")
+        raise typer.Exit(code=1)
+    if webbrowser.open(url):
+        console.print(f"[green][OK][/green] Opened {url}")
+    else:
+        console.print(f"[yellow]Could not open a browser.[/yellow] Visit: {url}")
+
+
 service_app = typer.Typer(help="Run BatonCadence processes as boot-persistent OS services.")
 app.add_typer(service_app, name="service")
 

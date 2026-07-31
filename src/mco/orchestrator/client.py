@@ -185,6 +185,13 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
+    def run_workflow(self, yaml: str) -> dict:
+        """Validate and submit workflow YAML through the gateway."""
+        with self._client() as c:
+            r = c.post("/api/workflows", json={"yaml": yaml})
+            r.raise_for_status()
+            return r.json()
+
     def recall(self, query: str = "", tags: Optional[List[str]] = None, limit: int = 5) -> List[dict]:
         """Recall the most relevant Drumline shared-context entries."""
         params: dict = {"query": query, "role": self.role, "limit": limit}

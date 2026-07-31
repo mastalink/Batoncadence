@@ -76,6 +76,24 @@ def test_flow_html_exposes_governance_actions():
         assert f"/{verb}" in html or f'"{verb}"' in html
 
 
+def test_flow_html_uses_mcp_host_bridge_without_exposing_a_token():
+    from mco.console import get_flow_html
+    html = get_flow_html()
+    assert 'request("ui/initialize"' in html
+    assert 'request("tools/call"' in html
+    assert 'notify("ui/notifications/initialized")' in html
+    for tool in ("mco_jobs", "mco_audit", "mco_run_workflow"):
+        assert tool in html
+    assert 'mcpBridge.callTool(`mco_${action}`' in html
+    assert "(approve|reject|retry|cancel)" in html
+    # Embedded failure is fail-closed and occurs before the standalone fetch
+    # path, so an MCP iframe never falls through to the localStorage prompt.
+    bridge_branch = html[html.index("async function api"):html.index("const res = await fetch")]
+    assert 'mcpBridge.state === "connected"' in bridge_branch
+    assert 'mcpBridge.state !== "standalone"' in bridge_branch
+    assert "throw new Error" in bridge_branch
+
+
 def test_flow_design_mode_authors_the_runtime_workflow_schema():
     from mco.console import get_flow_html
     html = get_flow_html()
@@ -131,3 +149,13 @@ def test_flow_route_is_registered():
     routes = {getattr(r, "path", None) for r in create_app().routes}
     assert "/flow" in routes
     assert "/console" in routes
+
+
+def test_gui_flow_prints_the_flow_url_without_connecting(monkeypatch):
+    from typer.testing import CliRunner
+    import mco.cli as cli
+
+    monkeypatch.setattr(cli, "get_config", lambda: {"MCO_GATEWAY_URL": "http://127.0.0.1:18790"})
+    result = CliRunner().invoke(cli.app, ["gui", "--flow", "--print"])
+    assert result.exit_code == 0
+    assert "http://127.0.0.1:18790/flow" in result.output
