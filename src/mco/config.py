@@ -36,6 +36,24 @@ SENSITIVE_KEYS = {
     "MCO_WEBHOOK_SECRET",
 }
 
+# Secrets whose names are generated at runtime can never appear in a static
+# set. LLM provider credentials, for instance, are stored per connection as
+# LLM_CONN_<id>_API_KEY. Treat anything that *looks* like a credential as one.
+SENSITIVE_KEY_MARKERS = ("API_KEY", "PASSWORD", "SECRET", "TOKEN", "PRIVATE_KEY")
+
+
+def is_sensitive_key(key: str) -> bool:
+    """Should this configuration key be treated as a credential?
+
+    One predicate, used by both masking and storage. They used to disagree:
+    `get_masked_config` matched on name patterns while `set()` consulted only
+    the static set, so a runtime-named secret such as `LLM_CONN_x_API_KEY` was
+    masked in the UI *and written to .env in clear text* - the code knew it was
+    sensitive enough to hide, but not sensitive enough to encrypt.
+    """
+    name = (key or "").upper()
+    return key in SENSITIVE_KEYS or any(marker in name for marker in SENSITIVE_KEY_MARKERS)
+
 
 # The global config home: works from any directory, any terminal. Lives next
 # to the secret store (secrets.enc) and the embedded database (local.db).
@@ -109,7 +127,7 @@ class ConfigManager:
     def get(self, key: str, default: Any = None) -> Any:
         """Retrieve a configuration value."""
         # Check if the secret store is unlocked and has the key
-        if key in SENSITIVE_KEYS and self._store.is_unlocked:
+        if is_sensitive_key(key) and self._store.is_unlocked:
             secret_val = self._store.get(key)
             # Skip the sentinel so a poisoned store can't mask the real .env value.
             if secret_val is not None and secret_val != "encrypted_in_secret_store":
@@ -117,12 +135,22 @@ class ConfigManager:
 
         return self._cached_config.get(key, default)
 
-    def set(self, key: str, value: str, encrypt: bool = False) -> None:
+    def set(self, key: str, value: str, encrypt: Optional[bool] = None) -> None:
         """Set a configuration parameter.
 
-        If encrypt is True, stores it in the encrypted SecretStore.
-        Otherwise, writes it as a plaintext entry in the local .env.
+        Credentials are encrypted by default. `encrypt=None` (the default)
+        means "encrypt if this looks like a secret and the store can take it";
+        pass True to require encryption, or False to force plaintext.
+
+        Callers previously had to opt in with `encrypt=True`, so any code path
+        that forgot wrote a credential to .env in clear text - which is exactly
+        how LLM provider API keys ended up there. Defaulting the other way
+        makes forgetting safe.
         """
+        sensitive = is_sensitive_key(key)
+        if encrypt is None:
+            encrypt = sensitive and self._store.is_unlocked
+
         if encrypt:
             if not self._store.is_unlocked:
                 raise RuntimeError("Secret store must be unlocked to set encrypted values.")
@@ -130,9 +158,19 @@ class ConfigManager:
             # Remove any plaintext entry in local .env to prevent leaks
             self._update_dotenv_file(key, "encrypted_in_secret_store")
             self._cached_config[key] = "encrypted_in_secret_store"
-        else:
-            self._update_dotenv_file(key, value)
-            self._cached_config[key] = value
+            return
+
+        if sensitive:
+            # Storing a credential in clear text is a real exposure, so say so
+            # rather than doing it silently. Not fatal: an operator who has not
+            # enabled the store still needs a working install.
+            logger.warning(
+                f"Storing {key} in plain text at {self._env_path} - the encrypted "
+                "secret store is not unlocked. Enable it with: "
+                "mco setup --menu -> Security."
+            )
+        self._update_dotenv_file(key, value)
+        self._cached_config[key] = value
 
     def delete(self, key: str) -> None:
         """Delete a configuration parameter."""
@@ -184,7 +222,7 @@ class ConfigManager:
             val = self.get(k)
             if not val:
                 continue
-            if k in SENSITIVE_KEYS or "API_KEY" in k or "PASSWORD" in k or "SECRET" in k:
+            if is_sensitive_key(k):
                 if val == "encrypted_in_secret_store":
                     masked[k] = "[ENCRYPTED]"
                 elif len(val) <= 4:

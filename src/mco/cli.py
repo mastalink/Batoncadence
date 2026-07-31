@@ -1763,8 +1763,16 @@ def list_orgs_cmd():
 
 
 @app.command("reset-token")
-def reset_token_cmd(instance_id: str = typer.Argument(..., help="Instance ID of the agent to rotate.")):
+def reset_token_cmd(
+    instance_id: str = typer.Argument(..., help="Instance ID of the agent to rotate."),
+    save: bool = typer.Option(
+        True, "--save/--no-save",
+        help="Write the new token to ~/.mco/tokens/<instance>.token so this machine's waker picks it up.",
+    ),
+):
     """Rotate an agent's access token. The old token stops working immediately."""
+    from mco.waker import agent_token_path
+
     try:
         res = _gateway_client().reset_token(instance_id)
     except Exception as e:
@@ -1773,12 +1781,34 @@ def reset_token_cmd(instance_id: str = typer.Argument(..., help="Instance ID of 
         raise typer.Exit(code=1)
 
     token = res.get("token", "")
+    saved_note = ""
+    if save and token:
+        # Rotation that doesn't update the consumer is how a fleet ends up
+        # "online" but unable to authenticate - so write it by default.
+        path = agent_token_path(instance_id)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(token, encoding="utf-8")
+            try:
+                os.chmod(path, 0o600)  # best-effort; a no-op on some filesystems
+            except OSError:
+                pass
+            saved_note = f"\n\n[dim]Saved to {path}[/dim]"
+        except OSError as e:
+            saved_note = f"\n\n[yellow]Could not write {path}: {e}[/yellow]"
+
     console.print(Panel.fit(
         f"[bold green][OK] Token rotated for '{instance_id}'.[/bold green]\n\n"
         f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
-        f"[bold white]{token}[/bold white]",
+        f"[bold white]{token}[/bold white]"
+        + saved_note,
         border_style="green"
     ))
+    if save and token:
+        console.print(
+            "[dim]Note: any MCP client config that embeds this token "
+            "(e.g. ~/.codex/config.toml) must be updated separately.[/dim]"
+        )
 
 
 @app.command("deregister")
@@ -1985,20 +2015,19 @@ def wake(
     min_interval: float = typer.Option(10.0, "--min-interval", help="Minimum seconds between spawn starts."),
 ):
     """Wake a local worker command when this agent's inbox has pending jobs."""
-    from mco.waker import Waker, WakerAuthError
+    from mco.waker import Waker, WakerAuthError, WakerTokenError, resolve_agent_token
 
     config = get_config()
     resolved_role = role or config.get("AGENT_ROLE") or os.environ.get("AGENT_ROLE") or ""
     resolved_instance = instance or config.get("AGENT_INSTANCE_ID") or os.environ.get("AGENT_INSTANCE_ID") or ""
     resolved_gateway = gateway or config.get("MCO_GATEWAY_URL") or os.environ.get("MCO_GATEWAY_URL") or None
-    resolved_token = (
-        token
-        or config.get("MCO_AGENT_TOKEN")
-        or os.environ.get("MCO_AGENT_TOKEN")
-        or config.get("MCO_LOCAL_TOKEN")
-        or os.environ.get("MCO_LOCAL_TOKEN")
-        or ""
-    )
+    # Resolves per-instance so several agents can run on one machine; fails
+    # loudly and by name rather than silently borrowing the operator token.
+    try:
+        resolved_token = resolve_agent_token(resolved_instance, explicit=token, config=config)
+    except WakerTokenError as e:
+        console.print(f"[red][ERROR][/red] {e}")
+        raise typer.Exit(code=1)
 
     waker = Waker(
         exec_command=exec_command,

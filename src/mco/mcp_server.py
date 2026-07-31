@@ -10,11 +10,20 @@ IMPORTANT: stdio is the MCP transport — never print to stdout here.
 
 from typing import List
 
-from mcp.server.fastmcp import FastMCP
+try:
+    # mcp >= 2.0 (the 2026-07-28 spec): FastMCP was replaced by MCPServer.
+    from mcp.server.mcpserver import MCPServer as _Server
+except ImportError:  # pragma: no cover - depends on the installed SDK major
+    # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _Server
 
 from mco.orchestrator.client import GatewayClient
 
-mcp = FastMCP("mco")
+# Both classes take the server name positionally and expose .tool()/.run(), so
+# every tool below is written once and works on either SDK major. Verified
+# against mcp 2.0.0: all 21 tools register and their input schemas (including
+# required-vs-defaulted args) come out identical.
+mcp = _Server("mco")
 
 
 def _client() -> GatewayClient:

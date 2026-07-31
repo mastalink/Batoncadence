@@ -185,3 +185,38 @@ poll_interval = 900
     assert "mco fleet apply" in message
     workers = fleet.load_fleet(config)
     assert workers["codex-beast"].mode == "waker"
+
+
+# ── token preflight ───────────────────────────────────────────────────────────
+
+def test_apply_fleet_warns_about_agents_with_no_token(tmp_path, monkeypatch):
+    """A tokenless waker installs fine, then dies on auth - warn up front.
+
+    This is the failure that made a whole fleet read "online" while nothing
+    could actually lease work.
+    """
+    import mco.waker as waker_mod
+    from mco.fleet import missing_agent_tokens, parse_fleet_data
+
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    (tmp_path / "has-token.token").write_text("tok", encoding="utf-8")
+
+    workers = parse_fleet_data({
+        "workers": {
+            "a": {"role": "codex", "instance": "has-token", "mode": "waker", "exec": "x.cmd"},
+            "b": {"role": "grok", "instance": "no-token", "mode": "waker", "exec": "y.cmd"},
+            "c": {"role": "claude", "instance": "off-agent", "mode": "off"},
+        }
+    })
+    assert missing_agent_tokens(workers) == ["no-token"]
+
+
+def test_disabled_workers_are_not_flagged(tmp_path, monkeypatch):
+    import mco.waker as waker_mod
+    from mco.fleet import missing_agent_tokens, parse_fleet_data
+
+    monkeypatch.setattr(waker_mod, "AGENT_TOKEN_DIR", tmp_path)
+    workers = parse_fleet_data({
+        "workers": {"c": {"role": "claude", "instance": "idle", "mode": "off"}}
+    })
+    assert missing_agent_tokens(workers) == []
