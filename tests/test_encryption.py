@@ -122,3 +122,32 @@ def test_atomic_persist_failure_preserves_previous_envelope(monkeypatch, tmp_pat
     assert store_path.read_bytes() == previous
     assert store.get("FIRST") == "kept"
     assert store.get("SECOND") is None
+
+
+# ── the guard itself: tests must never touch the operator's real store ────────
+
+def test_default_store_path_is_redirected_away_from_home():
+    """A default-constructed store must NOT be ~/.mco/secrets.enc during tests.
+
+    This is the file-path half of the isolation that a Credential-Manager-only
+    guard missed - and the reason a full suite run kept orphaning the real
+    store even after the first guard landed.
+    """
+    from pathlib import Path
+    import mco.security as security_mod
+
+    real = Path.home() / ".mco" / "secrets.enc"
+    assert security_mod.DEFAULT_STORE_PATH != real
+    assert security_mod.SecretStore()._path != real
+    assert security_mod.get_secret_store()._path != real
+
+
+def test_initializing_a_default_store_cannot_reach_the_real_file(tmp_path):
+    """Even initialize() on a default store stays in the temp sandbox."""
+    from pathlib import Path
+    import mco.security as security_mod
+
+    store = security_mod.get_secret_store()
+    store.initialize(b"Z" * 32)
+    assert store._path != Path.home() / ".mco" / "secrets.enc"
+    assert store.is_initialized()
