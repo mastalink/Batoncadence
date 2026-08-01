@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BatonCadence — Every agent. One baton.</title>
-<meta name="description" content="BatonCadence is a self-hosted orchestration hub for AI agents: a governed job board with human approval gates, an immutable audit trail, and Drumline — one shared memory every agent reads and writes. Free, MIT, runs on your machine.">
+<meta name="description" content="BatonCadence is a self-hosted orchestration hub for AI agents: a governed job board with human approval gates, an immutable audit trail, governed scheduling with bounded loops, a live Flow Control canvas, and Drumline — one shared memory every agent reads and writes. Free, MIT, runs on your machine.">
 <meta property="og:title" content="BatonCadence — Every agent. One baton.">
 <meta property="og:description" content="Orchestrate Claude, Codex, Gemini, and your ITSM stack from one governed job board. Approval gates, immutable audit, shared memory. Free and local-first.">
 <meta property="og:type" content="website">
@@ -469,6 +469,27 @@ footer{border-top:1px solid var(--rule);padding:46px 0 60px;background:var(--pap
         <h3>Workflow DSL</h3>
         <p>Multi-agent pipelines in YAML — per-step approval gates, retry budgets,
         and escalation roles. Or draw them in the visual builder.</p>
+      </div>
+      <div class="box indigo span3 sr">
+        <span class="tag">Live process view</span>
+        <h3>Flow Control</h3>
+        <p>The board as a diagram at <code class="inline">/flow</code>, where every edge is a real
+        <code class="inline">depends_on</code> gate the runtime enforces — not decoration. Click a node for its
+        audit trail, approve or cancel inline, or drag to author a workflow and export the YAML.</p>
+      </div>
+      <div class="box span3 sr">
+        <span class="tag">Loops that stop</span>
+        <h3>Governed scheduling</h3>
+        <p>Cron and interval schedules that run <em>through</em> the governed board. Loops must declare
+        how they end — a count, a deadline, or "until the queue is clear" — or they're refused at parse
+        time. Every scheduled job is stamped with what created it, so the audit trail answers a question
+        plain cron can't.</p>
+      </div>
+      <div class="box span2 sr">
+        <span class="tag">Encrypted by default</span>
+        <h3>Credentials, never in the clear</h3>
+        <p>API keys, tokens, and passwords go to an AES-256-GCM store, never silently to plaintext
+        <code class="inline">.env</code>. Auto-provisioned on Windows; a deliberate opt-out anywhere else.</p>
       </div>
       <div class="box span2 sr">
         <span class="tag">Enterprise connectors</span>

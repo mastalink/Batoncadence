@@ -77,6 +77,9 @@ BatonCadence sits between your agents and the work they do. It gives you:
 | **Drumline** | One shared memory across the whole mesh. Completed jobs auto-distill into recallable handoffs. |
 | **Approval gates** | Flag any job — or an entire role — to pause at `needs_approval` until a human decides. |
 | **Immutable audit** | Every mutation appends to `agent_job_events`. UPDATE and DELETE are rejected at the storage layer. |
+| **Scheduling & loops** | Cron/interval schedules and *bounded* loops — a loop must declare how it stops (count, deadline, or "until the queue is clear") or it's refused. Every scheduled job is stamped with what created it. |
+| **Flow Control** | Live DAG canvas at `/flow` — the board as a diagram whose edges are real `depends_on` gates, not decoration. Click a node for its audit trail; approve/reject/retry/cancel inline; drag to author a workflow and export YAML. |
+| **Encrypted secrets** | Credentials encrypt by default (AES-256-GCM) — never silently written to `.env` in the clear. Auto-provisioned on Windows; explicit master password elsewhere. |
 | **Embedded store** | No Supabase? An embedded SQLite store (`~/.mco/local.db`) takes over — the free edition is the full product. |
 | **Enterprise connectors** | Ingest ServiceNow incidents and Dynatrace problems as jobs; act back with auditable, gated platform actions. |
 | **Console GUI** | Zero-build web UI at `/console` — job board, approval queue, audit drawer, visual workflow builder. |
@@ -101,10 +104,14 @@ mco send codex -t "Summarize repo" -m "..."   # drop a job into a dropbox
 mco listen --role codex --instance worker-1   # start a worker
 mco audit <job_id>    # inspect a job's full history
 mco approve <job_id>  # approve a gate
+mco gui               # open the console in your browser (--flow for Flow Control)
+mco schedule init     # start declarative schedules & bounded loops
+mco launch <name>     # fire a named launcher (job, workflow, app, or URL) now
 ```
 
 Open **http://127.0.0.1:18789/console** in your browser, paste your access
-token (shown at startup, or in `~/.mco/.env`), and click Connect.
+token (shown at startup, or in `~/.mco/.env`), and click Connect — or just run
+`mco gui`. For the live workflow canvas, `mco gui --flow`.
 
 ---
 
@@ -157,6 +164,8 @@ vocabulary, and SSO setup: [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 - [docs/SETUP.md](docs/SETUP.md) — full multi-agent setup: Supabase schema, agent registration, MCP wiring
 - [docs/DRUMLINE.md](docs/DRUMLINE.md) — shared memory: how it works, how to use it
 - [docs/GOVERNANCE.md](docs/GOVERNANCE.md) — approval gates, audit trail, workflow DSL
+- [docs/SCHEDULING.md](docs/SCHEDULING.md) — launchers, cron/interval schedules, bounded loops
+- [docs/FLOW-CONTROL.md](docs/FLOW-CONTROL.md) — the live DAG canvas + visual workflow authoring
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — ServiceNow, Dynatrace, webhooks
 - [docs/ENTERPRISE.md](docs/ENTERPRISE.md) — editions, scoped-token RBAC, SSO delegation
 - [docs/SDK.md](docs/SDK.md) — write a custom agent/worker in fifteen lines
@@ -188,9 +197,12 @@ it. Before exposing it on a network:
   carried in a job, but only when you opt in with `MCO_ENABLE_SHELL_EXECUTOR=1`.
   Leave it unset unless you fully trust everyone who can post jobs; prefer typed
   executors (`register_executor`) instead.
-- **Tokens are bearer credentials** — keep them out of git. `.env` and the
-  encrypted secret store (`~/.mco/secrets.enc`, AES-256-GCM) hold them; never
-  commit real tokens.
+- **Credentials encrypt by default.** Anything credential-shaped (API keys,
+  tokens, passwords) goes to the AES-256-GCM secret store (`~/.mco/secrets.enc`),
+  never silently to plaintext `.env`. On Windows the store is auto-provisioned
+  (key held by Credential Manager); elsewhere set a master password via
+  `mco setup --menu → Security`. Plaintext is only ever a deliberate, visible
+  opt-out. Either way, keep secrets out of git.
 
 Found a vulnerability? Email **security@batoncadence.com** rather than opening a
 public issue.
