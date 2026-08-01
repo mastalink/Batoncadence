@@ -45,34 +45,31 @@ SENSITIVE_KEYS = {
 # Secrets whose names are generated at runtime can never appear in a static
 # set. LLM provider credentials, for instance, are stored per connection as
 # LLM_CONN_<id>_API_KEY. Treat anything that *looks* like a credential as one.
-SENSITIVE_KEY_MARKERS = ("API_KEY", "PASSWORD", "SECRET", "TOKEN", "PRIVATE_KEY")
+# Suffix-anchored on purpose: a bare substring match would flag names like
+# MAX_TOKENS_LIMIT. Kept as a module constant because tests assert against it.
+SENSITIVE_KEY_MARKERS = ("_API_KEY", "_PASSWORD", "_SECRET", "_TOKEN", "_PRIVATE_KEY")
 
 
 def is_sensitive_key(key: str) -> bool:
     """Should this configuration key be treated as a credential?
 
-    One predicate, used by both masking and storage. They used to disagree:
+    ONE predicate for masking, storage, and retrieval. They used to disagree:
     `get_masked_config` matched on name patterns while `set()` consulted only
     the static set, so a runtime-named secret such as `LLM_CONN_x_API_KEY` was
-    masked in the UI *and written to .env in clear text* - the code knew it was
-    sensitive enough to hide, but not sensitive enough to encrypt.
-    """
-    name = (key or "").upper()
-    return key in SENSITIVE_KEYS or any(marker in name for marker in SENSITIVE_KEY_MARKERS)
+    masked in the UI *and written to .env in clear text*. Dynamic names (model
+    connections, MCO_SECRET_* vault refs) can never be enumerated statically,
+    so well-known suffixes are treated as sensitive too.
 
-
-def is_sensitive_key(key: str) -> bool:
-    """Return whether a configuration name carries secret material.
-
-    Dynamic model-connection keys cannot be enumerated in ``SENSITIVE_KEYS``;
-    treating well-known secret suffixes as sensitive keeps masking and
-    encrypted-store lookups consistent for both static and generated names.
+    NOTE: this function was briefly defined twice - two branches each added
+    their own copy, and Python's silent last-def-wins meant one shadowed the
+    other with slightly different coverage. If you're adding a rule, extend
+    THIS definition; do not add another.
     """
     upper = str(key or "").upper()
     return (
         upper in SENSITIVE_KEYS
         or upper.startswith("MCO_SECRET_")
-        or upper.endswith(("_API_KEY", "_PASSWORD", "_SECRET", "_TOKEN"))
+        or upper.endswith(SENSITIVE_KEY_MARKERS)
     )
 
 

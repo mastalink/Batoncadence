@@ -85,7 +85,18 @@ def test_local_adapter_migrates_legacy_plaintext_only_after_encrypted_write(tmp_
     assert config._store.get(secret_ref.local_key) == "legacy-plaintext"
 
 
-def test_failed_legacy_migration_preserves_plaintext(tmp_path):
+def test_failed_legacy_migration_preserves_plaintext(tmp_path, monkeypatch):
+    """When the vault genuinely cannot be provisioned, plaintext must survive.
+
+    On Windows, config.set() now auto-provisions the store on first credential
+    write (key persisted to Credential Manager before the store exists), so an
+    uninitialized store no longer means "unavailable" there - the vault simply
+    becomes available. The unavailable case is real on platforms with no OS
+    keychain, so this test pins that path explicitly.
+    """
+    import os as _os
+    monkeypatch.setattr(_os, "name", "posix")
+
     env_file = tmp_path / ".env"
     store_file = tmp_path / "secrets.enc"
     secret_ref = ref()
@@ -97,6 +108,23 @@ def test_failed_legacy_migration_preserves_plaintext(tmp_path):
         LocalEncryptedVault(config).put(secret_ref, "keep-me")
 
     assert f"{secret_ref.local_key}=keep-me" in env_file.read_text(encoding="utf-8")
+
+
+def test_vault_auto_provisions_on_windows(tmp_path, monkeypatch):
+    """The flip side: on Windows the vault becomes available instead of failing."""
+    import os as _os
+    monkeypatch.setattr(_os, "name", "nt")
+
+    env_file = tmp_path / ".env"
+    store_file = tmp_path / "secrets.enc"
+    secret_ref = ref()
+    config = ConfigManager(env_path=env_file, store_path=store_file)
+    config._store = SecretStore(store_path=store_file)  # uninitialized
+
+    LocalEncryptedVault(config).put(secret_ref, "sk-provisioned")
+
+    assert "sk-provisioned" not in env_file.read_text(encoding="utf-8")
+    assert config._store.get(secret_ref.local_key) == "sk-provisioned"
 
 
 def test_shared_adapter_round_trip_never_stores_plaintext(tmp_path):
