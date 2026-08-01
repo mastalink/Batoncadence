@@ -39,7 +39,7 @@ def record_event(
         }).execute()
         return True
     except Exception as e:
-        logger.warning(f"Audit write skipped for job {job_id} ({event}): {e}")
+        logger.warning(f"Audit write skipped for job {job_id} ({event}): {type(e).__name__}")
         return False
 
 
@@ -57,5 +57,5 @@ def get_events(db_client: Any, job_id: str) -> list:
         )
         return res.data or []
     except Exception as e:
-        logger.error(f"Error fetching audit events for job {job_id}: {e}")
+        logger.error(f"Error fetching audit events for job {job_id}: {type(e).__name__}")
         return []
