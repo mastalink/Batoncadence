@@ -36,12 +36,23 @@ console = Console()
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _save(config, key: str, value: str) -> None:
-    """Persist a value; sensitive keys ride the encrypted store when available."""
-    from mco.security import get_secret_store
-    if key in SENSITIVE_KEYS and get_secret_store().is_unlocked:
-        config.set(key, value, encrypt=True)
-    else:
+    """Persist a value; sensitive keys ride the encrypted store when available.
+
+    config.set() now refuses to silently write credentials to plaintext .env.
+    In the wizard we are talking to a human, so when the store genuinely can't
+    take the value (no OS keychain, no master password yet) we say so out loud
+    and store it plainly as a *deliberate*, visible choice - the operator can
+    enable encryption in the Security step and re-save.
+    """
+    try:
         config.set(key, value)
+    except RuntimeError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        console.print(
+            f"[yellow]Storing {key} in plain .env for now - "
+            "enable encryption in the Security step to protect it.[/yellow]"
+        )
+        config.set(key, value, encrypt=False)
 
 
 def _current(config, key: str) -> str:
@@ -129,7 +140,11 @@ def step_local_token(config) -> None:
                 console.print("[green][OK][/green] Copied to your clipboard - paste it in the console with Ctrl+V.")
             return
     token = "mco_tok_" + _secrets.token_hex(24)
-    config.set("MCO_LOCAL_TOKEN", token)
+    # Deliberately plaintext: this is the local operator bootstrap token. The
+    # wizard prints it, tells the user "it also lives in the .env file", and
+    # operator tooling greps it from .env - encrypting it would break that
+    # documented contract. It authenticates only against the local gateway.
+    config.set("MCO_LOCAL_TOKEN", token, encrypt=False)
     console.print(f"  Your token: [bold white]{token}[/bold white]")
     if _copy_to_clipboard(token):
         console.print("[green][OK][/green] Saved and copied to your clipboard (paste with Ctrl+V).")

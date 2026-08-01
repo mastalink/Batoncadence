@@ -177,3 +177,43 @@ def test_mco_audit_delegates(monkeypatch):
     fake = _fake(monkeypatch, events=events)
     assert mco_audit("j1") == events
     assert fake.calls == [("events", "j1")]
+
+
+# ── SDK major compatibility (mcp 1.x and 2.x) ─────────────────────────────────
+
+def test_server_constructs_on_whichever_sdk_major_is_installed():
+    """mcp 2.0.0 removed mcp.server.fastmcp; mcp_server.py must work on both.
+
+    The day 2.0.0 shipped, an unbounded `mcp>=1.2.0` pin meant a fresh install
+    resolved to a major that no longer had FastMCP - the MCP server was dead on
+    arrival, and no test caught it.
+    """
+    from mco import mcp_server
+    assert mcp_server.mcp is not None
+    assert hasattr(mcp_server.mcp, "tool")
+    assert hasattr(mcp_server.mcp, "run")
+
+
+def test_every_governance_tool_is_registered():
+    import asyncio
+    from mco import mcp_server
+
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    names = {t.name for t in tools}
+    # Losing any of these silently would strand every configured worker.
+    for required in ("mco_inbox", "mco_lease", "mco_complete", "mco_fail", "mco_send"):
+        assert required in names, f"{required} missing from the MCP tool surface"
+
+
+def test_tool_schemas_mark_the_right_args_required():
+    import asyncio
+    from mco import mcp_server
+
+    tools = {t.name: t for t in asyncio.run(mcp_server.mcp.list_tools())}
+
+    def schema(tool):
+        # Tool.inputSchema (mcp 1.x) was renamed to Tool.input_schema (2.x).
+        return getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", None) or {}
+
+    assert schema(tools["mco_lease"]).get("required") == ["task_id"]
+    assert set(schema(tools["mco_complete"]).get("required", [])) == {"task_id", "output"}

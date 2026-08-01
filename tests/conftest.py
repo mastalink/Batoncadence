@@ -312,3 +312,40 @@ def isolated_db(fake_db: FakeDB) -> FakeDB:
     fake_db.add_job(id="org-b-job", org_id="org-b", title="Org B job")
     fake_db.add_job(id="default-job", title="default org job")
     return fake_db
+
+# ══════════════════════════════════════════════════════════════════════════
+# Machine protection: tests must never touch the operator's real secrets
+# ══════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture(autouse=True)
+def _isolate_operator_secrets(monkeypatch):
+    """Keep every test away from the real Windows Credential Manager.
+
+    A test used to call the real `WindowsCredentialProvider.store_key()` with a
+    throwaway key. On a developer machine that silently overwrote the master
+    key for the operator's REAL secret store at ~/.mco/secrets.enc, orphaning
+    it - the store still existed, but nothing could ever unlock it again. That
+    is not a hypothetical: it happened, twice, on the machine this project is
+    developed on, and presented as a mystery warning on every CLI run.
+
+    Every test gets an in-memory credential vault instead. A test that wants
+    to exercise the real thing must opt out explicitly - and should think hard
+    first.
+    """
+    import mco.security as security_mod
+
+    vault: Dict[str, bytes] = {}
+    real_provider = security_mod.WindowsCredentialProvider
+
+    class _InMemoryCredMan(real_provider):  # keeps isinstance() checks working
+        @classmethod
+        def store_key(cls, key: bytes) -> None:
+            vault["key"] = key
+
+        def get_key(self) -> bytes:
+            if "key" not in vault:
+                raise RuntimeError("no key stored (in-memory test vault)")
+            return vault["key"]
+
+    monkeypatch.setattr(security_mod, "WindowsCredentialProvider", _InMemoryCredMan)
+    yield

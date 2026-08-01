@@ -112,10 +112,38 @@ def parse_fleet_data(data: dict[str, Any]) -> dict[str, WorkerConfig]:
     return parsed
 
 
+def missing_agent_tokens(workers: dict[str, Any]) -> list[str]:
+    """Instances that will run but have no token to authenticate with.
+
+    A waker with no resolvable token installs cleanly, starts, is rejected by
+    the gateway, and exits 1 - while the board still shows the agent "online"
+    from its last heartbeat. That combination is why a dead fleet can look
+    healthy for days, so `apply_fleet` warns about it up front instead.
+    """
+    from mco.waker import read_agent_token_file
+
+    missing = []
+    for worker in workers.values():
+        if worker.mode not in {"waker", "poll"} or not worker.instance:
+            continue
+        if not read_agent_token_file(worker.instance):
+            missing.append(worker.instance)
+    return sorted(missing)
+
+
 def apply_fleet(path: Path = FLEET_CONFIG_PATH) -> list[str]:
     workers = load_fleet(path)
     installed = _installed_worker_service_names()
     summaries: list[str] = []
+
+    # Surfaced as a warning, not a hard failure: the token may legitimately
+    # arrive via MCO_AGENT_TOKEN in this worker's environment.
+    for instance in missing_agent_tokens(workers):
+        summaries.append(
+            f"{instance}: WARNING no token at ~/.mco/tokens/{instance}.token - "
+            f"the waker will fail to authenticate unless MCO_AGENT_TOKEN is set "
+            f"for it. Fix: mco reset-token {instance}"
+        )
     active_names = {
         worker.active_service_name
         for worker in workers.values()
