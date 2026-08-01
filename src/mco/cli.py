@@ -239,6 +239,14 @@ def create_app() -> FastAPI:
     async def console_ui() -> str:
         return get_console_html()
 
+    # Flow Control - the live DAG of the board: design intent, run state,
+    # approval gates, and the audit trail on one canvas.
+    from mco.console import get_flow_html
+
+    @app_server.get("/flow", response_class=HTMLResponse, include_in_schema=False)
+    async def flow_ui() -> str:
+        return get_flow_html()
+
     # Register broadcast callback
     register_broadcast_callback(server_broadcast_callback)
 
@@ -704,6 +712,335 @@ app.add_typer(service_app, name="service")
 fleet_app = typer.Typer(help="Apply declarative per-worker service run modes.")
 app.add_typer(fleet_app, name="fleet")
 
+schedule_app = typer.Typer(help="Schedules and loops: what work gets created, and when.")
+app.add_typer(schedule_app, name="schedule")
+
+
+def _print_schedules_missing(path):
+    from mco import scheduler
+    console.print(f"[yellow]No schedules config found at {path}.[/yellow]")
+    console.print("[dim]Create one with:[/dim] [bold]mco schedule init[/bold]")
+    console.print(f"[dim]Or write it yourself:[/dim]\n{scheduler.sample_config()}")
+
+
+def _load_schedules_or_exit(path=None):
+    """Load schedules.yaml, printing the friendly guidance on failure."""
+    from mco import scheduler
+    path = path or scheduler.SCHEDULES_CONFIG_PATH
+    try:
+        return scheduler.load_config(path)
+    except scheduler.ScheduleConfigMissing as exc:
+        _print_schedules_missing(exc)
+        raise typer.Exit(code=0)
+    except scheduler.ScheduleConfigError as exc:
+        console.print(f"[red][X] Invalid schedules config:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+
+@schedule_app.command("init")
+def schedule_init(
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing config."),
+):
+    """Write a starter ~/.mco/schedules.yaml."""
+    from mco import scheduler
+    path = scheduler.SCHEDULES_CONFIG_PATH
+    if path.exists() and not force:
+        console.print(f"[yellow]{path} already exists.[/yellow] Use --force to overwrite.")
+        raise typer.Exit(code=1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(scheduler.sample_config(), encoding="utf-8")
+    console.print(f"[green][OK][/green] Wrote {path}")
+    console.print("[dim]Edit it, then run:[/dim] [bold]mco schedule list[/bold]")
+
+
+@schedule_app.command("list")
+def schedule_list():
+    """Show every schedule and loop with its next fire time."""
+    from mco import launcher as launcher_mod
+    from mco import scheduler
+    launchers, schedules = _load_schedules_or_exit()
+    if not schedules:
+        console.print("[yellow]No schedules or loops defined.[/yellow]")
+        return
+
+    states = launcher_mod.load_state()
+    now = datetime.now(timezone.utc)
+    table = Table(title="BatonCadence Schedules")
+    for column in ("Name", "Kind", "Trigger", "Launches", "Next run", "Runs", "Bound"):
+        table.add_column(column)
+
+    for name in sorted(schedules):
+        schedule = schedules[name]
+        state = states.get(name)
+        next_run = scheduler.next_run_at(schedule, state, now)
+        if not schedule.enabled:
+            next_text = "[dim]disabled[/dim]"
+        elif next_run is None:
+            reason = scheduler.exhaustion_reason(schedule, state, now) or "finished"
+            next_text = f"[dim]{reason}[/dim]"
+        elif next_run <= now:
+            next_text = "[green]due now[/green]"
+        else:
+            next_text = next_run.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        runs = str(state.iterations) if state else "0"
+        table.add_row(
+            name,
+            "loop" if schedule.is_loop else "schedule",
+            schedule.describe_trigger(),
+            launchers[schedule.launcher].describe(),
+            next_text,
+            runs,
+            schedule.describe_bound(),
+        )
+    console.print(table)
+
+
+def _set_schedule_enabled(name: str, enabled: bool) -> None:
+    """Flip `enabled` on one schedule/loop, preserving the rest of the file byte-for-byte.
+
+    Deliberately a surgical text edit rather than parse-and-redump: PyYAML's
+    safe_dump discards every comment, so a one-word toggle would silently
+    destroy the explanatory config the user (or `schedule init`) wrote.
+    """
+    from mco import scheduler
+    path = scheduler.SCHEDULES_CONFIG_PATH
+    _, schedules = _load_schedules_or_exit(path)  # validate + friendly errors first
+    if name not in schedules:
+        console.print(f"[red][X] No schedule or loop named '{name}'.[/red]")
+        if schedules:
+            console.print(f"[dim]Defined:[/dim] {', '.join(sorted(schedules))}")
+        raise typer.Exit(code=1)
+
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    section, entry_indent, entry_line = None, None, None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            section = stripped.rstrip(":") if stripped.endswith(":") else None
+            continue
+        if section in ("schedules", "loops") and stripped.rstrip(":") == name and stripped.endswith(":"):
+            entry_indent, entry_line = indent, index
+            break
+
+    if entry_line is None:  # validated above, so this means an unusual layout
+        console.print(f"[red][X] Could not locate '{name}' in {path}.[/red]")
+        console.print("[dim]Edit the file directly to set 'enabled'.[/dim]")
+        raise typer.Exit(code=1)
+
+    value = "true" if enabled else "false"
+    field_indent = entry_indent + 2
+    # Walk the entry's own block looking for an existing `enabled:` to replace.
+    cursor = entry_line + 1
+    while cursor < len(lines):
+        line = lines[cursor]
+        if line.strip() and (len(line) - len(line.lstrip())) <= entry_indent:
+            break  # left this entry's block
+        if line.strip().startswith("enabled:"):
+            lines[cursor] = f"{' ' * (len(line) - len(line.lstrip()))}enabled: {value}\n"
+            break
+        if line.strip():
+            field_indent = len(line) - len(line.lstrip())
+        cursor += 1
+    else:
+        cursor = len(lines)
+    if cursor >= len(lines) or not lines[cursor].strip().startswith("enabled:"):
+        lines.insert(entry_line + 1, f"{' ' * field_indent}enabled: {value}\n")
+
+    path.write_text("".join(lines), encoding="utf-8")
+    kind = "loop" if schedules[name].is_loop else "schedule"
+    console.print(f"[green][OK][/green] {kind} '{name}' is now {'enabled' if enabled else 'disabled'}.")
+
+
+@schedule_app.command("enable")
+def schedule_enable(name: str = typer.Argument(..., help="Schedule or loop name.")):
+    """Enable a schedule or loop (without hand-editing YAML)."""
+    _set_schedule_enabled(name, True)
+
+
+@schedule_app.command("disable")
+def schedule_disable(name: str = typer.Argument(..., help="Schedule or loop name.")):
+    """Disable a schedule or loop, leaving its definition and history intact."""
+    _set_schedule_enabled(name, False)
+
+
+@schedule_app.command("reset")
+def schedule_reset(
+    name: str = typer.Argument(..., help="Schedule or loop name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+):
+    """Clear a schedule's run history so a finished loop can run again.
+
+    Completion is sticky by design - a loop that ended because its queue
+    drained must not resurrect when the queue refills. This is the deliberate
+    undo.
+    """
+    from mco import launcher as launcher_mod
+    _, schedules = _load_schedules_or_exit()
+    if name not in schedules:
+        console.print(f"[red][X] No schedule or loop named '{name}'.[/red]")
+        raise typer.Exit(code=1)
+
+    states = launcher_mod.load_state()
+    state = states.get(name)
+    if not state or (not state.iterations and not state.exhausted_reason):
+        console.print(f"[yellow]'{name}' has no run history to clear.[/yellow]")
+        return
+    if not yes:
+        console.print(
+            f"[yellow]'{name}' has run {state.iterations} time(s)"
+            + (f" and is marked finished ({state.exhausted_reason})" if state.exhausted_reason else "")
+            + ".[/yellow]"
+        )
+        if not typer.confirm("Clear its history so it can run again?"):
+            console.print("[dim]Left unchanged.[/dim]")
+            return
+    states.pop(name, None)
+    launcher_mod.save_state(states)
+    console.print(f"[green][OK][/green] Cleared run history for '{name}'.")
+
+
+@schedule_app.command("tick")
+def schedule_tick(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would fire without creating jobs."),
+):
+    """Run one scheduler pass (what `mco schedule run` does on a timer).
+
+    Use this to drive BatonCadence from an existing cron/Task Scheduler entry
+    instead of running the daemon.
+    """
+    from mco import launcher as launcher_mod
+    _load_schedules_or_exit()  # validate + friendly errors before touching the gateway
+    try:
+        report = launcher_mod.tick(_gateway_client(), dry_run=dry_run)
+    except Exception as exc:
+        console.print(f"[red][X] Scheduler tick failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+    _print_tick_report(report)
+
+
+def _print_tick_report(report: list) -> None:
+    if not report:
+        console.print("[dim]Nothing due.[/dim]")
+        return
+    styles = {
+        "fired": "green", "would-fire": "cyan",
+        "skipped-overlap": "yellow", "error": "red",
+    }
+    for row in report:
+        action = str(row["action"])
+        colour = styles.get(action, "white")
+        jobs = f" -> {', '.join(row['job_ids'])}" if row.get("job_ids") else ""
+        console.print(f"[{colour}]{action:<16}[/{colour}] {row['schedule']}: {row['detail']}{jobs}")
+
+
+@schedule_app.command("run")
+def schedule_run(
+    interval: float = typer.Option(30.0, "--interval", help="Seconds between scheduler passes."),
+):
+    """Run the scheduler in the foreground, ticking until interrupted."""
+    from mco import launcher as launcher_mod
+    _load_schedules_or_exit()
+    console.print(f"[cyan]Scheduler running[/cyan] (tick every {interval:g}s). Ctrl+C to stop.")
+    try:
+        launcher_mod.run_forever(
+            _gateway_client(), interval=interval, on_report=_print_tick_report
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Scheduler stopped.[/yellow]")
+
+
+def _port_is_open(base_url: str, timeout: float = 2.0) -> bool:
+    """Can we open a TCP connection to this base URL's host:port?"""
+    import socket
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+@app.command("gui")
+def open_gui(
+    flow: bool = typer.Option(False, "--flow", help="Open Flow Control (the live job-dependency canvas)."),
+    dashboard: bool = typer.Option(False, "--dashboard", help="Open the minimal dashboard instead of the full console."),
+    print_only: bool = typer.Option(False, "--print", help="Print the URL instead of opening a browser."),
+):
+    """Open the BatonCadence console in your browser.
+
+    Until now the CLI only printed the URL and left you to copy it - this is
+    the one-step version.
+    """
+    import webbrowser
+    config = get_config()
+    base = (config.get("MCO_GATEWAY_URL") or "http://127.0.0.1:18789").rstrip("/")
+    page = "flow" if flow else ("dashboard" if dashboard else "console")
+    url = f"{base}/{page}"
+
+    # Say plainly when nothing is listening, rather than opening a dead tab.
+    # A TCP probe rather than an HTTP GET: it needs no particular endpoint to
+    # exist and no auth, so it can't be wrong about a healthy gateway.
+    reachable = _port_is_open(base)
+
+    if print_only:
+        console.print(url)
+        return
+    if not reachable:
+        console.print(f"[yellow]Nothing is listening at {base}.[/yellow]")
+        console.print("[dim]Start it with:[/dim] [bold]mco start[/bold]  [dim](or `mco serve` in the foreground)[/dim]")
+        console.print(f"[dim]The console will be at:[/dim] {url}")
+        raise typer.Exit(code=1)
+    if webbrowser.open(url):
+        console.print(f"[green][OK][/green] Opened {url}")
+    else:
+        console.print(f"[yellow]Could not open a browser.[/yellow] Visit: {url}")
+
+
+@app.command("launch")
+def launch_now(
+    name: str = typer.Argument(..., help="Launcher name from ~/.mco/schedules.yaml."),
+    approve: bool = typer.Option(
+        None, "--approve/--no-approve",
+        help="Override the launcher's approval gate for this run.",
+    ),
+):
+    """Fire a launcher right now, by name.
+
+    Identical to what a schedule does at 3am - same code path, same governance -
+    so testing a launcher by hand proves the scheduled run too.
+    """
+    from mco import launcher as launcher_mod
+    launchers, _ = _load_schedules_or_exit()
+    if name not in launchers:
+        console.print(f"[red][X] Unknown launcher '{name}'.[/red]")
+        if launchers:
+            console.print(f"[dim]Defined:[/dim] {', '.join(sorted(launchers))}")
+        raise typer.Exit(code=1)
+
+    try:
+        job_ids = launcher_mod.launch(
+            launchers[name], _gateway_client(),
+            trigger="manual", requires_approval_override=approve,
+        )
+    except Exception as exc:
+        console.print(f"[red][X] Launch failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+    launcher = launchers[name]
+    if launcher.is_local:
+        # app/url launchers start something here; they queue nothing.
+        console.print(f"[green][OK][/green] Launched '{name}' - {launcher.describe()}")
+        return
+    plural = "s" if len(job_ids) != 1 else ""
+    console.print(f"[green][OK][/green] Launched '{name}' -> {len(job_ids)} job{plural}")
+    for job_id in job_ids:
+        console.print(f"  [dim]{job_id}[/dim]")
+
 
 def _print_fleet_missing(path):
     from mco import fleet
@@ -780,6 +1117,26 @@ def fleet_set(
         console.print(f"[red][X] Fleet set failed:[/red] {exc}")
         raise typer.Exit(code=1)
     console.print(f"[green][OK][/green] {message}")
+
+
+@service_app.command("install-scheduler")
+def service_install_scheduler(
+    interval: float = typer.Option(30.0, "--interval", help="Seconds between scheduler passes."),
+):
+    """Install the schedule/loop scheduler as a boot-persistent OS service.
+
+    Without this the scheduler only runs while a terminal is open - and a
+    scheduler that quietly died on reboot is the failure nobody notices until
+    the nightly job hasn't run for a week.
+    """
+    from mco import service
+    ok, message = service.install_scheduler(interval=interval)
+    if ok:
+        console.print(f"[green][OK][/green] {message}")
+        console.print("[dim]Check it with:[/dim] mco service status BatonCadence-scheduler")
+    else:
+        console.print(f"[red][X] {message}[/red]")
+        raise typer.Exit(code=1)
 
 
 @service_app.command("install")
@@ -1655,6 +2012,82 @@ def retry(job_id: str = typer.Argument(..., help="Failed/rejected job ID to re-q
         console.print(f"[bold green][OK] Job {job_id} re-queued -> {res['job']['status']}[/bold green]")
     except Exception as e:
         console.print(f"[red][ERROR] Retry failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("cancel")
+def cancel(
+    job_id: str = typer.Argument(..., help="Non-terminal job ID to call off."),
+    reason: str = typer.Option("", "--reason", help="Why the job was cancelled."),
+):
+    """Call off a job that hasn't finished yet (approver-role token)."""
+    try:
+        res = _gateway_client().cancel(job_id, reason)
+        console.print(f"[bold yellow][OK] Job {job_id} cancelled -> {res['job']['status']}[/bold yellow]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Cancel failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("archive")
+def archive(job_id: str = typer.Argument(..., help="Terminal job ID to hide from the default board view.")):
+    """Archive a completed/failed/rejected/cancelled job (reversible)."""
+    try:
+        res = _gateway_client().archive(job_id)
+        console.print(f"[bold green][OK] Job {job_id} archived[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Archive failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("unarchive")
+def unarchive(job_id: str = typer.Argument(..., help="Archived job ID to restore to the default board view.")):
+    """Undo archive."""
+    try:
+        res = _gateway_client().unarchive(job_id)
+        console.print(f"[bold green][OK] Job {job_id} unarchived[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Unarchive failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("duplicates")
+def duplicates(job_id: str = typer.Argument(..., help="Job ID to check for look-alike or linked jobs.")):
+    """List other jobs that look like the same work as this one."""
+    try:
+        dups = _gateway_client().duplicates(job_id)
+    except Exception as e:
+        console.print(f"[red][ERROR] Duplicate check failed: {e}[/red]")
+        raise typer.Exit(code=1)
+    if not dups:
+        console.print("[dim]No look-alike or linked jobs found.[/dim]")
+        return
+    table = Table(title=f"Possible duplicates of {job_id}", show_header=True, header_style="bold magenta")
+    table.add_column("ID", style="cyan")
+    table.add_column("Title", style="white")
+    table.add_column("Status", style="green")
+    table.add_column("Relation", style="dim")
+    for d in dups:
+        table.add_row(str(d.get("id")), str(d.get("title")), str(d.get("status")), str(d.get("relation")))
+    console.print(table)
+
+
+@app.command("reassign")
+def reassign(
+    job_id: str = typer.Argument(..., help="Failed/rejected/cancelled job ID to redo elsewhere."),
+    to_role: str = typer.Option(..., "--to-role", help="Target agent role for the new job."),
+    to_instance: str = typer.Option("", "--to-instance", help="Target agent instance (optional)."),
+    instructions: str = typer.Option("", "--instructions", help="Override instructions (default: reuse the original)."),
+):
+    """Clone a failed job onto a new target, link both rows, and archive the
+    old one (approver-role token)."""
+    try:
+        res = _gateway_client().reassign(job_id, to_role, target_agent_id=to_instance or None,
+                                          instructions=instructions or None)
+        new_id = res["job"]["id"]
+        console.print(f"[bold green][OK] Job {job_id} reassigned -> new job {new_id} ({to_role})[/bold green]")
+    except Exception as e:
+        console.print(f"[red][ERROR] Reassign failed: {e}[/red]")
         raise typer.Exit(code=1)
 
 
