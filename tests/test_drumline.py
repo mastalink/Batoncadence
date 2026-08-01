@@ -306,3 +306,53 @@ class TestSanitizeContent:
         db = FakeDB()
         entry = remember(db, title="t", content="a <b> c", kind="fact")
         assert entry["content"] == "a ‹b› c"
+
+
+# ── Tenant isolation in dedup ────────────────────────────────────────────────
+
+class TestDedupTenantIsolation:
+    """Dedup matches on a content hash, so it MUST be scoped per tenant.
+
+    These run against the real LocalStore rather than FakeDB because the bug
+    being guarded lives in column projection: `.select("id")` really does drop
+    org_id on both backends, which silently collapses every row to the default
+    org and lets one tenant's entry be handed back to another.
+    """
+
+    def _store(self, tmp_path):
+        from mco.localstore import LocalStore
+        return LocalStore(tmp_path / "drumline.db")
+
+    def test_same_content_in_two_orgs_stays_separate(self, tmp_path):
+        db = self._store(tmp_path)
+        kw = dict(title="Quarterly revenue", content="Up 12% YoY.", kind="fact")
+
+        a = remember(db, org_id="acme", **kw)
+        b = remember(db, org_id="globex", **kw)
+
+        assert a is not None and b is not None
+        # Globex must get its OWN row, not a pointer into Acme's memory.
+        assert a["id"] != b["id"], "cross-tenant dedup leaked Acme's row to Globex"
+        assert a.get("org_id") == "acme"
+        assert b.get("org_id") == "globex"
+
+    def test_dedup_still_collapses_within_one_org(self, tmp_path):
+        db = self._store(tmp_path)
+        kw = dict(title="Quarterly revenue", content="Up 12% YoY.", kind="fact")
+
+        first = remember(db, org_id="acme", **kw)
+        second = remember(db, org_id="acme", **kw)
+
+        # Same tenant, same content -> the existing row comes back, no duplicate.
+        assert first["id"] == second["id"]
+
+    def test_default_org_is_not_matched_by_a_named_org(self, tmp_path):
+        """The default org is stored as an ABSENT org_id column, so it needs
+        its own check - a named tenant must not collide with it."""
+        db = self._store(tmp_path)
+        kw = dict(title="Runbook", content="Restart the gateway.", kind="fact")
+
+        default_row = remember(db, **kw)                 # org_id="default"
+        named_row = remember(db, org_id="acme", **kw)
+
+        assert default_row["id"] != named_row["id"]

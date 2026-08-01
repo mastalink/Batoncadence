@@ -79,7 +79,10 @@ class TestRecordEvent:
         record_event(mock_db, "job-x", "leased", actor_id="a1", actor_role="codex",
                      detail={"reason": "retry"})
 
-        mock_db.table.assert_called_once_with(EVENTS_TABLE)
+        # Hash-chaining reads the chain's tail before appending, so a write now
+        # touches the table twice (one select, one insert) - both on EVENTS_TABLE.
+        assert mock_db.table.call_count == 2
+        assert {c.args[0] for c in mock_db.table.call_args_list} == {EVENTS_TABLE}
         insert_payload = mock_db.table.return_value.insert.call_args[0][0]
         assert insert_payload["job_id"] == "job-x"
         assert insert_payload["event"] == "leased"
