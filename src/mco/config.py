@@ -149,28 +149,73 @@ class ConfigManager:
         """
         sensitive = is_sensitive_key(key)
         if encrypt is None:
-            encrypt = sensitive and self._store.is_unlocked
+            encrypt = sensitive
 
         if encrypt:
-            if not self._store.is_unlocked:
-                raise RuntimeError("Secret store must be unlocked to set encrypted values.")
+            self._ensure_store_ready(key)
             self._store.set(key, value)
             # Remove any plaintext entry in local .env to prevent leaks
             self._update_dotenv_file(key, "encrypted_in_secret_store")
             self._cached_config[key] = "encrypted_in_secret_store"
             return
 
-        if sensitive:
-            # Storing a credential in clear text is a real exposure, so say so
-            # rather than doing it silently. Not fatal: an operator who has not
-            # enabled the store still needs a working install.
-            logger.warning(
-                f"Storing {key} in plain text at {self._env_path} - the encrypted "
-                "secret store is not unlocked. Enable it with: "
-                "mco setup --menu -> Security."
-            )
         self._update_dotenv_file(key, value)
         self._cached_config[key] = value
+
+    def _ensure_store_ready(self, key: str) -> None:
+        """Make the secret store usable, or refuse the write with instructions.
+
+        Credentials are never written to plaintext .env. There used to be a
+        warned fallback, but a warning in a log nobody reads is not a control -
+        the credential still landed on disk in the clear, and the security
+        scanner rightly kept flagging it.
+
+        On Windows the store can be provisioned automatically: generate a
+        random master key, persist it to Credential Manager FIRST (so an
+        interrupt can never orphan the store - the failure mode the setup
+        wizard explicitly guards against), then initialize. A fresh Windows
+        install therefore keeps working with zero prompts. Elsewhere there is
+        no OS keychain provider, so we refuse with the exact commands to fix
+        it rather than choosing between an orphaned store and a plaintext
+        secret on the operator's behalf.
+        """
+        if self._store.is_unlocked:
+            return
+        if self._store.is_initialized():
+            # Store exists but no key source unlocked it - do not stack a new
+            # store on top of an orphaned one; that loses data quietly.
+            raise RuntimeError(
+                f"Cannot store credential {key!r}: the encrypted secret store exists "
+                f"but is locked. Unlock it (set MCO_MASTER_PASSWORD, or run "
+                f"'mco setup --menu' -> Security), then retry."
+            )
+        if os.name == "nt":
+            import secrets as _secrets
+            from mco.security import WindowsCredentialProvider
+            master_key = _secrets.token_bytes(32)
+            try:
+                # Persist the key BEFORE the store exists: an interrupt between
+                # these two calls must leave "no store", never "store, no key".
+                WindowsCredentialProvider.store_key(master_key)
+                self._store.initialize(master_key)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Cannot store credential {key!r}: automatic secret-store setup "
+                    f"failed ({exc}). Run 'mco setup --menu' -> Security to set it "
+                    f"up with a master password."
+                ) from exc
+            logger.info(
+                "Encrypted secret store provisioned automatically "
+                "(key held by Windows Credential Manager)."
+            )
+            return
+        raise RuntimeError(
+            f"Cannot store credential {key!r}: no encrypted secret store is set up "
+            f"and this platform has no OS keychain to hold a key automatically. "
+            f"Either set MCO_MASTER_PASSWORD and run 'mco setup --menu' -> Security "
+            f"to create the store, or pass encrypt=False to store this value in "
+            f"plaintext .env deliberately."
+        )
 
     def delete(self, key: str) -> None:
         """Delete a configuration parameter."""
