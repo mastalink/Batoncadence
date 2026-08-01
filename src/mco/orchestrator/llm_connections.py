@@ -15,9 +15,10 @@ handled - see admin_routes.py SETTING_GROUPS and mco/security.py):
   `llm_connections` table (LocalStore or Supabase - same dual-backend
   contract as agent_registry).
 - The API key itself is never stored in that table. It goes through the same
-  config.set()/.env mechanism every other secret setting already uses
-  (MCO_WEBHOOK_SECRET, MCO_METRICS_TOKEN, ...), keyed by this row's id, and
-  is never echoed back over the API - reads only ever report key_set: bool.
+  tenant-aware SecretVault seam used by every saved instance. The local
+  Adapter stores AES-256-GCM ciphertext in SecretStore; the shared Adapter
+  stores ciphertext in `secret_records` while its master key remains outside
+  the database. Reads only ever report key_set: bool.
 
 Testing a connection makes ONE cheap, free "list models" call to the
 provider - it validates the key/base_url authenticate without spending
@@ -65,7 +66,7 @@ PROVIDERS = {
 
 
 def config_key_for(connection_id: str) -> str:
-    """The .env / config key an API key is stored under for one connection."""
+    """Legacy local-vault locator for one connection's API key."""
     return f"LLM_CONN_{connection_id}_API_KEY"
 
 

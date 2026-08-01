@@ -4,9 +4,9 @@
 -- Named connections to LLM providers (Anthropic, OpenAI, Gemini, or a custom
 -- OpenAI-compatible endpoint), managed from the Control Panel ("Settings ->
 -- Model Connections"). Metadata only - the API key itself is never stored in
--- this table. It lives in the same place every other secret in BatonCadence
--- lives (the operator's config home / encrypted secret store), keyed by this
--- row's id, and is never echoed back over the API.
+-- this table. It is resolved through the SecretVault seam, keyed by this
+-- row's id, and is never echoed back over the API. The July enterprise
+-- identity migration adds an optional secret_ref for shared hosted vaults.
 --
 -- LocalStore (the embedded SQLite backend) needs no migration: rows are JSON
 -- documents and this table is created automatically on first use.

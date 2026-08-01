@@ -172,6 +172,26 @@ def create_app() -> FastAPI:
         description="FastAPI WebSocket and REST Hub for Agent Job Coordination."
     )
 
+    # Authlib keeps OIDC state/PKCE material in the database cache; this
+    # signed cookie contains only the transaction marker needed for CSRF
+    # correlation. Hosted deployments must provide a stable secret.
+    session_secret = get_config().get("MCO_SESSION_SECRET")
+    if session_secret:
+        if len(str(session_secret)) < 32:
+            raise RuntimeError("MCO_SESSION_SECRET must be at least 32 characters")
+        from starlette.middleware.sessions import SessionMiddleware
+        secure_cookie = str(
+            get_config().get("MCO_SESSION_COOKIE_SECURE", "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+        app_server.add_middleware(
+            SessionMiddleware,
+            secret_key=str(session_secret),
+            session_cookie="mco_oidc_state",
+            max_age=600,
+            same_site="lax",
+            https_only=secure_cookie,
+        )
+
     # Per-token (fallback per-IP) rate limiting - exempts /healthz, configured
     # via MCO_RATE_LIMIT (requests/min, default 120; set to 0 to disable).
     from mco.ratelimit import build_rate_limit_store, RateLimitMiddleware
@@ -206,6 +226,11 @@ def create_app() -> FastAPI:
     app_server.include_router(settings_router)
     app_server.include_router(workflows_router)
     app_server.include_router(llm_connections_router)
+
+    # Human identity federation and server-managed browser sessions.
+    from mco.orchestrator.identity_routes import auth_router, identity_admin_router
+    app_server.include_router(identity_admin_router)
+    app_server.include_router(auth_router)
 
     # Prometheus metrics (/metrics)
     from mco.orchestrator.metrics_routes import metrics_router

@@ -105,3 +105,20 @@ def test_windows_credential_provider_mock(monkeypatch):
     provider = WindowsCredentialProvider()
     retrieved_key = provider.get_key()
     assert retrieved_key == test_key
+
+
+def test_atomic_persist_failure_preserves_previous_envelope(monkeypatch, tmp_path):
+    store_path = tmp_path / "secrets.enc"
+    store = SecretStore(store_path=store_path)
+    master_key = b"E" * 32
+    store.initialize(master_key)
+    store.set("FIRST", "kept")
+    previous = store_path.read_bytes()
+
+    monkeypatch.setattr("mco.security.os.replace", lambda source, target: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(OSError, match="disk"):
+        store.set("SECOND", "must-not-land")
+
+    assert store_path.read_bytes() == previous
+    assert store.get("FIRST") == "kept"
+    assert store.get("SECOND") is None

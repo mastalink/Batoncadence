@@ -5,7 +5,8 @@ from pathlib import Path
 import os
 import pytest
 
-from mco.config import ConfigManager, EnvironmentProfile
+from mco.config import ConfigManager, EnvironmentProfile, is_sensitive_key
+from mco.security import SecretStore
 
 
 def test_config_profiles():
@@ -275,3 +276,30 @@ def test_encrypt_false_still_forces_plaintext(fresh_config):
     cfg, env = fresh_config(with_store=True)
     cfg.set("MCO_WEBHOOK_SECRET", "shhh", encrypt=False)
     assert "shhh" in env.read_text(encoding="utf-8")
+def test_dynamic_model_connection_key_is_sensitive_and_resolves_immediately(tmp_path):
+    env_file = tmp_path / ".env"
+    store_file = tmp_path / "secrets.enc"
+    manager = ConfigManager(env_path=env_file, store_path=store_file)
+    # SecretStore is process-global in production; isolate this test from
+    # earlier ConfigManager instances that intentionally exercise that singleton.
+    manager._store = SecretStore(store_path=store_file)
+    manager._store.initialize(b"D" * 32)
+    key = "LLM_CONN_123_API_KEY"
+
+    assert is_sensitive_key(key)
+    manager.set(key, "sk-dynamic-secret", encrypt=True)
+
+    assert manager.get(key) == "sk-dynamic-secret"
+    assert "sk-dynamic-secret" not in env_file.read_text(encoding="utf-8")
+    assert manager.get_masked_config()[key] != "sk-dynamic-secret"
+
+
+def test_config_rejects_newline_injection(tmp_path):
+    manager = ConfigManager(
+        env_path=tmp_path / ".env",
+        store_path=tmp_path / "secrets.enc",
+    )
+
+    with pytest.raises(ValueError, match="newlines"):
+        manager.set("MCO_ORGS", "acme\nMCO_VAULT_MASTER_KEY=attacker")
+

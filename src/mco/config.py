@@ -33,26 +33,44 @@ SENSITIVE_KEYS = {
     "SERVICENOW_PASSWORD",
     "SERVICENOW_TOKEN",
     "DYNATRACE_API_TOKEN",
+    "MCO_AGENT_TOKEN",
+    "MCO_LOCAL_TOKEN",
+    "MCO_METRICS_TOKEN",
+    "MCO_SESSION_SECRET",
+    "MCO_TRUSTED_HEADER_SECRET",
+    "MCO_VAULT_MASTER_KEY",
     "MCO_WEBHOOK_SECRET",
 }
 
 # Secrets whose names are generated at runtime can never appear in a static
 # set. LLM provider credentials, for instance, are stored per connection as
 # LLM_CONN_<id>_API_KEY. Treat anything that *looks* like a credential as one.
-SENSITIVE_KEY_MARKERS = ("API_KEY", "PASSWORD", "SECRET", "TOKEN", "PRIVATE_KEY")
+# Suffix-anchored on purpose: a bare substring match would flag names like
+# MAX_TOKENS_LIMIT. Kept as a module constant because tests assert against it.
+SENSITIVE_KEY_MARKERS = ("_API_KEY", "_PASSWORD", "_SECRET", "_TOKEN", "_PRIVATE_KEY")
 
 
 def is_sensitive_key(key: str) -> bool:
     """Should this configuration key be treated as a credential?
 
-    One predicate, used by both masking and storage. They used to disagree:
+    ONE predicate for masking, storage, and retrieval. They used to disagree:
     `get_masked_config` matched on name patterns while `set()` consulted only
     the static set, so a runtime-named secret such as `LLM_CONN_x_API_KEY` was
-    masked in the UI *and written to .env in clear text* - the code knew it was
-    sensitive enough to hide, but not sensitive enough to encrypt.
+    masked in the UI *and written to .env in clear text*. Dynamic names (model
+    connections, MCO_SECRET_* vault refs) can never be enumerated statically,
+    so well-known suffixes are treated as sensitive too.
+
+    NOTE: this function was briefly defined twice - two branches each added
+    their own copy, and Python's silent last-def-wins meant one shadowed the
+    other with slightly different coverage. If you're adding a rule, extend
+    THIS definition; do not add another.
     """
-    name = (key or "").upper()
-    return key in SENSITIVE_KEYS or any(marker in name for marker in SENSITIVE_KEY_MARKERS)
+    upper = str(key or "").upper()
+    return (
+        upper in SENSITIVE_KEYS
+        or upper.startswith("MCO_SECRET_")
+        or upper.endswith(SENSITIVE_KEY_MARKERS)
+    )
 
 
 # The global config home: works from any directory, any terminal. Lives next
@@ -227,6 +245,10 @@ class ConfigManager:
 
     def _update_dotenv_file(self, key: str, value: Optional[str]) -> None:
         """Write or remove a key in the local .env file atomically."""
+        if any(ch in str(key) for ch in ("\r", "\n", "=")):
+            raise ValueError("Configuration keys may not contain newlines or '='")
+        if value is not None and any(ch in str(value) for ch in ("\r", "\n")):
+            raise ValueError("Configuration values may not contain newlines")
         lines = []
         if self._env_path.is_file():
             lines = self._env_path.read_text(encoding="utf-8").splitlines()

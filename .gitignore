@@ -155,3 +155,11 @@ plans/
 docs/VALIDATION_SUMMARY.md
 docs/ROADMAP.md
 docs/SMOKE_TEST.md
+
+# macOS finder metadata (the Mac mini in the fleet keeps creating these)
+.DS_Store
+**/.DS_Store
+
+# Stray per-repo codex config: it shadows ~/.codex/config.toml and can give an
+# agent the wrong identity. Keep codex config in the user home, not the repo.
+.codex/
