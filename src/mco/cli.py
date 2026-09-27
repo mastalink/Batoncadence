@@ -42,7 +42,7 @@ from mco.orchestrator.routes import (
 )
 from mco.orchestrator.utils import get_approver_roles
 from mco.orchestrator.listener import AgentListener
-from mco.notifiers.ntfy import notify, notify_agent_online, notify_agent_offline, get_ntfy_config, notify_gateway_startup
+from mco.notifiers.ntfy import notify_agent_online, notify_agent_offline, get_ntfy_config
 
 # Initialize typer app and console
 app = typer.Typer(help="BitCadence: Multi-Client Agent Orchestrator.")
@@ -636,42 +636,9 @@ def serve(
             except Exception:
                 pass
 
-            notify_gateway_startup(stats)
-            console.print(f"[dim]NTFY notifier enabled -> {ntfy_cfg['server']}/{ntfy_cfg['topic']}[/dim]")
+            console.print("[dim]NTFY notifier enabled (private topic configured)[/dim]")
         except Exception as ntfy_err:
             console.print(f"[yellow]NTFY notifier init warning: {ntfy_err}[/yellow]")
-
-    # Launch Uvicorn
-    # Start background process snapshot reporter (helps catch mco.exe / codex / git / node leaks)
-    def _periodic_process_snapshot():
-        import threading
-        import time
-        ntfy_cfg = get_ntfy_config()
-        if not (ntfy_cfg.get("server") and ntfy_cfg.get("topic")):
-            return
-        def _reporter():
-            while True:
-                try:
-                    import psutil
-                    snapshot = {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "total_processes": len(psutil.pids()),
-                        "mco_processes": len([p for p in psutil.process_iter(['name']) if 'mco' in (p.info['name'] or '').lower()]),
-                        "node_processes": len([p for p in psutil.process_iter(['name']) if 'node' in (p.info['name'] or '').lower()]),
-                        "git_processes": len([p for p in psutil.process_iter(['name']) if 'git' in (p.info['name'] or '').lower()]),
-                    }
-                    notify(
-                        json.dumps(snapshot, indent=2),
-                        title="BitCadence Process Snapshot",
-                        priority=1,
-                        tags=["mco", "process-snapshot", "leak-detection"],
-                    )
-                except Exception:
-                    pass
-                time.sleep(600)  # every 10 minutes
-        threading.Thread(target=_reporter, daemon=True).start()
-
-    _periodic_process_snapshot()
 
     # Background enterprise connector sync (opt-in via MCO_SYNC_INTERVAL seconds).
     # Pulls open ServiceNow incidents / Dynatrace problems onto the job board.
@@ -2072,7 +2039,7 @@ def doctor(
     # 8. Notifications
     ntfy_cfg = get_ntfy_config()
     if ntfy_cfg.get("server") and ntfy_cfg.get("topic"):
-        ok(f"Notifications: ntfy -> {ntfy_cfg['server']}/{ntfy_cfg['topic']}")
+        ok("Notifications: ntfy -> private topic configured")
     else:
         console.print("     [dim]Notifications: off (set NTFY_TOPIC to enable push alerts)[/dim]")
 

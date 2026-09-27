@@ -63,7 +63,7 @@ class TestChainStall:
         event, broadcast_job = result.broadcasts[0]
         assert event == "chain_stalled"
         assert broadcast_job["id"] == "s04"
-        assert "never handed off" in result.notifications[0]["message"]
+        assert result.notifications == [{"job_id": "s04"}]
         assert delivery.CHAIN_STALLED in _events(db, "s04")
 
     def test_stall_is_handed_to_a_role_that_can_resume_it(self, db):
@@ -116,7 +116,7 @@ class TestChainStall:
         result = _sweep(db, {"MCO_CHAIN_STALL_TO_ROLE": ""})
         assert result.chain_stalled == ["s04"]          # still recorded and pushed
         assert db.table("agent_jobs").select("*").eq("status", "pending").execute().data == []
-        assert "Sent to" not in result.notifications[0]["message"]
+        assert result.notifications == [{"job_id": "s04"}]
 
     def test_kill_switch_stops_chain_detection_too(self, db):
         _done(db, "s04")

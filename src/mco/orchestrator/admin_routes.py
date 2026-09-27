@@ -333,7 +333,7 @@ SETTING_GROUPS = {
     },
     "notifications": {
         "NTFY_SERVER": {"type": "text", "label": "ntfy server", "placeholder": "https://ntfy.sh"},
-        "NTFY_TOPIC": {"type": "text", "label": "ntfy topic (blank = notifications off)"},
+        "NTFY_TOPIC": {"type": "secret", "label": "ntfy topic (blank = notifications off)"},
     },
     "connectors": {
         "SERVICENOW_INSTANCE_URL": {"type": "text", "label": "ServiceNow instance URL",

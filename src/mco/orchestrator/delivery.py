@@ -263,10 +263,6 @@ def sweep(
         result.broadcasts.append(("job_undeliverable", job))
         result.notifications.append({
             "job_id": job_id,
-            "title": "BitCadence job stuck",
-            "message": (f"'{job.get('title') or job_id}' for {job.get('target_agent_id') or role} "
-                        f"has waited {int(age // 60)} min and nothing can take it: {reason}. "
-                        f"Job {job_id}"),
         })
         result.escalated.append(job_id)
         _shadow_watchdog(result, jev_provider, db, job_id, "escalate", {
@@ -411,10 +407,6 @@ def _sweep_chain_stalls(db: Any, result: SweepResult, *, now: datetime,
 
         result.notifications.append({
             "job_id": job_id,
-            "title": "BitCadence chain stalled",
-            "message": (f"'{title}' finished but never handed off, and nothing is queued. "
-                        + (f"Sent to {to_role} to resume. " if to_role else "")
-                        + f"Job {job_id}"),
         })
 
 

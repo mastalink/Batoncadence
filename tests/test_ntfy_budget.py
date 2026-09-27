@@ -84,3 +84,28 @@ def test_notify_returns_false_without_sending_when_suppressed(monkeypatch):
     ntfy._last_sent[("BitCadence: alert", "Attention needed on operations (job unknown)")] = 10_000_000_000.0
     assert ntfy.notify("hello", title="BitCadence") is False
     assert calls == []
+
+
+def test_repeat_is_dropped_without_sns_or_batch(monkeypatch):
+    cfg = {"server": "https://example.invalid", "topic": "t", "token": None}
+    monkeypatch.setattr(ntfy, "get_ntfy_config", lambda: cfg)
+    posts = []
+    emails = []
+    monkeypatch.setattr(ntfy, "_post", lambda *a, **k: posts.append(1) or True)
+    monkeypatch.setattr(ntfy, "_send_sns_backup", lambda *a, **k: emails.append(1) or True)
+    assert ntfy.notify_event("alert", "1a2b3c4d") is True
+    assert ntfy.notify_event("alert", "1a2b3c4d") is False
+    assert posts == [1]
+    assert emails == [1]
+    assert list(ntfy._batched) == []
+
+
+def test_failed_batch_flush_keeps_items_and_releases_slot(monkeypatch):
+    cfg = {"server": "https://example.invalid", "topic": "t", "token": None}
+    monkeypatch.setattr(ntfy, "get_ntfy_config", lambda: cfg)
+    monkeypatch.setattr(ntfy, "_send_sns_backup", lambda *a, **k: True)
+    monkeypatch.setattr(ntfy, "_post", lambda *a, **k: False)
+    ntfy._batched.append(("BitCadence: alert", "safe", 4))
+    assert ntfy.flush_batched() is False
+    assert len(ntfy._batched) == 1
+    assert len(ntfy._push_sends) == 0

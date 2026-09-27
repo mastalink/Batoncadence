@@ -40,13 +40,16 @@ def test_notify_does_not_post_when_topic_unset(monkeypatch):
         "post",
         lambda *a, **k: posted.append((a, k)),
     )
+    emailed = []
+    monkeypatch.setattr(ntfy_mod, "_send_sns_backup", lambda *a, **k: emailed.append(1))
     assert ntfy_mod.notify("hello") is False
     ntfy_mod.notify_job_created("j1", "title", "claude")
     ntfy_mod.notify_gateway_startup({"host": "127.0.0.1", "port": 18789, "pid": 1})
     assert posted == []
+    assert emailed == []
 
 
-def test_notify_posts_when_topic_set(monkeypatch):
+def test_test_push_posts_when_private_topic_set(monkeypatch):
     monkeypatch.setattr(
         ntfy_mod, "get_config", lambda: _Cfg({"NTFY_TOPIC": "v7Jk2pQ9xN4mR8sT6wY3cF5hL1dB0zGa"})
     )
@@ -62,7 +65,7 @@ def test_notify_posts_when_topic_set(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(ntfy_mod.requests, "post", _post)
-    assert ntfy_mod.notify("hello") is True
+    assert ntfy_mod.send_test_push() is True
     assert posted == ["https://ntfy.sh/v7Jk2pQ9xN4mR8sT6wY3cF5hL1dB0zGa"]
 
 
@@ -86,10 +89,8 @@ def test_caller_cannot_override_destination_or_payload(monkeypatch):
             return None
 
     monkeypatch.setattr(ntfy_mod.requests, "post", lambda url, **kw: posted.append((url, kw)) or _Resp())
-    assert ntfy_mod.notify("household secret", title="mco-codex", topic="mco-codex", server="https://evil.invalid")
-    assert posted[0][0] == f"https://ntfy.sh/{topic}"
-    assert posted[0][1]["headers"]["Title"] == "BitCadence: alert"
-    assert b"household" not in posted[0][1]["data"]
+    assert ntfy_mod.notify("household secret", title="mco-codex", topic="mco-codex", server="https://evil.invalid") is False
+    assert posted == []
 
 
 def test_vault_topic_is_used_when_plain_config_is_missing(monkeypatch):

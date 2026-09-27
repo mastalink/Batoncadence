@@ -284,10 +284,14 @@ class TestSettings:
 
     def test_secret_values_never_echoed(self):
         _ctx().cfg.values["MCO_WEBHOOK_SECRET"] = "super-secret"
+        _ctx().cfg.values["NTFY_TOPIC"] = "private-topic-capability"
         resp = _ctx().http.get("/api/settings")
         security = {i["key"]: i for i in resp.json()["groups"]["security"]}
+        notifications = {i["key"]: i for i in resp.json()["groups"]["notifications"]}
         assert security["MCO_WEBHOOK_SECRET"]["value"] is True   # set, but masked
+        assert notifications["NTFY_TOPIC"]["value"] is True
         assert "super-secret" not in resp.text
+        assert "private-topic-capability" not in resp.text
 
     def test_put_whitelisted_bool_coerces(self):
         resp = _ctx().http.put("/api/settings", json={"MCO_KILL_SWITCH": True})

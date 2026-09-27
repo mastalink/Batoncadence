@@ -130,24 +130,38 @@ def _throttle_config(cfg: dict) -> tuple[int, int, int]:
     )
 
 
-def _allowed(message: str, title: Optional[str], priority: int, cfg: dict, now: float) -> bool:
-    """Enforce a hard ten-per-hour cap for every priority."""
+def _admission(message: str, title: Optional[str], priority: int, cfg: dict, now: float) -> str:
+    """Return ``allow``, ``repeat``, or ``cap`` and reserve allowed sends."""
     repeat_after, max_per_hour, _ = _throttle_config(cfg)
     key = (title or "", message)
     last = _last_sent.get(key)
     if last is not None and repeat_after and now - last < repeat_after:
         logger.debug("ntfy suppressed a repeated operator notification")
-        return False
+        return "repeat"
     while _push_sends and now - _push_sends[0] >= 3600:
         _push_sends.popleft()
     if max_per_hour == 0 or len(_push_sends) >= max_per_hour:
-        return False
+        return "cap"
     _push_sends.append(now)
     _last_sent[key] = now
     if len(_last_sent) > 512:
         for old in sorted(_last_sent, key=_last_sent.get)[:256]:
             _last_sent.pop(old, None)
-    return True
+    return "allow"
+
+
+def _allowed(message: str, title: Optional[str], priority: int, cfg: dict, now: float) -> bool:
+    """Compatibility boolean around the three-way admission decision."""
+    return _admission(message, title, priority, cfg, now) == "allow"
+
+
+def _rollback_admission(message: str, title: str, admitted_at: float) -> None:
+    """Undo a reserved slot after a failed post so maintenance may retry."""
+    _last_sent.pop((title, message), None)
+    try:
+        _push_sends.remove(admitted_at)
+    except ValueError:
+        pass
 
 
 def _short_id(job_id: str) -> str:
@@ -220,13 +234,19 @@ def _post(cfg: dict, message: str, title: str, priority: int) -> bool:
 
 def _deliver(message: str, title: str, priority: int, *, cfg: Optional[dict] = None) -> bool:
     cfg = cfg or get_ntfy_config()
-    # Email remains a backup for every push attempt, including a rate-limited
-    # ntfy send. This prevents the phone relay from becoming the only path.
-    _send_sns_backup(cfg, title, message)
-    if not _allowed(message, title, priority, cfg, time.time()):
+    if not cfg.get("topic"):
+        logger.warning("ntfy send skipped: no valid private topic is configured")
+        return False
+    admission = _admission(message, title, priority, cfg, time.time())
+    if admission == "repeat":
+        return False
+    if admission == "cap":
         _batched.append((title, message, priority))
         logger.warning("ntfy hourly cap reached; operator notification batched")
         return False
+    # One email backup for each admitted push. Suppressed repeats and overflow
+    # do not create duplicate mail; overflow gets one backup with its summary.
+    _send_sns_backup(cfg, title, message)
     return _post(cfg, message, title, priority)
 
 
@@ -248,11 +268,14 @@ def flush_batched() -> bool:
     now = time.time()
     summary = f"{len(_batched)} more items need attention (job batch)"
     title = _SAFE_TITLES["alert"]
-    if not _allowed(summary, title, 4, cfg, now):
+    if _admission(summary, title, 4, cfg, now) != "allow":
+        return False
+    _send_sns_backup(cfg, title, summary)
+    if not _post(cfg, summary, title, 4):
+        _rollback_admission(summary, title, now)
         return False
     _batched.clear()
-    _send_sns_backup(cfg, title, summary)
-    return _post(cfg, summary, title, 4)
+    return True
 
 
 def send_test_push() -> bool:
@@ -272,7 +295,7 @@ def notify(message: str, title: Optional[str] = None, priority: int = 3,
     :func:`notify_event`.
     """
     del message, title, priority, tags, topic, server, jev_provider
-    return notify_event("alert", "unknown")
+    return False
 
 
 def is_joseph_decision(title: str) -> bool:

@@ -115,7 +115,7 @@ class TestSweep:
         result = delivery.sweep(db, now=_later(STALL), config=BASE, online_roles=_online())
         assert result.escalated == ["job-1"]
         assert result.broadcasts[0][0] == "job_undeliverable"
-        assert "no online agent" in result.notifications[0]["message"]
+        assert result.notifications == [{"job_id": "job-1"}]
         assert _row(db)["target_agent_role"] == "codex"
         repeat = delivery.sweep(db, now=_later(STALL * 3), config=BASE, online_roles=_online())
         assert repeat.notifications == []
@@ -126,7 +126,7 @@ class TestSweep:
         delivery.sweep(db, config=BASE, online_roles=_online("claude"))
         result = delivery.sweep(db, now=_later(STALL), config=BASE, online_roles=_online("claude"))
         assert result.escalated == ["job-1"]
-        assert "no_reroute" in result.notifications[0]["message"]
+        assert result.notifications == [{"job_id": "job-1"}]
 
     def test_role_without_fallback_escalates(self, db):
         _job(db, age_seconds=STALL + 5, role="chief", instance="chief-beast")
