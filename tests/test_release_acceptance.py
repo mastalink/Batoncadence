@@ -229,7 +229,8 @@ def test_readiness_keeps_dead_fleet_accessible_and_rejects_dead_store(tmp_path,m
 def test_ntfy_cannot_override_configured_destination(monkeypatch):
     import mco.notifiers.ntfy as ntfy
     calls=[]
-    monkeypatch.setattr(ntfy,'get_config',lambda:FakeConfig(NTFY_TOPIC='private-unpredictable',NTFY_SERVER='https://push.example'))
+    private_topic='A9vK2xP7mQ4sT8wY5cF1hL6dB3zR0nGj'
+    monkeypatch.setattr(ntfy,'get_config',lambda:FakeConfig(NTFY_TOPIC=private_topic,NTFY_SERVER='https://push.example'))
     class Response:
         def raise_for_status(self):pass
     monkeypatch.setattr(ntfy.requests,'post',lambda url,**kw:(calls.append(url) or Response()))
@@ -237,6 +238,7 @@ def test_ntfy_cannot_override_configured_destination(monkeypatch):
     ntfy.notify_job_completed('j','completed','codex');ntfy.notify_job_failed('j','x','codex')
     ntfy.notify_job_needs_approval('j','title','codex');ntfy.notify_job_escalated('j','title','codex','x')
     ntfy.notify_force_pull('codex');ntfy.notify('x',topic='public',server='https://other.example')
-    assert len(calls)==8 and set(calls)=={'https://push.example/private-unpredictable'}
+    assert calls and set(calls)=={f'https://push.example/{private_topic}'}
+    assert all('mco-' not in url for url in calls)
     monkeypatch.setattr(ntfy,'get_config',lambda:FakeConfig())
     assert ntfy.notify('x',topic='public') is False

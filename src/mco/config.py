@@ -41,6 +41,9 @@ SENSITIVE_KEYS = {
     "MCO_TRUSTED_HEADER_SECRET",
     "MCO_VAULT_MASTER_KEY",
     "MCO_WEBHOOK_SECRET",
+    # A public ntfy topic is a bearer-like subscription capability. Keep it
+    # out of plaintext .env files just like an API token.
+    "NTFY_TOPIC",
 }
 
 # Secrets whose names are generated at runtime can never appear in a static

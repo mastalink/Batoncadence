@@ -262,10 +262,7 @@ def sweep(
                       "target_agent_id": job.get("target_agent_id")})
         result.broadcasts.append(("job_undeliverable", job))
         result.notifications.append({
-            "title": "BitCadence job stuck",
-            "message": (f"'{job.get('title') or job_id}' for {job.get('target_agent_id') or role} "
-                        f"has waited {int(age // 60)} min and nothing can take it: {reason}. "
-                        f"Job {job_id}"),
+            "job_id": job_id,
         })
         result.escalated.append(job_id)
         _shadow_watchdog(result, jev_provider, db, job_id, "escalate", {
@@ -409,10 +406,7 @@ def _sweep_chain_stalls(db: Any, result: SweepResult, *, now: datetime,
                 result.broadcasts.append(("job_pending", created[0]))
 
         result.notifications.append({
-            "title": "BitCadence chain stalled",
-            "message": (f"'{title}' finished but never handed off, and nothing is queued. "
-                        + (f"Sent to {to_role} to resume. " if to_role else "")
-                        + f"Job {job_id}"),
+            "job_id": job_id,
         })
 
 
@@ -420,11 +414,10 @@ def send_notifications(result: SweepResult) -> None:
     """Push escalations to the operator. Best-effort: ntfy is optional."""
     if not result.notifications:
         return
-    from mco.notifiers.ntfy import notify
+    from mco.notifiers.ntfy import notify_event
 
     for note in result.notifications:
         try:
-            notify(note["message"], title=note["title"], priority=4,
-                   tags=["mco", "delivery", "escalated"])   # urgent: never dropped for budget
+            notify_event("alert", note.get("job_id", "unknown"))
         except Exception as exc:  # pragma: no cover - notifier already swallows
             logger.debug(f"delivery escalation push skipped: {exc}")

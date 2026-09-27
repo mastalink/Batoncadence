@@ -1,274 +1,369 @@
-"""
-BitCadence NTFY Notifier Addon
-================================
+"""Private, payload-minimized operator notifications.
 
-Simple addon to push important MCO events and logs to ntfy.sh (or self-hosted ntfy server)
-via webhooks.
-
-Usage in BitCadence:
-- Set in .env or config:
-  NTFY_SERVER=https://ntfy.sh
-  NTFY_TOPIC=mco-events   # required to enable; blank = off (Local-Only default)
-  NTFY_LEVELS=INFO,WARNING,ERROR   # comma separated
-
-- Then from anywhere in the code:
-  from mco.notifiers.ntfy import notify
-  notify("New job for codex", priority=4, tags=["job", "codex"])
-
-This is intentionally lightweight so it can be used for both operational logging
-and "force pull" signals to agents.
+ntfy topics are bearer-like capabilities: anyone who can guess the public
+``ntfy.sh/<topic>`` URL can subscribe. This module therefore has one
+destination authority, rejects weak topics, and never derives a topic from a
+role, job, or caller argument. Public helpers also build the payload here so
+job titles, errors, hostnames, and other board data cannot reach the relay.
 """
 
 from __future__ import annotations
 
-import os
+import re
 import time
 from collections import deque
-from typing import Optional, List
+from typing import List, Optional
 
 import requests
 from loguru import logger
 
-
 from mco.config import get_config
+from mco.secret_vault import SecretNotFoundError, SecretRef, VaultError, build_secret_vault
 
-# Delivery budget. Every job transition pushes, so a busy hour used to exhaust
-# ntfy.sh's limit and the escalations - the only messages meant to reach a
-# person - came back 429 and were dropped.
-REPEAT_AFTER_SECONDS = 600     # identical (title, message) is sent at most this often
-MAX_ROUTINE_PER_HOUR = 20      # budget for routine traffic; urgent messages ignore it
-URGENT_PRIORITY = 4            # >= this is urgent: failures, approvals, escalations
-_last_sent: dict[tuple, float] = {}
-_routine_sends: deque = deque()
+
+REPEAT_AFTER_SECONDS = 600
+MAX_PUSHES_PER_HOUR = 10
+# Compatibility name for callers/tests from the older routine-only budget.
+MAX_ROUTINE_PER_HOUR = MAX_PUSHES_PER_HOUR
+URGENT_PRIORITY = 4
+MIN_PRIVATE_TOPIC_LENGTH = 32
+_SAFE_TITLES = {
+    "decision": "BitCadence: decision needed",
+    "alert": "BitCadence: alert",
+    "done": "BitCadence: done",
+    "test": "BitCadence: test",
+}
+_WEAK_TOPIC_PREFIXES = ("mco-", "codex", "claude", "grok", "gemini", "bitcadence")
+_GENERIC_PROJECTS = {"operations", "bitcadence", "simlab", "via", "moses", "mymeals"}
+_last_sent: dict[tuple[str, str], float] = {}
+_push_sends: deque[float] = deque()
+_routine_sends = _push_sends
+_batched: deque[tuple[str, str, int]] = deque(maxlen=1000)
 _last_rate_limit_log = [0.0]
 
 
-def get_ntfy_config() -> dict:
-    """Read ntfy settings from BitCadence config."""
+def _topic_ref(org_id: str = "default") -> SecretRef:
+    # Stable vault identity: default/ntfy/topic. The legacy key keeps existing
+    # local installs on NTFY_TOPIC while ConfigManager stores it encrypted.
+    return SecretRef(org_id=org_id, scope="ntfy", name="topic", legacy_config_key="NTFY_TOPIC")
+
+
+def _vault_topic(config, db=None, org_id: str = "default") -> str:
+    try:
+        return str(build_secret_vault(config, db).get(_topic_ref(org_id))).strip()
+    except (SecretNotFoundError, VaultError, ValueError):
+        return ""
+
+
+def _aws_vault_topic(config) -> str:
+    """Read the optional AWS vault key without ever logging its value."""
+    secret_id = str(config.get("NTFY_TOPIC_SECRET_ID") or "").strip()
+    if not secret_id:
+        return ""
+    try:
+        import boto3
+        profile = str(config.get("NTFY_AWS_PROFILE") or "").strip() or None
+        session = boto3.Session(profile_name=profile)
+        value = session.client("secretsmanager").get_secret_value(SecretId=secret_id)
+        return str(value.get("SecretString") or "").strip()
+    except Exception as exc:
+        logger.warning("ntfy vault topic unavailable ({})", type(exc).__name__)
+        return ""
+
+
+def topic_is_private(topic: str) -> bool:
+    """Conservatively accept only long, URL-safe, non-derived topics."""
+    value = str(topic or "").strip()
+    lowered = value.lower()
+    return (
+        len(value) >= MIN_PRIVATE_TOPIC_LENGTH
+        and re.fullmatch(r"[A-Za-z0-9_-]+", value) is not None
+        and not lowered.startswith(_WEAK_TOPIC_PREFIXES)
+        and len(set(value)) >= 12
+    )
+
+
+def get_ntfy_config(*, db=None, org_id: str = "default") -> dict:
+    """Resolve the one configured topic; a missing/weak topic disables sends."""
     config = get_config()
-    # Blank NTFY_TOPIC means off. Do not default to "mco-events"; that
-    # silently enabled public ntfy.sh on Local-Only installs.
+    # ConfigManager already overlays the encrypted local store. The explicit
+    # vault read adds the shared-vault path without a caller-supplied target.
+    topic = str(config.get("NTFY_TOPIC") or "").strip()
+    if not topic and str(config.get("MCO_SECRET_VAULT_BACKEND") or "local").lower() == "database":
+        if db is None:
+            try:
+                from mco.orchestrator.routes import get_db_client
+                db = get_db_client()
+            except Exception:
+                db = None
+        topic = _vault_topic(config, db, org_id)
+    if topic and not topic_is_private(topic):
+        logger.warning("ntfy disabled: configured topic is not a random private topic of at least 32 characters")
+        topic = ""
+    if not topic:
+        vault_topic = _aws_vault_topic(config)
+        if topic_is_private(vault_topic):
+            topic = vault_topic
+        elif vault_topic:
+            logger.warning("ntfy disabled: vault topic is not a random private topic of at least 32 characters")
     return {
-        "server": (config.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/"),
-        "topic": (config.get("NTFY_TOPIC") or "").strip(),
+        "server": str(config.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/"),
+        "topic": topic,
         "token": config.get("NTFY_TOKEN"),
-        "levels": [x.strip().upper() for x in config.get("NTFY_LEVELS", "INFO,WARNING,ERROR,CRITICAL").split(",")],
+        "sns_topic": config.get("SNS_TOPIC") or config.get("MCO_SNS_TOPIC"),
+        "aws_profile": config.get("NTFY_AWS_PROFILE"),
+        "max_per_hour": config.get("NTFY_MAX_PER_HOUR", MAX_PUSHES_PER_HOUR),
+        "repeat_after": config.get("NTFY_REPEAT_AFTER", REPEAT_AFTER_SECONDS),
     }
 
 
 def _throttle_config(cfg: dict) -> tuple[int, int, int]:
-    def _int(key, default):
+    def _int(value, default):
         try:
-            return max(0, int(cfg.get(key) or default))
+            return max(0, int(value if value is not None else default))
         except (TypeError, ValueError):
             return default
-    return (_int("NTFY_REPEAT_AFTER", REPEAT_AFTER_SECONDS),
-            _int("NTFY_MAX_PER_HOUR", MAX_ROUTINE_PER_HOUR),
-            _int("NTFY_URGENT_PRIORITY", URGENT_PRIORITY))
+    return (
+        _int(cfg.get("repeat_after", cfg.get("NTFY_REPEAT_AFTER")), REPEAT_AFTER_SECONDS),
+        min(MAX_PUSHES_PER_HOUR, _int(cfg.get("max_per_hour", cfg.get("NTFY_MAX_PER_HOUR")), MAX_PUSHES_PER_HOUR)),
+        URGENT_PRIORITY,
+    )
 
 
-def _allowed(message: str, title: Optional[str], priority: int, cfg: dict, now: float) -> bool:
-    """Spend the delivery budget on the messages that matter.
-
-    Routine traffic gets an hourly budget; urgent messages (priority >=
-    NTFY_URGENT_PRIORITY) ignore that budget and are only de-duplicated, so a
-    repeated alarm cannot spam and a flood of routine events cannot bury it.
-    """
-    repeat_after, max_routine, urgent_at = _throttle_config(cfg)
+def _admission(message: str, title: Optional[str], priority: int, cfg: dict, now: float) -> str:
+    """Return ``allow``, ``repeat``, or ``cap`` and reserve allowed sends."""
+    repeat_after, max_per_hour, _ = _throttle_config(cfg)
     key = (title or "", message)
     last = _last_sent.get(key)
     if last is not None and repeat_after and now - last < repeat_after:
-        logger.debug("ntfy suppressed a repeat of {}", title)
-        return False
-    if priority < urgent_at and max_routine:
-        while _routine_sends and now - _routine_sends[0] > 3600:
-            _routine_sends.popleft()
-        if len(_routine_sends) >= max_routine:
-            logger.debug("ntfy routine budget spent; dropping {}", title)
-            return False
-        _routine_sends.append(now)
+        logger.debug("ntfy suppressed a repeated operator notification")
+        return "repeat"
+    while _push_sends and now - _push_sends[0] >= 3600:
+        _push_sends.popleft()
+    if max_per_hour == 0 or len(_push_sends) >= max_per_hour:
+        return "cap"
+    _push_sends.append(now)
     _last_sent[key] = now
-    if len(_last_sent) > 512:      # bounded; drop the oldest half
+    if len(_last_sent) > 512:
         for old in sorted(_last_sent, key=_last_sent.get)[:256]:
             _last_sent.pop(old, None)
+    return "allow"
+
+
+def _allowed(message: str, title: Optional[str], priority: int, cfg: dict, now: float) -> bool:
+    """Compatibility boolean around the three-way admission decision."""
+    return _admission(message, title, priority, cfg, now) == "allow"
+
+
+def _rollback_admission(message: str, title: str, admitted_at: float) -> None:
+    """Undo a reserved slot after a failed post so maintenance may retry."""
+    _last_sent.pop((title, message), None)
+    try:
+        _push_sends.remove(admitted_at)
+    except ValueError:
+        pass
+
+
+def _short_id(job_id: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9]", "", str(job_id or ""))
+    return clean[:8].lower() or "unknown"
+
+
+def _generic_project(project: str) -> str:
+    value = re.sub(r"[^a-z0-9]", "", str(project or "").lower())
+    return value if value in _GENERIC_PROJECTS else "operations"
+
+
+def _body(kind: str, job_id: str, project: str = "operations", count: int = 0) -> str:
+    short = _short_id(job_id)
+    project = _generic_project(project)
+    if kind == "decision":
+        return f"Decision waiting on {project} (job {short})"
+    if kind == "done":
+        return f"Work finished on {project} (job {short})"
+    if kind == "digest":
+        return f"{max(1, int(count))} things need you today (job {short})"
+    return f"Attention needed on {project} (job {short})"
+
+
+def _send_sns_backup(cfg: dict, title: str, message: str) -> bool:
+    """Best-effort email backup through the already-subscribed SNS topic."""
+    topic_arn = str(cfg.get("sns_topic") or "").strip()
+    if not topic_arn:
+        logger.warning("SNS backup skipped: SNS_TOPIC is not configured")
+        return False
+    try:
+        import boto3
+        region = topic_arn.split(":", 4)[3] if topic_arn.startswith("arn:aws:sns:") else None
+        session = boto3.Session(profile_name=str(cfg.get("aws_profile") or "").strip() or None)
+        session.client("sns", region_name=region or None).publish(
+            TopicArn=topic_arn, Subject=title[:100], Message=message,
+        )
+        return True
+    except Exception as exc:  # never include an ARN or payload in logs
+        logger.warning("SNS backup delivery failed ({})", type(exc).__name__)
+        return False
+
+
+def _post(cfg: dict, message: str, title: str, priority: int) -> bool:
+    if not cfg.get("topic"):
+        logger.warning("ntfy send skipped: no valid private topic is configured")
+        return False
+    try:
+        headers = {"Title": title, "Priority": str(priority)}
+        if cfg.get("token"):
+            headers["Authorization"] = f"Bearer {cfg['token']}"
+        response = requests.post(
+            f"{cfg['server']}/{cfg['topic']}",
+            data=message.encode("utf-8"), headers=headers, timeout=10,
+        )
+        response.raise_for_status()
+        logger.debug("ntfy operator notification accepted")
+        return True
+    except Exception as exc:  # request exceptions may contain the secret URL
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 429 and time.time() - _last_rate_limit_log[0] > 600:
+            _last_rate_limit_log[0] = time.time()
+            logger.warning("ntfy relay rate-limited operator notifications")
+        elif status:
+            logger.warning("ntfy delivery failed with HTTP status {}", status)
+        else:
+            logger.warning("ntfy delivery failed ({})", type(exc).__name__)
+        return False
+
+
+def _deliver(message: str, title: str, priority: int, *, cfg: Optional[dict] = None) -> bool:
+    cfg = cfg or get_ntfy_config()
+    if not cfg.get("topic"):
+        logger.warning("ntfy send skipped: no valid private topic is configured")
+        return False
+    admission = _admission(message, title, priority, cfg, time.time())
+    if admission == "repeat":
+        return False
+    if admission == "cap":
+        _batched.append((title, message, priority))
+        logger.warning("ntfy hourly cap reached; operator notification batched")
+        return False
+    # One email backup for each admitted push. Suppressed repeats and overflow
+    # do not create duplicate mail; overflow gets one backup with its summary.
+    _send_sns_backup(cfg, title, message)
+    return _post(cfg, message, title, priority)
+
+
+def notify_event(kind: str, job_id: str, *, project: str = "operations", count: int = 0) -> bool:
+    """Send one minimized event. Callers provide no relay-visible prose."""
+    normalized = "alert" if kind == "digest" else kind
+    if normalized not in _SAFE_TITLES or normalized == "test":
+        raise ValueError("unsupported operator notification kind")
+    title = _SAFE_TITLES[normalized]
+    priority = 4 if normalized in {"decision", "alert"} else 3
+    return _deliver(_body(kind, job_id, project, count), title, priority)
+
+
+def flush_batched() -> bool:
+    """Collapse overflow into one neutral push when the hourly window opens."""
+    if not _batched:
+        return False
+    cfg = get_ntfy_config()
+    now = time.time()
+    summary = f"{len(_batched)} more items need attention (job batch)"
+    title = _SAFE_TITLES["alert"]
+    if _admission(summary, title, 4, cfg, now) != "allow":
+        return False
+    _send_sns_backup(cfg, title, summary)
+    if not _post(cfg, summary, title, 4):
+        _rollback_admission(summary, title, now)
+        return False
+    _batched.clear()
     return True
 
 
-def notify(
-    message: str,
-    title: Optional[str] = None,
-    priority: int = 3,          # 1-5, 5 = emergency
-    tags: Optional[List[str]] = None,
-    topic: Optional[str] = None,
-    server: Optional[str] = None,
-    jev_provider=None,
-) -> bool:
-    """
-    Send a notification to ntfy.
-
-    Returns True on success, False on failure (errors are logged but do not crash the orchestrator).
-    """
-    cfg = get_ntfy_config()
-    if not cfg["topic"]:
-        return False
-    if not _allowed(message, title, priority, cfg, time.time()):
-        return False
-    _shadow_notify(title, message, priority, jev_provider)
-    server = cfg["server"]
-    topic = cfg["topic"]  # Configuration is the sole destination authority.
-
-    url = f"{server}/{topic}"
-
-    headers = {
-        "Title": title or "BitCadence",
-        "Priority": str(priority),
-    }
-    if tags:
-        headers["Tags"] = ",".join(tags)
-
-    token = cfg.get("token")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    try:
-        resp = requests.post(url, data=message.encode("utf-8"), headers=headers, timeout=10)
-        resp.raise_for_status()
-        logger.debug(f"ntfy notification sent to {topic}")
-        return True
-    except Exception as e:
-        # A 429 means even this budget is too generous for that server; say so
-        # occasionally rather than once per dropped message.
-        if "429" in str(e):
-            if time.time() - _last_rate_limit_log[0] > 600:
-                _last_rate_limit_log[0] = time.time()
-                logger.warning("ntfy is rate-limiting this topic (429). Lower NTFY_MAX_PER_HOUR "
-                               "or host your own ntfy server; some notifications were dropped.")
-        else:
-            logger.warning(f"Failed to send ntfy notification: {e}")
-        return False
-
-
-def _shadow_notify(title: Optional[str], message: str, priority: int, provider) -> None:
-    """Annotate a push that `_allowed` already admitted. Never changes the send."""
-    try:
-        from mco.orchestrator.jev_ops import annotate_notification
-        key = (title or "", message)
-        recent = [
-            {"title": t, "message": m}
-            for (t, m) in list(_last_sent.keys())[-20:]
-            if (t, m) != key
-        ]
-        annotate_notification(
-            provider,
-            title=title,
-            message=message,
-            deterministic_priority=priority,
-            recent=recent,
-        )
-    except Exception:
-        logger.debug("ntfy shadow annotation skipped")
-
-
-# Convenience wrappers for common MCO events
-def notify_job_created(job_id: str, title: str, to_role: str):
-    notify(
-        f"New MCO job for {to_role}: {title}",
-        title="BitCadence Job Created",
-        priority=3,
-        tags=["mco", "job", to_role.lower()],
+def send_test_push() -> bool:
+    return _deliver(
+        "Your fleet can reach you. No action needed.",
+        _SAFE_TITLES["test"], 3,
     )
+
+
+def notify(message: str, title: Optional[str] = None, priority: int = 3,
+           tags: Optional[List[str]] = None, topic: Optional[str] = None,
+           server: Optional[str] = None, jev_provider=None) -> bool:
+    """Compatibility entry point that intentionally discards caller prose.
+
+    ``topic`` and ``server`` remain accepted only to avoid breaking extensions;
+    neither can influence the destination. New code should use
+    :func:`notify_event`.
+    """
+    del message, title, priority, tags, topic, server, jev_provider
+    return False
+
+
+def is_joseph_decision(title: str) -> bool:
+    lowered = str(title or "").strip().lower()
+    return lowered.startswith("joseph decision") or lowered.startswith("cio approval")
+
+
+def notify_job_created(job_id: str, title: str, to_role: str):
+    del to_role
+    if is_joseph_decision(title):
+        return notify_event("decision", job_id)
+    return False
 
 
 def notify_job_leased(job_id: str, agent_id: str, to_role: str):
-    notify(
-        f"🏃 Job {job_id} leased by {agent_id} ({to_role})",
-        title="BitCadence Job Leased",
-        priority=2,
-        tags=["mco", "job", "leased", to_role.lower()],
-    )
+    del job_id, agent_id, to_role
+    return False
 
 
 def notify_job_completed(job_id: str, status: str, to_role: str):
-    emoji = "✅" if status.lower() in ("success", "done", "completed") else "❌"
-    notify(
-        f"{emoji} Job {job_id} for {to_role} -> {status}",
-        title="BitCadence Job Completed",
-        priority=2 if status.lower() in ("success", "done", "completed") else 4,
-        tags=["mco", "job", status.lower(), to_role.lower()],
-    )
+    del job_id, status, to_role
+    return False
 
 
 def notify_job_failed(job_id: str, error: str, to_role: str):
-    notify(
-        f"❌ Job {job_id} for {to_role} FAILED: {error}",
-        title="BitCadence Job FAILED",
-        priority=5,
-        tags=["mco", "job", "failed", to_role.lower()],
-    )
+    del error, to_role
+    return notify_event("alert", job_id)
 
 
 def notify_job_needs_approval(job_id: str, title: str, to_role: str):
-    """Human-in-the-loop gate: a job is paused waiting for an approval decision."""
-    notify(
-        f"Job {job_id} for {to_role} awaits approval: {title}",
-        title="BitCadence Approval Required",
-        priority=4,
-        tags=["mco", "job", "approval", to_role.lower()],
-    )
+    del to_role
+    if is_joseph_decision(title):
+        return notify_event("decision", job_id)
+    return False
 
 
 def notify_job_escalated(job_id: str, title: str, escalate_to_role: str, error: str):
-    """A job exhausted retries and was escalated to another role."""
-    notify(
-        f"Job {job_id} escalated to {escalate_to_role}: {title}\nLast error: {error}",
-        title="BitCadence Job ESCALATED",
-        priority=5,
-        tags=["mco", "job", "escalated", escalate_to_role.lower()],
-    )
+    del title, escalate_to_role, error
+    return notify_event("alert", job_id)
+
+
+def notify_sidecar_escalation(job_id: str, project: str = "operations"):
+    return notify_event("decision", job_id, project=project)
+
+
+def notify_operate_alert(job_id: str, project: str = "operations"):
+    return notify_event("alert", job_id, project=project)
+
+
+def notify_sns_alarm(alarm_id: str, project: str = "operations"):
+    return notify_event("alert", alarm_id, project=project)
 
 
 def notify_force_pull(role: str, reason: str = "Manual trigger"):
-    """Special signal used by force-pull scripts."""
-    notify(
-        f"FORCE_PULL instruction for {role}. Reason: {reason}. Please run your MCO loop immediately.",
-        title=f"FORCE MCO PULL - {role}",
-        priority=5,   # highest
-        tags=["mco", "force-pull", role.lower()],
-    )
+    del role, reason
+    return notify_event("alert", "manual")
 
 
 def notify_agent_online(role: str, instance_id: str):
-    notify(
-        f"Agent online: {role} ({instance_id})",
-        title="BitCadence Agent Online",
-        priority=2,
-        tags=["mco", "agent", "online", role.lower()],
-    )
+    del role, instance_id
+    return False
 
 
 def notify_agent_offline(role: str, instance_id: str):
-    notify(
-        f"Agent offline: {role} ({instance_id})",
-        title="BitCadence Agent Offline",
-        priority=3,
-        tags=["mco", "agent", "offline", role.lower()],
-    )
+    del role, instance_id
+    return False
 
 
 def notify_gateway_startup(stats: dict):
-    """Send a rich startup message with current system state."""
-    msg_lines = [
-        f"Gateway started on {stats.get('host')}:{stats.get('port')}",
-        f"PID: {stats.get('pid')}",
-        f"Agents: {stats.get('agent_count', 0)} total ({stats.get('online_count', 0)} online)",
-        f"Pending jobs: {stats.get('pending_jobs', 0)}",
-    ]
-    if stats.get('process_count'):
-        msg_lines.append(f"Processes: {stats.get('process_count')}")
-    
-    notify(
-        "\n".join(msg_lines),
-        title="BitCadence Gateway Started",
-        priority=2,
-        tags=["gateway", "startup", "mco"],
-    )
+    del stats
+    return False
