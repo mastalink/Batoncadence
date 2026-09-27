@@ -267,13 +267,17 @@ async def _unlock_dependents(
             unlocked_job = unlock_res.data[0]
             record_event(db_client, waiting_job["id"], f"status:{next_status}",
                          "system", "orchestrator", {"unlocked_by": task_id})
-            if next_status == JobStatus.NEEDS_APPROVAL.value:
-                try:
+            try:
+                if next_status == JobStatus.NEEDS_APPROVAL.value:
                     from mco.notifiers.ntfy import notify_job_needs_approval
                     notify_job_needs_approval(waiting_job["id"], unlocked_job.get("title", ""),
                                               unlocked_job.get("target_agent_role", "unknown"))
-                except Exception:
-                    pass
+                else:
+                    from mco.notifiers.ntfy import notify_job_created
+                    notify_job_created(waiting_job["id"], unlocked_job.get("title", ""),
+                                       unlocked_job.get("target_agent_role", "unknown"))
+            except Exception:
+                pass
             await broadcast_event(event_name, unlocked_job)
 
 

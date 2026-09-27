@@ -110,6 +110,8 @@ async def delivery_once():
             except Exception as exc:
                 logger.warning(f"Delivery broadcast failed for {job.get('id')}: {type(exc).__name__}")
     await asyncio.to_thread(delivery.send_notifications, result)
+    from mco.orchestrator import operator_notifications
+    await asyncio.to_thread(operator_notifications.maintenance_once, db)
     if result.rekicked or result.rerouted or result.escalated:
         logger.info("Delivery sweep: rekicked=%s rerouted=%s escalated=%s",
                     result.rekicked, result.rerouted, result.escalated)
@@ -201,7 +203,7 @@ async def _sleep_until(interval, stop) -> bool:
 
 
 async def readyz(request: Request):
-    from mco.orchestrator.routes import get_db_client, decorate_presence, get_offline_after_seconds
+    from mco.orchestrator.routes import get_db_client, get_offline_after_seconds
     from mco.orchestrator import score_sweep
     from mco.config import get_config
     checks = {}

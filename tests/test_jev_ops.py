@@ -61,10 +61,12 @@ def db(tmp_path):
 def _clean_ntfy():
     ntfy._last_sent.clear()
     ntfy._routine_sends.clear()
+    ntfy._batched.clear()
     ntfy._last_rate_limit_log[0] = 0.0
     yield
     ntfy._last_sent.clear()
     ntfy._routine_sends.clear()
+    ntfy._batched.clear()
 
 
 def _shadow_provider(payload, mode="shadow"):
@@ -222,17 +224,17 @@ class TestDisabledModeParity:
         assert escalated.escalated == ["job-2"]
         assert "jev_decision" not in _events(db, "job-2")
 
-    def test_ntfy_budget_urgent_bypass_and_dedup_unchanged(self):
+    def test_ntfy_hard_budget_and_dedup_unchanged(self):
         from tests.test_ntfy_budget import (
             test_identical_message_is_not_repeated_within_the_window,
             test_routine_traffic_has_an_hourly_budget,
             test_urgent_messages_are_still_de_duplicated,
-            test_urgent_messages_ignore_the_budget,
+            test_urgent_messages_share_the_hard_budget,
         )
         for fn in (
             test_identical_message_is_not_repeated_within_the_window,
             test_routine_traffic_has_an_hourly_budget,
-            test_urgent_messages_ignore_the_budget,
+            test_urgent_messages_share_the_hard_budget,
             test_urgent_messages_are_still_de_duplicated,
         ):
             ntfy._last_sent.clear()
@@ -301,10 +303,10 @@ class TestShadowDoesNotApply:
         assert result.jev_annotations[-1]["action"] == "retry"
         assert result.jev_annotations[-1]["applied"] is False
 
-    def test_ntfy_keeps_caller_priority_when_jev_demotes(self, monkeypatch):
+    def test_ntfy_hard_cap_cannot_be_bypassed_by_priority(self, monkeypatch):
         provider = _shadow_provider(_notify_payload(urgency="routine", duplicate=0.99))
         monkeypatch.setattr(ntfy, "get_ntfy_config", lambda: {
-            "server": "https://example.invalid", "topic": "t", "token": None, "levels": [],
+            "server": "https://example.invalid", "topic": "A9vK2xP7mQ4sT8wY5cF1hL6dB3zR0nGj", "token": None,
         })
         posted = []
 
@@ -317,11 +319,11 @@ class TestShadowDoesNotApply:
             return _Resp()
 
         monkeypatch.setattr(ntfy.requests, "post", _post)
-        for i in range(ntfy.MAX_ROUTINE_PER_HOUR):
-            assert ntfy.notify(f"job {i}", title="routine", priority=3) is True
-        assert ntfy.notify("one too many", title="routine-extra", priority=3) is False
-        assert ntfy.notify("a job is stuck", title="Alarm", priority=5, jev_provider=provider) is True
-        assert posted[-1]["headers"]["Priority"] == "5"
+        for i in range(ntfy.MAX_PUSHES_PER_HOUR):
+            assert ntfy.notify_event("alert", f"job-{i}") is True
+        assert ntfy.notify_event("alert", "one-too-many") is False
+        assert ntfy.notify("a job is stuck", title="Alarm", priority=5, jev_provider=provider) is False
+        assert len(posted) == ntfy.MAX_PUSHES_PER_HOUR
         annotation = annotate_notification(
             provider, title="Alarm", message="a job is stuck", deterministic_priority=5,
         )
@@ -339,10 +341,10 @@ class TestShadowDoesNotApply:
             transport=httpx.MockTransport(forbidden),
         )
         monkeypatch.setattr(ntfy, "get_ntfy_config", lambda: {
-            "server": "https://example.invalid", "topic": "t", "token": None, "levels": [],
+            "server": "https://example.invalid", "topic": "A9vK2xP7mQ4sT8wY5cF1hL6dB3zR0nGj", "token": None,
         })
         monkeypatch.setattr(ntfy.requests, "post", lambda *a, **k: (_ for _ in ()).throw(AssertionError("post")))
-        ntfy._last_sent[("BitCadence", "hello")] = 10_000_000_000.0
+        ntfy._last_sent[("BitCadence: alert", "Attention needed on operations (job unknown)")] = 10_000_000_000.0
         assert ntfy.notify("hello", title="BitCadence", jev_provider=provider) is False
 
 
