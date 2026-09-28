@@ -369,6 +369,29 @@ async def get_jobs(
         if not include_archived:
             jobs = [j for j in jobs if not j.get("archived")]
 
+        # Project names live outside execution payloads. Overlay the reviewed
+        # assignment for presentation while leaving the stored job untouched.
+        try:
+            rows = db_client.table("job_project_assignments").select("*").eq(
+                "org_id", agent_org(agent)
+            ).execute().data or []
+            assignments = {row.get("job_id"): row for row in rows}
+            jobs = [
+                {
+                    **job,
+                    "project": {
+                        "id": assignments[job.get("id")].get("project_id"),
+                        "name": assignments[job.get("id")].get("project_name"),
+                    },
+                }
+                if job.get("id") in assignments else job
+                for job in jobs
+            ]
+        except Exception as exc:
+            # Older hosted installs may briefly serve before the additive
+            # migration lands. The board still works and shows Unassigned.
+            logger.debug("Project assignments unavailable: %s", exc)
+
         if effective_sort == "created_asc":
             jobs.sort(key=lambda j: j.get("created_at") or "")
         elif effective_sort == "created_desc":
@@ -385,6 +408,41 @@ async def get_jobs(
     except Exception as e:
         logger.error(f"Error fetching jobs: {e}")
         return []
+
+
+@router.get("/project-view")
+async def get_project_view_jobs(agent: dict = Depends(require_scopes("jobs:read"))):
+    """Return the complete non-archived job set used by the Projects view.
+
+    The Job Board keeps its fast 100-row window. This path pages explicitly so
+    project counts and Unassigned coverage are not silently based on that page.
+    A hard ceiling prevents an unbounded console response and is reported.
+    """
+    db_client = get_db_client()
+    if not db_client:
+        return {"jobs": [], "count": 0, "truncated": False}
+    page_size, ceiling, offset = 500, 5000, 0
+    jobs = []
+    while offset < ceiling:
+        rows = db_client.table("agent_jobs").select("*").eq(
+            "org_id", agent_org(agent)
+        ).order("id", desc=False).range(offset, offset + page_size - 1).execute().data or []
+        jobs.extend(j for j in rows if not j.get("archived"))
+        offset += len(rows)
+        if len(rows) < page_size:
+            break
+    truncated = offset >= ceiling and len(rows) == page_size
+    try:
+        rows = db_client.table("job_project_assignments").select("*").eq(
+            "org_id", agent_org(agent)
+        ).execute().data or []
+        assignments = {row.get("job_id"): row for row in rows}
+        jobs = [{**job, "project": {"id": assignments[job["id"]].get("project_id"),
+                 "name": assignments[job["id"]].get("project_name")}}
+                if job.get("id") in assignments else job for job in jobs]
+    except Exception as exc:
+        logger.debug("Project assignments unavailable: %s", exc)
+    return {"jobs": jobs, "count": len(jobs), "truncated": truncated, "ceiling": ceiling}
 
 
 @router.get("/capabilities")
@@ -1104,6 +1162,46 @@ def _load_job_in_org(db_client, job_id: str, agent: dict) -> dict:
     if job_org(job) != agent_org(agent):
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.post("/{job_id}/project")
+async def assign_job_project(job_id: str, payload: dict = None,
+                             agent: dict = Depends(require_scopes("jobs:write"))):
+    """Set or clear a reviewed presentation-only project assignment."""
+    db_client = get_db_client()
+    if not db_client:
+        raise HTTPException(status_code=400, detail="Database not configured")
+    _load_job_in_org(db_client, job_id, agent)
+    raw_name = (payload or {}).get("name")
+    if raw_name is not None and not isinstance(raw_name, str):
+        raise HTTPException(status_code=400, detail="project name must be a string")
+    name = (raw_name or "").strip()
+    if len(name) > 80:
+        raise HTTPException(status_code=400, detail="project name must be 80 characters or fewer")
+    org_id = agent_org(agent)
+    previous_rows = db_client.table("job_project_assignments").select("*").eq(
+        "job_id", job_id
+    ).eq("org_id", org_id).execute().data or []
+    previous = previous_rows[0] if previous_rows else None
+    if not name:
+        db_client.table("job_project_assignments").delete().eq("job_id", job_id).eq(
+            "org_id", org_id
+        ).execute()
+        assignment = None
+    else:
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "project"
+        assignment = {
+            "job_id": job_id, "org_id": org_id, "project_id": slug[:80],
+            "project_name": name, "assigned_by": agent["instance_id"],
+            "assigned_by_role": agent["role"], "updated_at": _utc_now_iso(),
+        }
+        result = db_client.table("job_project_assignments").upsert(assignment).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Project assignment failed to persist")
+    record_event(db_client, job_id, "project_assigned" if assignment else "project_cleared",
+                 agent["instance_id"], agent["role"],
+                 {"assignment": assignment, "previous_assignment": previous})
+    return {"success": True, "assignment": assignment}
 
 
 @router.post("/{job_id}/cancel")

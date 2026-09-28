@@ -28,6 +28,10 @@
   let ws = null, wsOk = false, wsRetryTimer = null, wsBackoff = 2000;
 
   let jobs = [];
+  let projectJobs = [];
+  let projectCoverage = { count: 0, truncated: false, ceiling: 5000 };
+  let projectFetchedAt = 0;
+  let projectFetchPromise = null;
   let agents = [];
   let eventsCache = {};
   let prevStatus = {};
@@ -105,6 +109,23 @@
     }
   }
 
+  async function refreshProjectView(force) {
+    if (!isLive()) return;
+    if (!force && projectFetchedAt && Date.now() - projectFetchedAt < 60000) return;
+    if (projectFetchPromise) return projectFetchPromise;
+    projectFetchPromise = api("/api/jobs/project-view").then((projectView) => {
+      projectJobs = ((projectView && projectView.jobs) || []).map(withWorkflow);
+      projectCoverage = {
+        count: Number(projectView && projectView.count) || projectJobs.length,
+        truncated: !!(projectView && projectView.truncated),
+        ceiling: Number(projectView && projectView.ceiling) || 5000,
+      };
+      projectFetchedAt = Date.now();
+      emit();
+    }).finally(() => { projectFetchPromise = null; });
+    return projectFetchPromise;
+  }
+
   function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
     // With a live WebSocket feed, polling is just a safety net (agents list,
@@ -172,7 +193,9 @@
         localStorage.setItem("bitcadence_conn", JSON.stringify(cfg));
         demo.stopSim();
         connState = "live";
-        jobs = []; agents = []; eventsCache = {}; prevStatus = {}; liveActivity = [];
+        jobs = []; projectJobs = []; projectFetchedAt = 0;
+        projectCoverage = { count: 0, truncated: false, ceiling: 5000 };
+        agents = []; eventsCache = {}; prevStatus = {}; liveActivity = [];
         await poll();
         startPolling();
         startWs();
@@ -190,6 +213,8 @@
       stopWs();
       stopPolling();
       connState = "demo"; lastError = null;
+      projectJobs = []; projectFetchedAt = 0;
+      projectCoverage = { count: 0, truncated: false, ceiling: 5000 };
       localStorage.removeItem("bitcadence_conn");
       localStorage.removeItem("baton_conn");
       toast("info", "Demo mode", "Showing simulated data again.");
@@ -198,6 +223,11 @@
 
     // ---- reads ----
     getJobs: () => connState === "demo" ? demo.getJobs() : jobs.slice(),
+    getProjectJobs: () => connState === "demo" ? demo.getJobs() : (projectFetchedAt ? projectJobs.slice() : jobs.slice()),
+    getProjectCoverage: () => connState === "demo"
+      ? { count: demo.getJobs().length, truncated: false, ceiling: 5000 }
+      : projectFetchedAt ? { ...projectCoverage } : { count: jobs.length, truncated: false, ceiling: 5000 },
+    refreshProjectView,
     getAgents: () => connState === "demo" ? demo.getAgents() : agents.slice(),
     getEvents(jobId) {
       if (connState === "demo") return demo.getEvents(jobId);
@@ -247,6 +277,14 @@
       }
       catch (e) { toast("err", "Reassign failed", e.message + " (reassign needs an approver-role token)"); }
     },
+    async assignProject(jobId, name) {
+      if (connState === "demo") return demo.assignProject(jobId, name);
+      try {
+        await api("/api/jobs/" + jobId + "/project", { method: "POST", body: JSON.stringify({ name: String(name || "").trim() }) });
+        await refreshProjectView(true);
+        toast("ok", name ? "Project assigned" : "Project cleared", name || "The job is now unassigned.");
+      } catch (e) { toast("err", "Project assignment failed", e.message); throw e; }
+    },
     async batchAction(action, jobIds, extra = {}) {
       if (connState === "demo") {
         const res = demo.batchAction ? demo.batchAction(action, jobIds, extra) : { ok: true, success_count: jobIds.length, failure_count: 0 };
@@ -278,6 +316,7 @@
       // topo order: place steps whose deps are all already submitted
       const remaining = steps.slice();
       const idMap = {};
+      const run = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
       try {
         let guard = 0;
         while (remaining.length && guard++ < steps.length + 2) {
@@ -293,6 +332,7 @@
                   requires_approval: !!s.requires_approval,
                   max_retries: s.max_retries || 0,
                   escalate_to_role: s.escalate_to_role || null,
+                  input_payload: { workflow: { name, run, step: s.tmpId } },
                 }),
               });
               idMap[s.tmpId] = res.job.id;

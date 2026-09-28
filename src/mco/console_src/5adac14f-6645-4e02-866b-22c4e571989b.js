@@ -24,6 +24,184 @@ const JOB_SORTS = [
 const jobPriority = (j) => Number(j && j.priority) || 0;
 const jobTime = (j) => new Date(j.updated_at || j.created_at || 0).getTime() || 0;
 
+// Projects are a human-facing projection of the job board, not a second source
+// of truth. Prefer an explicit project stamp, fall back to the workflow stamp
+// already written by workflow submission, and keep everything else visible in
+// an honest Unassigned bucket. Jev may suggest stamps upstream, but this view
+// never invents or persists an assignment.
+const PROJECT_TERMINAL = ["completed", "failed", "rejected", "cancelled", "halted"];
+const PROJECT_PROBLEMS = ["failed", "rejected", "halted"];
+
+function humanizeProjectName(value) {
+  const text = String(value || "").trim().replace(/^project[:/\s-]*/i, "");
+  if (!text) return "";
+  return text
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function projectKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project";
+}
+
+function declaredProject(job) {
+  const payload = job && typeof job.input_payload === "object" && job.input_payload ? job.input_payload : {};
+  const explicit = job.project || job.project_name || job.project_id || payload.project || payload.project_name || payload.project_id;
+  if (explicit && typeof explicit === "object") {
+    const key = explicit.id || explicit.slug || explicit.name || explicit.title;
+    const label = explicit.name || explicit.title || explicit.slug || explicit.id;
+    if (key) return { id: "project:" + projectKey(key), name: humanizeProjectName(label), source: "declared project" };
+  } else if (explicit) {
+    return { id: "project:" + projectKey(explicit), name: humanizeProjectName(explicit), source: "declared project" };
+  }
+
+  const workflow = payload.workflow || job.workflow;
+  if (workflow && typeof workflow === "object" && workflow.name) {
+    return { id: "workflow:" + String(workflow.name), name: humanizeProjectName(workflow.name), source: "workflow" };
+  }
+  if (workflow && typeof workflow === "string") {
+    return { id: "workflow:" + workflow, name: humanizeProjectName(workflow), source: "workflow" };
+  }
+  return { id: "unassigned", name: "Unassigned work", source: "unassigned" };
+}
+
+function projectHealth(jobs) {
+  const counts = {};
+  jobs.forEach((j) => { counts[j.status] = (counts[j.status] || 0) + 1; });
+  const completed = counts.completed || 0;
+  const total = jobs.length;
+  const decision = jobs.find((j) => j.status === "needs_approval");
+  const problem = jobs.find((j) => PROJECT_PROBLEMS.includes(j.status));
+  const working = jobs.find((j) => ["leased", "in_progress"].includes(j.status));
+  const ready = jobs.find((j) => j.status === "pending");
+  const waiting = jobs.find((j) => j.status === "waiting");
+
+  if (decision) return { rank: 0, state: "Needs decision", status: "needs_approval", next: `Review “${decision.title}”` };
+  if (problem) return { rank: 1, state: "Needs attention", status: "failed", next: `Resolve “${problem.title}”` };
+  if (working) return { rank: 2, state: "In progress", status: "in_progress", next: `Working on “${working.title}”` };
+  if (ready) return { rank: 3, state: "Ready", status: "pending", next: `Start “${ready.title}”` };
+  if (waiting) return { rank: 4, state: "Waiting", status: "waiting", next: `Waiting to unlock “${waiting.title}”` };
+  if (completed === total && total > 0) return { rank: 6, state: "Complete", status: "completed", next: "No action needed" };
+  return { rank: 5, state: "Closed", status: "cancelled", next: "Review closed work" };
+}
+
+function projectGroups(jobs) {
+  const grouped = new Map();
+  jobs.forEach((job) => {
+    const project = declaredProject(job);
+    if (!grouped.has(project.id)) grouped.set(project.id, { ...project, jobs: [] });
+    grouped.get(project.id).jobs.push(job);
+  });
+  return Array.from(grouped.values()).map((project) => {
+    project.jobs.sort((a, b) => jobTime(b) - jobTime(a));
+    const health = projectHealth(project.jobs);
+    const completed = project.jobs.filter((j) => j.status === "completed").length;
+    return { ...project, ...health, completed, total: project.jobs.length };
+  }).sort((a, b) => a.rank - b.rank || (a.id === "unassigned" ? 1 : 0) - (b.id === "unassigned" ? 1 : 0) || a.name.localeCompare(b.name));
+}
+
+function ProjectDashboard({ jobs, coverage, tone, onOpen, onShowJobs }) {
+  const [query, setQuery] = useStateJ("");
+  const [filter, setFilter] = useStateJ("open");
+  const projects = useMemoJ(() => projectGroups(jobs), [jobs]);
+  const visible = useMemoJ(() => projects.filter((p) => {
+    if (filter === "open" && ["completed", "cancelled"].includes(p.status)) return false;
+    if (filter === "attention" && !["needs_approval", "failed"].includes(p.status)) return false;
+    const q = query.trim().toLowerCase();
+    return !q || p.name.toLowerCase().includes(q) || p.jobs.some((j) => String(j.title || "").toLowerCase().includes(q));
+  }), [projects, query, filter]);
+  const openCount = projects.filter((p) => !["completed", "cancelled"].includes(p.status)).length;
+  const attentionCount = projects.filter((p) => ["needs_approval", "failed"].includes(p.status)).length;
+  const progress = jobs.length ? Math.round((jobs.filter((j) => j.status === "completed").length / jobs.length) * 100) : 0;
+  const moveJob = async (job, project) => {
+    const name = window.prompt("Project name (leave blank for Unassigned):", project.source === "declared project" ? project.name : "");
+    if (name !== null) await window.BitCadenceStore.assignProject(job.id, name);
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 18 }}>
+        <h2 style={{ margin: "0 0 5px", fontSize: 20, fontWeight: 680 }}>Projects at a glance</h2>
+        <div style={{ color: "var(--text-2)", fontSize: 13.5, maxWidth: 760 }}>
+          Jobs are grouped by their declared project or workflow. Work without either stays visible as Unassigned so nothing silently disappears.
+        </div>
+      </div>
+
+      {coverage && coverage.truncated ? (
+        <div role="status" style={{ marginBottom: 14, padding: "10px 13px", borderRadius: 8, border: "1px solid var(--st-approval-dot)", background: "var(--st-approval-bg)", color: "var(--st-approval-fg)", fontSize: 12.5 }}>
+          Showing the first {coverage.ceiling || jobs.length} jobs. Project counts are partial; narrow or archive old work before treating these totals as complete.
+        </div>
+      ) : null}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 16 }}>
+        {[
+          ["Open projects", openCount, "Work still moving or waiting"],
+          ["Need you", attentionCount, "Decisions or problems"],
+          ["Jobs complete", progress + "%", `${jobs.filter((j) => j.status === "completed").length} of ${jobs.length}`],
+        ].map(([label, value, note]) => (
+          <Card key={label}><div style={{ color: "var(--text-3)", fontSize: 11.5, fontWeight: 650, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</div><div style={{ fontSize: 25, fontWeight: 720, margin: "4px 0 1px" }}>{value}</div><div style={{ color: "var(--text-3)", fontSize: 12 }}>{note}</div></Card>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+        <div role="tablist" aria-label="Filter projects" style={{ display: "flex", gap: 2, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: 3 }}>
+          {[["open", "Open"], ["attention", "Needs attention"], ["all", "All"]].map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={filter === id} onClick={() => setFilter(id)} style={{ border: "none", cursor: "pointer", borderRadius: 6, padding: "5px 11px", fontSize: 12.5, fontWeight: 600, background: filter === id ? "var(--accent-soft)" : "transparent", color: filter === id ? "var(--accent-text)" : "var(--text-2)" }}>{label}</button>
+          ))}
+        </div>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search projects" placeholder="Search projects or work…" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 12px", fontSize: 13, background: "var(--surface)", color: "var(--text)", width: 240, outline: "none" }} />
+        <div style={{ flex: 1 }}></div>
+        <Btn onClick={onShowJobs}>Open Job Board</Btn>
+      </div>
+
+      {visible.length ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14 }}>
+          {visible.map((project) => {
+            const pct = project.total ? Math.round((project.completed / project.total) * 100) : 0;
+            const q = query.trim().toLowerCase();
+            const matchingJobs = q ? project.jobs.filter((j) => String(j.title || "").toLowerCase().includes(q)) : project.jobs;
+            const shownJobs = matchingJobs.slice(0, project.id === "unassigned" ? 8 : 4);
+            return (
+              <Card key={project.id}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 670 }}>{project.name}</h3>
+                      <StatusBadge status={project.status} tone={tone} />
+                    </div>
+                    <div style={{ color: "var(--text-3)", fontSize: 11.5, marginTop: 4 }}>{project.source === "workflow" ? "Grouped from workflow" : project.source === "unassigned" ? "No project or workflow declared" : "Declared project"}</div>
+                  </div>
+                  <div style={{ color: "var(--text-2)", fontSize: 12.5, whiteSpace: "nowrap" }}>{project.completed}/{project.total} done</div>
+                </div>
+                <div aria-label={`${pct}% complete`} style={{ height: 6, borderRadius: 99, background: "var(--surface-2)", overflow: "hidden", margin: "13px 0 12px" }}><div style={{ width: pct + "%", height: "100%", background: project.status === "failed" ? "var(--st-failed-dot)" : "var(--accent)", borderRadius: 99 }}></div></div>
+                <div style={{ background: "var(--surface-2)", borderRadius: 8, padding: "9px 11px", marginBottom: 10 }}>
+                  <div style={{ color: "var(--text-3)", fontSize: 10.5, fontWeight: 650, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 2 }}>Next action</div>
+                  <div style={{ fontSize: 13, fontWeight: 570 }}>{project.next}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                  {shownJobs.map((job) => (
+                    <div key={job.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto", gap: 6, alignItems: "center" }}>
+                      <button onClick={() => onOpen(job.id)} style={{ border: "none", borderRadius: 7, padding: "7px 8px", background: "transparent", color: "var(--text)", cursor: "pointer", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.title}</button>
+                      <StatusBadge status={job.status} tone={tone} />
+                      <button aria-label={`Move ${job.title} to a project`} onClick={() => moveJob(job, project)} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "3px 6px", background: "var(--surface)", color: "var(--text-3)", cursor: "pointer", fontSize: 11 }}>Move</button>
+                    </div>
+                  ))}
+                </div>
+                {matchingJobs.length > shownJobs.length ? <div style={{ color: "var(--text-3)", fontSize: 11.5, padding: "5px 8px 0" }}>+ {matchingJobs.length - shownJobs.length} more jobs · search to move one</div> : null}
+              </Card>
+            );
+          })}
+        </div>
+      ) : <Card><EmptyState icon="◇" title="No projects here" body="Try All projects or clear the search." /></Card>}
+
+      <div style={{ marginTop: 16, color: "var(--text-3)", fontSize: 11.5 }}>
+        Project assignment follows job metadata. Advisory tools such as Jev can recommend organization, while reviewed job metadata remains authoritative.
+      </div>
+    </div>
+  );
+}
+
 function JobBoard({ jobs, tone, advanced, onOpen, onCompose }) {
   const [filter, setFilter] = useStateJ("all");
   const [query, setQuery] = useStateJ("");
@@ -751,4 +929,4 @@ function ActivityFeedScreen({ jobs, tone, advanced, onOpen }) {
   );
 }
 
-Object.assign(window, { JobBoard, JobDetail, NewJobForm, ActivityFeedScreen });
+Object.assign(window, { ProjectDashboard, JobBoard, JobDetail, NewJobForm, ActivityFeedScreen });
