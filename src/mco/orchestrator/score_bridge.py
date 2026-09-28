@@ -203,14 +203,8 @@ class ScoreBridge:
             on_reject_targets = {t["on_reject"]: t["id"] for t in score["tasks"] if t.get("on_reject")}
 
             def _lineage_satisfied(dep_id):
-                if dep_id in accepted:
-                    return True
-                curr = dep_id
-                while tasks[curr].get("on_reject"):
-                    curr = tasks[curr]["on_reject"]
-                    if curr in accepted:
-                        return True
-                return False
+                root_id, chain, _ = self._lineage_info(score["tasks"], rejected, dep_id)
+                return any(t_id in accepted for t_id in chain)
 
             for key, t in tasks.items():
                 if key in accepted:
@@ -516,14 +510,18 @@ class ScoreBridge:
         if not isinstance(artifacts, dict) or set(artifacts) != set(required):
             raise ScoreError("Missing/extra evidence")
         for ref in artifacts.values():
-            if not isinstance(ref, dict) or set(ref) != {"path", "sha256"} or not isinstance(ref["path"], str) or Path(ref["path"]).is_absolute():
-                raise ScoreError("Invalid relative artifact reference")
-            if not isinstance(ref["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", ref["sha256"]):
+            if not isinstance(ref, dict) or set(ref) != {"path", "sha256"} or not isinstance(ref["path"], str) or Path(ref["path"]).is_absolute() or ".." in Path(ref["path"]).parts:
+                raise ScoreError("Invalid relative artifact reference or path traversal")
+            if not isinstance(ref["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", ref["sha256"].lower()):
                 raise ScoreError("Invalid artifact SHA-256")
             path = (self.root / ref["path"]).resolve()
-            if self.root not in path.parents or not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
+            try:
+                path.relative_to(self.root)
+            except ValueError:
+                raise ScoreError("Evidence path traversal outside root")
+            if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
                 raise ScoreError("Evidence missing/outside root/oversized")
-            if hashlib.sha256(path.read_bytes()).hexdigest() != ref["sha256"]:
+            if hashlib.sha256(path.read_bytes()).hexdigest() != ref["sha256"].lower():
                 raise ScoreError("Evidence digest mismatch")
         return artifacts
 
@@ -607,6 +605,10 @@ class ScoreBridge:
                             raise ScoreError(f"Failed to resolve HEAD in worktree: {proc.stderr.strip()}")
                         expected_before_sha = proc.stdout.strip()
 
+                    claimed_before_sha = output.get("expected_before_sha")
+                    if claimed_before_sha and claimed_before_sha.strip().lower() != expected_before_sha.strip().lower():
+                        raise ScoreError(f"Stale-head rejected: worker claimed '{claimed_before_sha}', expected '{expected_before_sha}'")
+
                     resource = commit_conf["worktree_path"]
                     env = "test"
                     owner_principal = run["principal"]
@@ -673,8 +675,53 @@ class ScoreBridge:
                             evidence[req] = receipt["observed_state"][req]
                         elif req == "commit":
                             evidence[req] = {"sha": new_sha, "target_branch": str(target_branch)}
-                        else:
+                        elif req == "commit_sha":
                             evidence[req] = new_sha
+                        else:
+                            # Required evidence is not a commit property; must be an authenticated/verified artifact
+                            artifacts_claim = output.get("artifacts")
+                            if not isinstance(artifacts_claim, dict) or req not in artifacts_claim:
+                                raise ScoreError(f"Missing required evidence label '{req}'; cannot fabricate or substitute commit SHA")
+                            ref = artifacts_claim[req]
+                            if not isinstance(ref, dict) or set(ref) != {"path", "sha256"}:
+                                raise ScoreError(f"Invalid artifact reference structure for '{req}'")
+                            rel_path = ref.get("path")
+                            expected_sha = ref.get("sha256")
+                            if not isinstance(rel_path, str) or not rel_path or Path(rel_path).is_absolute() or ".." in Path(rel_path).parts:
+                                raise ScoreError(f"Path traversal or invalid path rejected for evidence '{req}': '{rel_path}'")
+                            if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha.lower()):
+                                raise ScoreError(f"Invalid artifact SHA-256 digest for evidence '{req}'")
+
+                            cand_root = (self.root / rel_path).resolve()
+                            cand_wt = (Path(wt_path).resolve() / rel_path).resolve()
+
+                            resolved_file = None
+                            try:
+                                cand_root.relative_to(self.root)
+                                if cand_root.is_file():
+                                    resolved_file = cand_root
+                            except ValueError:
+                                pass
+
+                            if resolved_file is None:
+                                try:
+                                    cand_wt.relative_to(Path(wt_path).resolve())
+                                    if cand_wt.is_file():
+                                        resolved_file = cand_wt
+                                except ValueError:
+                                    pass
+
+                            if resolved_file is None:
+                                raise ScoreError(f"Artifact for '{req}' missing or outside allowed roots: '{rel_path}'")
+
+                            if resolved_file.stat().st_size > 16 * 1024 * 1024:
+                                raise ScoreError(f"Artifact for '{req}' oversized (>16MB)")
+
+                            actual_digest = hashlib.sha256(resolved_file.read_bytes()).hexdigest()
+                            if actual_digest != expected_sha.lower():
+                                raise ScoreError(f"Artifact digest mismatch for '{req}': claimed {expected_sha}, actual {actual_digest}")
+
+                            evidence[req] = {"path": rel_path, "sha256": actual_digest}
                     if not evidence:
                         evidence = {"commit_sha": new_sha}
                     status = "validated"
