@@ -8,7 +8,7 @@ import logging
 import importlib.metadata as importlib_metadata
 import re
 import subprocess
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 from datetime import datetime, timezone
 from pathlib import Path
@@ -339,6 +339,7 @@ STATUS_SORT_ORDER = {
 async def get_jobs(
     include_archived: bool = False,
     sort: str = None,
+    limit: Optional[int] = None,
     agent: dict = Depends(require_scopes("jobs:read")),
 ):
     """Retrieve job list from the database.
@@ -364,7 +365,9 @@ async def get_jobs(
             query = query.order("priority", desc=True)
         else:
             query = query.order("created_at", desc=True)
-        res = query.limit(100).execute()
+        if limit is not None and limit > 0:
+            query = query.limit(limit)
+        res = query.execute()
         jobs = res.data or []
         if not include_archived:
             jobs = [j for j in jobs if not j.get("archived")]
@@ -1327,7 +1330,7 @@ async def get_job_duplicates(job_id: str, agent: dict = Depends(require_scopes("
         return []
     job = _load_job_in_org(db_client, job_id, agent)
 
-    res = db_client.table("agent_jobs").select("*").order("created_at", desc=True).limit(500).execute()
+    res = db_client.table("agent_jobs").select("*").order("created_at", desc=True).execute()
     all_jobs = [j for j in (res.data or []) if job_org(j) == agent_org(agent)]
 
     linked_ids = {job.get("reassigned_from_job_id"), job.get("reassigned_to_job_id")} - {None}

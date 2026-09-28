@@ -82,6 +82,21 @@ class Conductor:
         score = json.loads(run["definition"])
         accepted = {r["task"] for r in rows if r["phase"] == "review" and r["status"] == "accepted"}
         waiting_on_gate = [r["task"] for r in rows if r["status"] == "waiting_on_gate"]
+
+        def _task_satisfied(task_id: str) -> bool:
+            tasks_by_id = {t["id"]: t for t in score["tasks"]}
+            on_reject_targets = {t["on_reject"]: t["id"] for t in score["tasks"] if t.get("on_reject")}
+            curr = task_id
+            while curr in on_reject_targets:
+                curr = on_reject_targets[curr]
+            root = curr
+            chain = [root]
+            node = root
+            while tasks_by_id.get(node, {}).get("on_reject"):
+                node = tasks_by_id[node]["on_reject"]
+                chain.append(node)
+            return any(tid in accepted for tid in chain)
+
         return {
             "run_id": run_id,
             "score_id": score["id"],
@@ -92,7 +107,7 @@ class Conductor:
             "tasks_total": len(score["tasks"]),
             "tasks_accepted": sorted(accepted),
             "launch_requires": score["launch_requires"],
-            "launched": set(score["launch_requires"]) <= accepted,
+            "launched": all(_task_satisfied(req) for req in score["launch_requires"]),
             "dispatch": rows,
             "recent_events": events,
         }
