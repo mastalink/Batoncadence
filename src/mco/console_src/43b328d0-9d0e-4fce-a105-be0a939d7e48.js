@@ -449,6 +449,7 @@ function Overview({ jobs, agents, tone, advanced, onNav, onOpen }) {
   const doneToday = jobs.filter((j) => j.status === "completed").length;
   const problems = jobs.filter((j) => ["failed"].includes(j.status)).length;
   const online = agents.filter((a) => a.status === "online").length;
+  const quotaEligible = agents.filter((a) => a.status === "online" && a.quota_eligible !== false).length;
 
   const [liveLookModalOpen, setLiveLookModalOpen] = useStateH(false);
   const [autonomyData, setAutonomyData] = useStateH(null);
@@ -462,7 +463,7 @@ function Overview({ jobs, agents, tone, advanced, onNav, onOpen }) {
         <StatCard label={tone === "plain" ? "Working now" : "Active jobs"} value={active} sub={tone === "plain" ? "jobs moving through the pipeline" : "pending · leased · in progress"} kind="active" onClick={() => onNav("jobs")} />
         <StatCard label={tone === "plain" ? "Needs your OK" : "Approval gates"} value={gates} sub={gates ? (tone === "plain" ? "paused until you decide" : "paused at needs_approval") : "all clear"} kind="approval" onClick={() => onNav("approvals")} />
         <StatCard label={tone === "plain" ? "Finished" : "Completed"} value={doneToday} sub="in the last 24 hours" kind="done" onClick={() => onNav("jobs")} />
-        <StatCard label="Agents online" value={online + " / " + agents.length} sub={problems ? problems + (tone === "plain" ? " job needs attention" : " failed job") : "fleet healthy"} kind={problems ? "failed" : "done"} onClick={() => onNav("agents")} />
+        <StatCard label="Agents online" value={online + " / " + agents.length} sub={online > quotaEligible ? `${quotaEligible} quota-eligible` : (problems ? problems + (tone === "plain" ? " job needs attention" : " failed job") : "fleet healthy")} kind={problems ? "failed" : "done"} onClick={() => onNav("agents")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.7fr) minmax(0, 1fr)", gap: 22, alignItems: "start" }}>

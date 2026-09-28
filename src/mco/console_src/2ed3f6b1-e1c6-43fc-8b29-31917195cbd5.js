@@ -232,7 +232,12 @@ function AgentFleet({ agents, jobs, tone, advanced }) {
               <RoleChip role={role} size={26} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 650, fontSize: 14 }}>{role}</div>
-                <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>{list.filter((a) => a.status === "online").length} of {list.length} online</div>
+                <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+                  {list.filter((a) => a.status === "online").length} of {list.length} online
+                  {list.some((a) => a.quota_eligible === false) ? (
+                    <span> · {list.filter((a) => a.status === "online" && a.quota_eligible !== false).length} quota-eligible</span>
+                  ) : null}
+                </div>
               </div>
             </div>
             {list.map((a, i) => {
@@ -246,15 +251,43 @@ function AgentFleet({ agents, jobs, tone, advanced }) {
                       animation: a.status === "online" ? "cadence-pulse 2.2s ease-in-out infinite" : "none",
                     }}></span>
                     <Mono style={{ fontWeight: 600, color: "var(--text)", fontSize: 13 }}>{a.instance_id}</Mono>
+                    {a.connected !== undefined ? (
+                      <span style={{
+                        fontSize: 10.5, padding: "1px 5px", borderRadius: 4, fontWeight: 500,
+                        background: a.connected ? "var(--st-active-bg)" : "var(--surface-2)",
+                        color: a.connected ? "var(--st-active-fg)" : "var(--text-3)",
+                        border: "1px solid " + (a.connected ? "var(--st-active-dot)" : "var(--border)"),
+                      }}>
+                        {a.connected ? "connected socket" : "polling"}
+                      </span>
+                    ) : null}
+                    {a.quota_eligible === false ? (
+                      <span style={{
+                        fontSize: 10.5, padding: "1px 6px", borderRadius: 4, fontWeight: 600,
+                        background: "var(--st-waiting-bg)", color: "var(--st-waiting-fg)",
+                        border: "1px solid var(--st-waiting-dot)",
+                      }}>
+                        quota paused
+                      </span>
+                    ) : a.status === "online" && a.quota_eligible !== false ? (
+                      <span style={{
+                        fontSize: 10.5, padding: "1px 5px", borderRadius: 4, fontWeight: 500,
+                        background: "var(--st-done-bg)", color: "var(--st-done-fg)",
+                      }}>
+                        quota eligible
+                      </span>
+                    ) : null}
                     <span style={{ flex: 1 }}></span>
                     <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>{a.status === "online" ? "seen " + timeAgo(a.last_seen_at) : "last seen " + timeAgo(a.last_seen_at)}</span>
                   </div>
                   <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 4, paddingLeft: 16 }}>
                     {job
                       ? <span>{tone === "plain" ? "Working on: " : "Executing: "}<b>{job.title}</b></span>
-                      : a.status === "online"
-                        ? <span style={{ color: "var(--text-3)" }}>{tone === "plain" ? "Idle — waiting for work" : "Idle — polling job board"}</span>
-                        : <span style={{ color: "var(--text-3)" }}>{tone === "plain" ? "Not connected" : "No heartbeat"}</span>}
+                      : a.quota_eligible === false
+                        ? <span style={{ color: "var(--st-waiting-fg)" }}>{a.reason || "Quota paused"}{a.unavailable_until ? ` (until ${new Date(a.unavailable_until).toLocaleString([], { dateStyle: "short", timeStyle: "short" })})` : ""}</span>
+                        : a.status === "online"
+                          ? <span style={{ color: "var(--text-3)" }}>{tone === "plain" ? "Idle — waiting for work" : "Idle — polling job board"}</span>
+                          : <span style={{ color: "var(--text-3)" }}>{tone === "plain" ? "Not connected" : "No heartbeat"}</span>}
                     {advanced ? <span style={{ color: "var(--text-3)" }}> · {doneBy(a)} completed</span> : null}
                   </div>
                   {live ? <AgentRowActions agent={a} tone={tone} orgs={orgs} /> : null}

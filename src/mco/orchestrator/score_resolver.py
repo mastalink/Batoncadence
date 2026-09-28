@@ -16,6 +16,7 @@ from mco.orchestrator.presence import (
     STANDBY,
     WORKING,
     describe_fleet,
+    is_agent_quota_eligible,
 )
 from mco.orchestrator.scores import ScoreError, load_score
 
@@ -128,6 +129,14 @@ def resolve_score_targets(
 
         instance_id = row.get("instance_id")
         if not instance_id or not isinstance(instance_id, str):
+            continue
+
+        # Capacity and quota eligibility enforcement:
+        # Exclude paused/quota-ineligible identities (e.g. Claude Beast/Mac until Tuesday 11am ET).
+        # Recheck capacity on expiry: when now >= unavailable_until, identities become eligible again.
+        if row.get("quota_eligible") is False:
+            continue
+        if not is_agent_quota_eligible(row, now=now):
             continue
 
         agent_role = str(row.get("role") or "").strip().lower()

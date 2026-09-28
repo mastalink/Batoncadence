@@ -36,6 +36,59 @@ BROKEN_WINDOW_SECONDS = 3600
 _ACTIVE_JOB_STATUSES = ["leased", "in_progress"]
 _NON_WORKER_ROLES = {"admin", "human", "operator", "owner", "approver"}
 
+# Capacity and quota pause constants:
+# Claude identities (Claude Beast / Claude Mac) are paused until Tuesday, September 29, 2026, 11:00 AM America/New_York.
+CLAUDE_PAUSE_UNTIL = "2026-09-29T11:00:00-04:00"
+CLAUDE_PAUSE_REASON = "Claude identities unavailable until 2026-09-29 11:00 America/New_York; no new Claude assignments"
+CLAUDE_USAGE_OBSERVED_AT = "2026-09-27T15:15:00Z"
+CLAUDE_EXCLUDED_INSTANCES = frozenset({"claude-beast", "claude-mac"})
+
+
+def get_default_capacity_schedule() -> dict[str, dict[str, Any]]:
+    """Deterministic default capacity pause schedule for known fleet identities."""
+    return {
+        inst: {
+            "unavailable_until": CLAUDE_PAUSE_UNTIL,
+            "reason": CLAUDE_PAUSE_REASON,
+            "unavailable_reason": CLAUDE_PAUSE_REASON,
+            "usage_observed_at": CLAUDE_USAGE_OBSERVED_AT,
+        }
+        for inst in CLAUDE_EXCLUDED_INSTANCES
+    }
+
+
+def is_agent_quota_eligible(
+    row: dict,
+    *,
+    now: Optional[datetime] = None,
+    capacity_schedule: Optional[dict] = None,
+) -> bool:
+    """Evaluate whether an agent identity currently has usable quota / capacity.
+    
+    Returns False if the agent is disabled or within an unexpired pause window
+    (now < unavailable_until). On expiry (now >= unavailable_until), returns True
+    (rechecks capacity on expiry).
+    """
+    if str(row.get("status") or "").lower() == DISABLED:
+        return False
+
+    cur_now = now or datetime.now(timezone.utc)
+    instance = row.get("instance_id")
+
+    unavail_val = row.get("unavailable_until")
+    if unavail_val is None:
+        sched = (capacity_schedule or get_default_capacity_schedule()).get(instance)
+        if sched:
+            unavail_val = sched.get("unavailable_until")
+
+    if unavail_val:
+        ts = _parse_ts(unavail_val)
+        if ts is not None and cur_now < ts:
+            return False
+
+    return True
+
+
 # Registered by the gateway process: returns instance ids holding an
 # authenticated (non-admin) broadcast socket. None outside the gateway.
 _connected_probe: Optional[Callable[[], set]] = None
@@ -58,6 +111,8 @@ def connected_instances() -> Optional[set]:
 def _parse_ts(value: Any) -> Optional[datetime]:
     if not value:
         return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     try:
         ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (TypeError, ValueError):
@@ -80,6 +135,7 @@ def describe_fleet(
     connected: Optional[set] = None,
     stall_seconds: Optional[int] = None,
     now: Optional[datetime] = None,
+    capacity_schedule: Optional[dict] = None,
 ) -> list[dict]:
     """Decorate registry rows (copies) with presence and `state`/`state_reason`.
 
@@ -92,6 +148,7 @@ def describe_fleet(
     now = now or datetime.now(timezone.utc)
     stall = get_stall_seconds() if stall_seconds is None else stall_seconds
     connected = connected if connected is not None else (connected_instances() or set())
+    schedule = capacity_schedule if capacity_schedule is not None else get_default_capacity_schedule()
 
     try:
         active = db.table("agent_jobs").select("*").in_("status", _ACTIVE_JOB_STATUSES).execute().data or []
@@ -124,12 +181,35 @@ def describe_fleet(
 
     out = []
     for raw in rows:
-        row = decorate_presence(dict(raw), threshold)
+        row = decorate_presence(dict(raw), threshold, now=now)
         instance = row.get("instance_id")
         live_socket = instance in connected
         if live_socket and row["effective_status"] == "offline" and raw.get("status") != DISABLED:
             row["effective_status"] = row["status"] = "online"
         row["connected"] = live_socket
+
+        # Capacity & quota eligibility evaluation
+        sched_entry = schedule.get(instance) or {}
+        unavail_val = raw.get("unavailable_until")
+        reason_val = raw.get("reason") or raw.get("unavailable_reason")
+        usage_obs_val = raw.get("usage_observed_at")
+
+        if unavail_val is None and sched_entry:
+            unavail_val = sched_entry.get("unavailable_until")
+        if reason_val is None and sched_entry:
+            reason_val = sched_entry.get("reason") or sched_entry.get("unavailable_reason")
+        if usage_obs_val is None and sched_entry:
+            usage_obs_val = sched_entry.get("usage_observed_at")
+
+        unavail_ts = _parse_ts(unavail_val)
+        is_paused = bool(unavail_ts is not None and now < unavail_ts)
+        quota_eligible = not is_paused and (raw.get("status") != DISABLED)
+
+        row["unavailable_until"] = unavail_val
+        row["reason"] = reason_val
+        row["unavailable_reason"] = reason_val
+        row["usage_observed_at"] = usage_obs_val
+        row["quota_eligible"] = quota_eligible
 
         reason = None
         if raw.get("status") == DISABLED or row["effective_status"] == DISABLED:
@@ -160,7 +240,9 @@ def describe_fleet(
     return out
 
 
-def available_roles(described: Iterable[dict], org: str = "default") -> set:
+def available_roles(described: Iterable[dict], org: str = "default", *, require_quota: bool = False) -> set:
     """Roles with at least one agent that can take new work now."""
     return {str(row.get("role") or "").lower() for row in described
-            if (row.get("org_id") or "default") == org and row.get("state") in {STANDBY, WORKING}}
+            if (row.get("org_id") or "default") == org
+            and row.get("state") in {STANDBY, WORKING}
+            and (not require_quota or row.get("quota_eligible", True))}

@@ -167,7 +167,7 @@ def reclaim_stale_leases(db_client) -> int:
     return reclaimed
 
 
-def decorate_presence(row: dict, threshold: int) -> dict:
+def decorate_presence(row: dict, threshold: int, now: Optional[datetime] = None) -> dict:
     """Add derived liveness to a registry row.
 
     - last_seen_seconds: age of the last heartbeat (None if never seen)
@@ -189,6 +189,7 @@ def decorate_presence(row: dict, threshold: int) -> dict:
     """
     from datetime import datetime, timezone
 
+    cur_now = now or datetime.now(timezone.utc)
     secs = None
     last = row.get("last_seen_at")
     if last:
@@ -196,7 +197,7 @@ def decorate_presence(row: dict, threshold: int) -> dict:
             ts = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
-            secs = max(0, int((datetime.now(timezone.utc) - ts).total_seconds()))
+            secs = max(0, int((cur_now - ts).total_seconds()))
         except (ValueError, TypeError):
             pass
     effective = row.get("status") or "offline"
@@ -613,6 +614,11 @@ def _pending_for_agent(db_client, role: str, instance_id, agent: dict) -> list:
     Highest priority first, then oldest within a band - so raising one job's
     priority cannot starve equally-urgent older work.
     """
+    from mco.orchestrator.leases import is_lease_eligible
+    candidate_id = instance_id or (agent.get("instance_id") if isinstance(agent, dict) else None)
+    if candidate_id and not is_lease_eligible(db_client, candidate_id):
+        return []
+
     res = db_client.table("agent_jobs")        .select("*")        .eq("status", "pending")        .eq("target_agent_role", role)        .execute()
 
     filtered = []

@@ -127,10 +127,60 @@ def _lease(job):
     return Lease(str(job['id']), job['lease_id'], int(job['lease_epoch']),
                  job['lease_incarnation'], job['leased_by_instance_id'])
 
+
+def is_lease_eligible(db: Any, owner: str, *, now: datetime | None = None) -> bool:
+    """Enforce capacity and quota eligibility for new lease acquisition.
+
+    A paused/unavailable agent (e.g. Claude Beast/Mac until Tuesday 11am ET, or
+    any agent with unavailable_until in the future) cannot acquire new leases.
+    On expiry of the pause window (now >= unavailable_until), capacity is rechecked
+    and the identity becomes eligible again.
+    Active held leases are preserved and can still be renewed or completed.
+    """
+    if not owner or not isinstance(owner, str):
+        return False
+
+    cur_now = now or _now()
+
+    # 1. Check database agent_registry record if available
+    if db is not None:
+        try:
+            res = db.table("agent_registry").select("*").eq("instance_id", owner).execute().data
+            if res:
+                row = res[0]
+                if row.get("status") == "disabled":
+                    return False
+                unavail = row.get("unavailable_until")
+                if unavail:
+                    ts = _parse(unavail)
+                    if ts and cur_now < ts:
+                        return False
+                    if ts and cur_now >= ts:
+                        return True
+        except Exception:
+            pass
+
+    # 2. Check deterministic default capacity schedule
+    from mco.orchestrator.presence import (
+        CLAUDE_EXCLUDED_INSTANCES,
+        CLAUDE_PAUSE_UNTIL,
+        _parse_ts,
+    )
+    if owner in CLAUDE_EXCLUDED_INSTANCES:
+        pause_ts = _parse_ts(CLAUDE_PAUSE_UNTIL)
+        if pause_ts and cur_now < pause_ts:
+            return False
+        return True
+
+    return True
+
+
 @attempt_boundary
 @atomic
-def acquire_lease(db: Any, job_id: str, owner: str, *, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> Lease | None:
+def acquire_lease(db: Any, job_id: str, owner: str, *, ttl_seconds: int = DEFAULT_TTL_SECONDS, now: datetime | None = None) -> Lease | None:
     if not owner:
+        return None
+    if not is_lease_eligible(db, owner, now=now):
         return None
     if is_postgres(db):
         result = _remote(db, 'acquire', job_id, owner, ttl=ttl_seconds)
@@ -138,12 +188,12 @@ def acquire_lease(db: Any, job_id: str, owner: str, *, ttl_seconds: int = DEFAUL
     job = _get(db, job_id)
     if not job or job.get('status') != PENDING or _paused(db):
         return None
-    now = _now()
+    now_ts = now or _now()
     updates = {'status': LEASED, 'leased_by_instance_id': owner,
-        'started_at': now.isoformat(), 'completed_at': None, 'lease_id': uuid.uuid4().hex,
+        'started_at': now_ts.isoformat(), 'completed_at': None, 'lease_id': uuid.uuid4().hex,
         'lease_epoch': int(job.get('lease_epoch') or 0) + 1,
         'lease_incarnation': store_incarnation(db),
-        'lease_expires_at': (now + timedelta(seconds=max(1, ttl_seconds))).isoformat()}
+        'lease_expires_at': (now_ts + timedelta(seconds=max(1, ttl_seconds))).isoformat()}
     rows = db.table('agent_jobs').update(updates).eq('id', str(job_id)).eq('status', PENDING).execute().data
     return _lease(rows[0]) if rows else None
 
