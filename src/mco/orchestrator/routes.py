@@ -1006,7 +1006,7 @@ async def get_recent_events(
     try:
         jres = (
             db_client.table("agent_jobs").select("*")
-            .order("created_at", desc=True).limit(500).execute()
+            .order("created_at", desc=True).execute()
         )
         jobs_by_id = {j.get("id"): j for j in (jres.data or [])}
     except Exception as e:
