@@ -45,6 +45,7 @@ APPEND_ONLY_TABLES = {"agent_job_events", "mco_audit_outbox", "mco_attempt_recei
 # Natural primary key per table (upsert conflict target).
 PRIMARY_KEYS = {
     "agent_registry": "instance_id",
+    "job_project_assignments": "job_id",
     "score_documents": "digest",
     "score_runs": "run_id",
     "score_tasks": "id",
@@ -132,6 +133,7 @@ class _Query:
         self._filters: List[tuple] = []      # ("eq"|"in", column, value)
         self._order: Optional[tuple] = None  # (column, desc)
         self._limit: Optional[int] = None
+        self._offset: int = 0
 
     # ── verbs ────────────────────────────────────────────────────────────
     def select(self, columns: str = "*"):
@@ -180,6 +182,11 @@ class _Query:
 
     def limit(self, n: int):
         self._limit = int(n)
+        return self
+
+    def range(self, start: int, end: int):
+        self._offset = max(0, int(start))
+        self._limit = max(0, int(end) - self._offset + 1)
         return self
 
     # ── terminal ─────────────────────────────────────────────────────────
@@ -380,6 +387,8 @@ class LocalStore:
                 if q._order:
                     col, desc = q._order
                     rows.sort(key=lambda r: str(r.get(col) or ""), reverse=desc)
+                if q._offset:
+                    rows = rows[q._offset:]
                 if q._limit is not None:
                     rows = rows[: q._limit]
                 return APIResult([self._project(r, q._columns) for r in rows])

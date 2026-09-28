@@ -3,6 +3,7 @@ const { useState: useStateA, useEffect: useEffectA } = React;
 
 const NAV = [
   { id: "overview", label: "Overview", icon: "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" },
+  { id: "projects", label: "Projects", icon: "M3 7h7l2 2h9v10H3zM3 7V5h7l2 2" },
   { id: "jobs", label: "Job Board", icon: "M4 6h16M4 12h16M4 18h10" },
   { id: "approvals", label: "Approvals", icon: "M9 12l2 2 4-5M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18z" },
   { id: "governance", label: "Governance", icon: "M12 3l8 4v5c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V7l8-4zM9 12l2 2 4-5" },
@@ -66,8 +67,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const PAGE_TITLES = {
-  expert: { overview: "Overview", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", workflows: "Workflows", agents: "Agent Fleet", memory: "Drumline", activity: "Audit Trail", settings: "Settings" },
-  plain: { overview: "Overview", jobs: "All work", approvals: "Needs your OK", governance: "Governance", workflows: "Flows", agents: "Your agents", memory: "Drumline", activity: "What happened", settings: "Settings" },
+  expert: { overview: "Overview", projects: "Projects", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", workflows: "Workflows", agents: "Agent Fleet", memory: "Drumline", activity: "Audit Trail", settings: "Settings" },
+  plain: { overview: "Overview", projects: "Projects", jobs: "All work", approvals: "Needs your OK", governance: "Governance", workflows: "Flows", agents: "Your agents", memory: "Drumline", activity: "What happened", settings: "Settings" },
 };
 
 function App() {
@@ -98,12 +99,23 @@ function App() {
   useEffectA(() => { const i = setInterval(() => force((x) => x + 1), 10000); return () => clearInterval(i); }, []);
 
   const jobs = window.BitCadenceStore.getJobs();
+  const projectJobs = window.BitCadenceStore.getProjectJobs ? window.BitCadenceStore.getProjectJobs() : jobs;
+  const projectCoverage = window.BitCadenceStore.getProjectCoverage ? window.BitCadenceStore.getProjectCoverage() : { count: projectJobs.length, truncated: false };
+  const storeMode = window.BitCadenceStore.mode ? window.BitCadenceStore.mode() : "demo";
   const agents = window.BitCadenceStore.getAgents();
   const tone = t.tone;
   const gates = jobs.filter((j) => j.status === "needs_approval").length;
 
+  useEffectA(() => {
+    if (page !== "projects" || !window.BitCadenceStore.refreshProjectView) return;
+    window.BitCadenceStore.refreshProjectView(false).catch(() => {});
+    const timer = setInterval(() => window.BitCadenceStore.refreshProjectView(true).catch(() => {}), 60000);
+    return () => clearInterval(timer);
+  }, [page, storeMode]);
+
   const screen = {
     overview: <Overview jobs={jobs} agents={agents} tone={tone} advanced={advanced} onNav={setPage} onOpen={setOpenJob} />,
+    projects: <ProjectDashboard jobs={projectJobs} coverage={projectCoverage} tone={tone} onOpen={setOpenJob} onShowJobs={() => setPage("jobs")} />,
     jobs: <JobBoard jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} onCompose={() => setComposing(true)} />,
     approvals: <Approvals jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     governance: <Governance jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
@@ -197,7 +209,7 @@ function App() {
       </main>
 
       <Drawer open={!!openJob} onClose={() => setOpenJob(null)}>
-        <JobDetail jobId={openJob} jobs={jobs} tone={tone} advanced={advanced} onClose={() => setOpenJob(null)} onOpen={setOpenJob} />
+        <JobDetail jobId={openJob} jobs={page === "projects" ? projectJobs : jobs} tone={tone} advanced={advanced} onClose={() => setOpenJob(null)} onOpen={setOpenJob} />
       </Drawer>
       <Drawer open={composing} onClose={() => setComposing(false)} width={420}>
         <NewJobForm tone={tone} advanced={advanced} onClose={() => setComposing(false)} />

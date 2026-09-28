@@ -92,22 +92,23 @@ def test_migrate_empty_store_applies_all_including_score(monkeypatch):
     assert state["closed"] is True
 
 
-def test_migrate_store_with_job_priority_applied_applies_only_score(monkeypatch):
-    """Acceptance: store that already applied 2026-09_job_priority only applies 2026-09_score_store.sql."""
+def test_migrate_store_with_job_priority_applied_applies_remaining(monkeypatch):
+    """An existing store applies every migration added after job priority."""
     migs = mig.discover()
     names = [name for name, _ in migs]
     idx_prio = names.index("2026-09_job_priority.sql")
     already_applied = set(names[:idx_prio + 1])  # all migrations through job_priority
+    remaining = names[idx_prio + 1:]
 
     state = {"log": [], "applied": already_applied, "commits": 0, "rollbacks": 0, "closed": False}
     monkeypatch.setattr(mig, "_connect", lambda url: (FakeConn(state), "psycopg"))
 
     result = mig.apply_postgres("postgres://acceptance-existing")
     assert "2026-09_job_priority.sql" in result["skipped"]
-    assert result["applied"] == ["2026-09_score_store.sql", "2026-09_score_store_s04.sql"]
+    assert result["applied"] == remaining
     inserts = [s for s, p in state["log"] if s.startswith("INSERT INTO schema_migrations")]
-    assert len(inserts) == 2
-    assert state["commits"] == 3  # init plus the two applied Score migrations
+    assert len(inserts) == len(remaining)
+    assert state["commits"] == 1 + len(remaining)  # init plus newly applied migrations
 
 
 def test_migrate_idempotent_when_already_applied(monkeypatch):

@@ -220,20 +220,31 @@ def step_guardrails(config) -> None:
 
 def step_notifications(config) -> None:
     _header("Phone notifications (optional)",
-            "Get a push alert (free ntfy.sh app) when a job needs your approval, finishes, or fails.")
-    if not Confirm.ask("Set up notifications?", default=bool(_current(config, "NTFY_URL"))):
+            "Optional push alerts for decisions and failures. Routine job and agent updates stay on the board.")
+    if not Confirm.ask("Configure phone alerts?", default=False):
         return
-    console.print("[dim]Install the 'ntfy' app, subscribe to a topic name you invent (e.g. joes-agents-x7q2),[/dim]")
-    console.print("[dim]then enter that topic URL here.[/dim]")
-    url = Prompt.ask("  ntfy topic URL (https://ntfy.sh/your-topic)", default=_current(config, "NTFY_URL"))
-    if url:
-        config.set("NTFY_URL", url)
-        console.print("[green][OK][/green] Notifications on.")
+    console.print("[dim]ntfy needs a private random topic of at least 32 characters.[/dim]")
+    topic = _current(config, "NTFY_TOPIC") or _secrets.token_urlsafe(32)
+    from mco.notifiers.ntfy import topic_is_private
+    if not topic_is_private(topic):
+        console.print("[yellow]The configured topic is too weak; no push alerts were enabled.[/yellow]")
+        return
+    try:
+        config.set("NTFY_TOPIC", topic)
+    except RuntimeError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        console.print("[yellow]No phone alert setting was changed.[/yellow]")
+        return
+    subscribe_url = f"{_current(config, 'NTFY_SERVER') or 'https://ntfy.sh'}/{topic}"
+    if _copy_to_clipboard(subscribe_url):
+        console.print("[green][OK][/green] Decision and failure alerts enabled. Private subscription URL copied to clipboard.")
+    else:
+        console.print(f"[green][OK][/green] Decision and failure alerts enabled. Subscribe at {subscribe_url}")
 
 
 def step_webhook(config) -> None:
     _header("Inbound webhooks (optional)",
-            "Lets platforms PUSH incidents to you (and enables the smoke test's simulated detections).")
+            "Lets external platforms create BitCadence jobs. This does not send phone notifications.")
     current = _current(config, "MCO_WEBHOOK_SECRET")
     if current and not Confirm.ask("A webhook secret exists. Replace it?", default=False):
         return
@@ -340,8 +351,8 @@ def show_summary(config) -> None:
     table.add_row("ServiceNow", _current(config, "SERVICENOW_INSTANCE_URL") or "[dim]not connected[/dim]")
     table.add_row("Dynatrace", _current(config, "DYNATRACE_BASE_URL") or "[dim]not connected[/dim]")
     table.add_row("Gated roles", _current(config, "MCO_POLICY_GATED_ROLES") or "[dim]none[/dim]")
-    table.add_row("Notifications", "on" if _current(config, "NTFY_URL") else "[dim]off[/dim]")
-    table.add_row("Webhooks", "on" if _current(config, "MCO_WEBHOOK_SECRET") else "[dim]off[/dim]")
+    table.add_row("Phone alerts", "on" if _current(config, "NTFY_TOPIC") else "[dim]off[/dim]")
+    table.add_row("Inbound job webhooks", "on" if _current(config, "MCO_WEBHOOK_SECRET") else "[dim]off[/dim]")
     store = get_secret_store()
     table.add_row("Encryption", "on" if store.is_initialized() else "[dim]off (plain .env)[/dim]")
     console.print()

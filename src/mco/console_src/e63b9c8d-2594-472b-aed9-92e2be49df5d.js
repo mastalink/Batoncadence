@@ -53,11 +53,11 @@
   const wfShip = mkJob({ title: "Tag and publish v2.4", description: "Tag the release and publish artifacts to the registry.", target_agent_role: "codex", status: "waiting", depends_on: [wfQa.id], requires_approval: true, workflow: "release-pipeline", created_at: minsAgo(42) });
 
   const jobs = [
-    mkJob({ title: "Deploy hotfix to production", description: "Roll the auth-token expiry hotfix to the production gateway.", target_agent_role: "codex", status: "needs_approval", requires_approval: true, source_agent_id: "claude-research-1", source_agent_role: "claude", created_at: minsAgo(8) }),
-    mkJob({ title: "Rotate Supabase service keys", description: "Rotate service-role keys and update the secret vault.", target_agent_role: "codex", status: "needs_approval", requires_approval: true, source_agent_id: "gemini-qa-1", source_agent_role: "gemini", created_at: minsAgo(23) }),
+    mkJob({ title: "Deploy hotfix to production", description: "Roll the auth-token expiry hotfix to the production gateway.", target_agent_role: "codex", status: "needs_approval", requires_approval: true, source_agent_id: "claude-research-1", source_agent_role: "claude", input_payload: { project: { id: "gateway-reliability", name: "Gateway reliability" } }, created_at: minsAgo(8) }),
+    mkJob({ title: "Rotate Supabase service keys", description: "Rotate service-role keys and update the secret vault.", target_agent_role: "codex", status: "needs_approval", requires_approval: true, source_agent_id: "gemini-qa-1", source_agent_role: "gemini", input_payload: { project: { id: "gateway-reliability", name: "Gateway reliability" } }, created_at: minsAgo(23) }),
     wfShip, wfQa, wfBuild,
-    mkJob({ title: "Summarize weekly agent activity", description: "Compile the weekly digest of fleet activity for the ops channel.", target_agent_role: "claude", status: "pending", created_at: minsAgo(5) }),
-    mkJob({ title: "Index new docs into memory", target_agent_role: "claude", status: "leased", leased_by_instance_id: "claude-research-1", created_at: minsAgo(11) }),
+    mkJob({ title: "Summarize weekly agent activity", description: "Compile the weekly digest of fleet activity for the ops channel.", target_agent_role: "claude", status: "pending", input_payload: { project: "agent-operations" }, created_at: minsAgo(5) }),
+    mkJob({ title: "Index new docs into memory", target_agent_role: "claude", status: "leased", leased_by_instance_id: "claude-research-1", input_payload: { project: "agent-operations" }, created_at: minsAgo(11) }),
     wfResearch,
     mkJob({ title: "Nightly dependency audit", description: "Scan lockfiles for vulnerable packages.", target_agent_role: "gemini", status: "completed", created_at: minsAgo(125), output_payload: { vulnerabilities: 0, scanned: 312 } }),
     mkJob({ title: "Backfill audit events to cold storage", target_agent_role: "codex", status: "failed", error_message: "S3 bucket policy denied PutObject (403).", max_retries: 2, retry_count: 2, escalate_to_role: "human", created_at: minsAgo(58) }),
@@ -148,6 +148,14 @@
       touch(j, "pending");
       record(jobId, "reassigned", "joe-laptop", "human", { toRole, toInstance });
       toast("ok", "Reassigned", j.title + " → " + (toInstance || toRole));
+      notify();
+    },
+    assignProject(jobId, name) {
+      const j = find(jobId); if (!j) return;
+      const clean = String(name || "").trim();
+      j.project = clean ? { id: clean.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project", name: clean } : null;
+      j.updated_at = now();
+      record(jobId, clean ? "project_assigned" : "project_cleared", "joe-laptop", "human", { project: j.project });
       notify();
     },
     batchAction(action, jobIds, extra = {}) {
