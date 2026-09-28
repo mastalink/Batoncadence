@@ -427,3 +427,139 @@ def test_get_jobs_reads_all_rows_without_100_row_loss(monkeypatch):
     res_lim = client.get("/api/jobs?limit=50")
     assert res_lim.status_code == 200
     assert len(res_lim.json()) == 50
+
+
+def test_get_recent_events_reads_all_jobs_without_500_limit(monkeypatch):
+    class FakeDBForRecentEvents:
+        def __init__(self):
+            # 600 jobs, exceeding 500
+            self.jobs = [
+                {"id": f"j-{i}", "title": f"Job {i}", "status": "completed", "created_at": f"2026-01-01T00:{i:02d}:00Z", "org_id": "org-special"}
+                for i in range(600)
+            ]
+            # An event referring to job 550 (which would be dropped if capped at 500)
+            self.events = [
+                {"id": "ev-1", "job_id": "j-550", "event": "status:completed", "created_at": "2026-01-02T00:00:00Z"}
+            ]
+            self._table = None
+            self._limit = None
+
+        def table(self, name):
+            self._table = name
+            self._limit = None
+            return self
+
+        def select(self, *_args):
+            return self
+
+        def order(self, *_args, **_kw):
+            return self
+
+        def limit(self, n):
+            self._limit = n
+            return self
+
+        def execute(self):
+            class Res:
+                pass
+            r = Res()
+            if self._table == "agent_job_events":
+                r.data = self.events[:self._limit] if self._limit else list(self.events)
+            elif self._table == "agent_jobs":
+                assert self._limit is None, "agent_jobs query in get_recent_events must not be limited to 500"
+                r.data = self.jobs[:self._limit] if self._limit else list(self.jobs)
+            else:
+                r.data = []
+            return r
+
+    import mco.orchestrator.routes as routes_mod
+    fake_db = FakeDBForRecentEvents()
+    monkeypatch.setattr(routes_mod, "get_db_client", lambda: fake_db)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from mco.orchestrator.auth import require_agent
+
+    app = FastAPI()
+    app.include_router(routes_mod.events_router)
+    app.dependency_overrides[require_agent] = lambda: {
+        "instance_id": "test-agent",
+        "role": "worker",
+        "org_id": "org-special",
+    }
+    client = TestClient(app)
+
+    res = client.get("/api/events")
+    assert res.status_code == 200
+    evs = res.json()
+    assert len(evs) == 1
+    assert evs[0]["job_title"] == "Job 550"
+
+
+def test_export_evidence_pack_reads_all_jobs_without_500_limit(monkeypatch):
+    class FakeDBForEvidencePack:
+        def __init__(self):
+            self.jobs = [
+                {"id": f"j-{i}", "title": f"Job {i}", "status": "completed", "created_at": f"2026-01-01T00:{i:02d}:00Z", "org_id": "org-special"}
+                for i in range(600)
+            ]
+            self.events = [
+                {"id": "ev-1", "job_id": "j-550", "event": "status:completed", "created_at": "2026-01-02T00:00:00Z"}
+            ]
+            self._table = None
+            self._limit = None
+
+        def table(self, name):
+            self._table = name
+            self._limit = None
+            return self
+
+        def select(self, *_args):
+            return self
+
+        def order(self, *_args, **_kw):
+            return self
+
+        def limit(self, n):
+            self._limit = n
+            return self
+
+        def execute(self):
+            class Res:
+                pass
+            r = Res()
+            if self._table == "agent_job_events":
+                r.data = self.events[:self._limit] if self._limit else list(self.events)
+            elif self._table == "agent_jobs":
+                assert self._limit is None, "agent_jobs query in export_evidence_pack must not be limited to 500"
+                r.data = self.jobs[:self._limit] if self._limit else list(self.jobs)
+            else:
+                r.data = []
+            return r
+
+    import mco.orchestrator.routes as routes_mod
+    import mco.orchestrator.admin_routes as admin_routes_mod
+    fake_db = FakeDBForEvidencePack()
+    monkeypatch.setattr(routes_mod, "get_db_client", lambda: fake_db)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from mco.orchestrator.auth import require_agent
+
+    app = FastAPI()
+    app.include_router(admin_routes_mod.governance_router)
+    app.dependency_overrides[require_agent] = lambda: {
+        "instance_id": "test-agent",
+        "role": "admin",
+        "org_id": "org-special",
+    }
+    client = TestClient(app)
+
+    res = client.post("/api/governance/evidence-pack", json={})
+    assert res.status_code == 200
+    pack = res.json()
+    assert pack["summary"]["audit_events"] == 1
+    trail = json.loads(pack["files"][1]["text"])
+    assert len(trail["audit_events"]) == 1
+    assert trail["audit_events"][0]["job_title"] == "Job 550"
+
