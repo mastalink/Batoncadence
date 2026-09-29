@@ -1,0 +1,14 @@
+{
+  "number": 41,
+  "state": "open",
+  "user": {"login": "copilot-swe-agent[bot]"},
+  "head": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ref": "score/via/v1-ci/a1",
+    "repo": {"fork": false, "full_name": "mastalink/via"}
+  },
+  "base": {
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ref": "codex/via-foundation"
+  }
+}

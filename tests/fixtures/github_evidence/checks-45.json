@@ -1,0 +1,11 @@
+{
+  "check_runs": [
+    {
+      "name": "Verify Via",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "0000000000000000000000000000000000000000",
+      "app": {"slug": "github-actions"}
+    }
+  ]
+}

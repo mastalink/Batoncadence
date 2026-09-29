@@ -1,0 +1,5 @@
+{
+  "state": "approved",
+  "user": {"login": "claude-reviewer"},
+  "commit_id": "1111111111111111111111111111111111111111"
+}

@@ -1,0 +1,14 @@
+{
+  "number": 43,
+  "state": "open",
+  "user": {"login": "external-fork-bot"},
+  "head": {
+    "sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "ref": "feature/forked",
+    "repo": {"fork": true, "full_name": "someone/via"}
+  },
+  "base": {
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ref": "codex/via-foundation"
+  }
+}

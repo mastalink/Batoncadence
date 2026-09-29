@@ -1,0 +1,14 @@
+{
+  "number": 46,
+  "state": "merged",
+  "user": {"login": "copilot-swe-agent[bot]"},
+  "head": {
+    "sha": "1111111111111111111111111111111111111111",
+    "ref": "score/via/merged-no-ci",
+    "repo": {"fork": false, "full_name": "mastalink/via"}
+  },
+  "base": {
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ref": "codex/via-foundation"
+  }
+}
