@@ -243,6 +243,31 @@ def test_via_repository_continuation_avoids_exhausted_provider():
     )
 
 
+def test_score_cloud_v2_build_score_is_dark_and_independently_reviewed():
+    path = Path(__file__).parents[1] / "examples/scores/score-cloud-v2.score.json"
+    value = load_score(path.read_text(encoding="utf-8"))
+    builds = [t for t in value["tasks"] if not t["id"].endswith(("-fix", "-fix2"))]
+    assert [t["id"] for t in builds] == [f"C{n}" for n in range(1, 10)]
+    assert value["launch_requires"] == ["C9"]
+    assert all(t["role"] != t["review_role"] for t in value["tasks"])
+    assert all("cloud:change" not in t["capabilities"] for t in value["tasks"])
+    assert all(t["commit"]["target_branch"] == "score/cloud-v2" for t in value["tasks"])
+    assert builds[0]["commit"]["expected_before_sha"] == "ff4374d7f3b9d72ed88ac337990fec39d77f6ab3"
+    # Without an issued repository:write grant nothing may start.
+    assert SandboxRun(value, "cloud-v2-preview").ready() == []
+
+
+def test_demo_studio_score_is_evidence_only_and_ends_at_owner_checkpoint():
+    path = Path(__file__).parents[1] / "examples/scores/demo-studio-via.score.json"
+    value = load_score(path.read_text(encoding="utf-8"))
+    assert value["budget_cents"] == 0
+    assert all(t["max_cost_cents"] == 0 for t in value["tasks"])
+    assert all("repository:write" not in t["capabilities"] for t in value["tasks"])
+    assert all(t["role"] != t["review_role"] for t in value["tasks"])
+    gated = [t["id"] for t in value["tasks"] if t["checkpoint"]]
+    assert gated == ["D5"] and value["launch_requires"] == ["D5"]
+
+
 def test_on_reject_valid():
     value = score()
     fix_task = copy.deepcopy(value["tasks"][0])

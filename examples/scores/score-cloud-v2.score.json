@@ -1,0 +1,1108 @@
+{
+  "score_version": 1,
+  "id": "score-cloud-v2",
+  "revision": 1,
+  "objective": "Build Score Cloud v2 per docs/SCORE-CLOUD-V2.md: a Postgres-backed conductor that can run off Beast, git-native pull-request/check-run/review evidence, task-scoped credentials, lane adapters (cloud-session, local site agent, api) and conductor-owned merge. Dark by default; nothing deploys.",
+  "constraints": [
+    "Every new behavior is dark by default behind explicit configuration; SQLite Appliance behavior is unchanged.",
+    "No cloud resources are created, no terraform apply, no credentials handled or printed, no push, no merge, no deploy.",
+    "No real vendor or model API calls in tests; use deterministic fakes and recorded fixtures.",
+    "No worker ever gains merge, deploy or cloud:change authority; merging is a conductor effect behind a grant.",
+    "Builder and reviewer are different identities and different vendor families; second fixes are reviewed by a third identity.",
+    "All repository writes happen only in C:/AI/baton/wt/score-cloud-v2 on branch score/cloud-v2. Do not push, merge, deploy, handle or print secrets, or call a paid provider.",
+    "Every step is reviewed by a different identity than its builder; second fixes by a third identity."
+  ],
+  "budget_cents": 0,
+  "max_parallel": 1,
+  "launch_requires": [
+    "C9"
+  ],
+  "tasks": [
+    {
+      "id": "C1",
+      "goal": "C1",
+      "title": "Postgres Score store behind one store interface",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Introduce a Score store interface used by score_bridge, score_conductor and score_sweep. Keep the SQLite implementation byte-for-byte behavior compatible and add a Postgres implementation using the existing Team-edition Postgres path and a reviewed migration at the actual migration head. Preserve every transaction boundary (plan+outbox, state transition+event). Acceptance: a parity test runs the canary and repository-slice fixtures against both stores and asserts identical event sequences; Postgres cases run in postgres-acceptance CI; SQLite remains the default. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C1: Postgres Score store behind one store interface",
+        "expected_before_sha": "ff4374d7f3b9d72ed88ac337990fec39d77f6ab3"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C1-fix"
+    },
+    {
+      "id": "C1-fix",
+      "goal": "C1",
+      "title": "Fix review findings for C1",
+      "instructions": "The independent review of C1 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Introduce a Score store interface used by score_bridge, score_conductor and score_sweep. Keep the SQLite implementation byte-for-byte behavior compatible and add a Postgres implementation using the existing Team-edition Postgres path and a reviewed migration at the actual migration head. Preserve every transaction boundary (plan+outbox, state transition+event). Acceptance: a parity test runs the canary and repository-slice fixtures against both stores and asserts identical event sequences; Postgres cases run in postgres-acceptance CI; SQLite remains the default. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C1"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C1: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C1-fix2"
+    },
+    {
+      "id": "C1-fix2",
+      "goal": "C1",
+      "title": "Second fix attempt for C1",
+      "instructions": "The independent review of C1 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Introduce a Score store interface used by score_bridge, score_conductor and score_sweep. Keep the SQLite implementation byte-for-byte behavior compatible and add a Postgres implementation using the existing Team-edition Postgres path and a reviewed migration at the actual migration head. Preserve every transaction boundary (plan+outbox, state transition+event). Acceptance: a parity test runs the canary and repository-slice fixtures against both stores and asserts identical event sequences; Postgres cases run in postgres-acceptance CI; SQLite remains the default. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C1-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C1: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C2",
+      "goal": "C2",
+      "title": "Git-native evidence verifier in shadow mode",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add a GitHub App client and verifier for pull_request, check_runs and review evidence exactly as section 3.3 specifies (author-to-lane identity map, expected base, allowed_paths including renames/deletions, check runs on the exact head SHA from an allowlisted app, missing checks fail closed, review voided by any later push, different vendor family). Shadow mode only: it records verdicts and never accepts, rejects, merges or posts statuses. Provide a CLI that replays a PR list and prints verdicts. Acceptance: fixture tests for every rule; a recorded fixture of a merged PR with no check run is refused. No network calls in tests. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C1"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C2: Git-native evidence verifier in shadow mode"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C2-fix"
+    },
+    {
+      "id": "C2-fix",
+      "goal": "C2",
+      "title": "Fix review findings for C2",
+      "instructions": "The independent review of C2 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add a GitHub App client and verifier for pull_request, check_runs and review evidence exactly as section 3.3 specifies (author-to-lane identity map, expected base, allowed_paths including renames/deletions, check runs on the exact head SHA from an allowlisted app, missing checks fail closed, review voided by any later push, different vendor family). Shadow mode only: it records verdicts and never accepts, rejects, merges or posts statuses. Provide a CLI that replays a PR list and prints verdicts. Acceptance: fixture tests for every rule; a recorded fixture of a merged PR with no check run is refused. No network calls in tests. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C1",
+        "C2"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C2: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C2-fix2"
+    },
+    {
+      "id": "C2-fix2",
+      "goal": "C2",
+      "title": "Second fix attempt for C2",
+      "instructions": "The independent review of C2 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add a GitHub App client and verifier for pull_request, check_runs and review evidence exactly as section 3.3 specifies (author-to-lane identity map, expected base, allowed_paths including renames/deletions, check runs on the exact head SHA from an allowlisted app, missing checks fail closed, review voided by any later push, different vendor family). Shadow mode only: it records verdicts and never accepts, rejects, merges or posts statuses. Provide a CLI that replays a PR list and prints verdicts. Acceptance: fixture tests for every rule; a recorded fixture of a merged PR with no check run is refused. No network calls in tests. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C1",
+        "C2-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C2: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C3",
+      "goal": "C3",
+      "title": "Task-scoped expiring credentials for cloud sessions",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Mint task-scoped credentials bound to org, run, task, attempt and expiry, usable only to lease/renew/complete/fail that one job. Extend mcp_server bearer_guard to verify them while keeping the single static bearer for Appliance. Acceptance: tests reject expired, replayed-after-completion, cross-task, cross-run and tampered credentials; the static bearer path is unchanged. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C2"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C3: Task-scoped expiring credentials for cloud sessions"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C3-fix"
+    },
+    {
+      "id": "C3-fix",
+      "goal": "C3",
+      "title": "Fix review findings for C3",
+      "instructions": "The independent review of C3 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Mint task-scoped credentials bound to org, run, task, attempt and expiry, usable only to lease/renew/complete/fail that one job. Extend mcp_server bearer_guard to verify them while keeping the single static bearer for Appliance. Acceptance: tests reject expired, replayed-after-completion, cross-task, cross-run and tampered credentials; the static bearer path is unchanged. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C2",
+        "C3"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C3: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C3-fix2"
+    },
+    {
+      "id": "C3-fix2",
+      "goal": "C3",
+      "title": "Second fix attempt for C3",
+      "instructions": "The independent review of C3 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Mint task-scoped credentials bound to org, run, task, attempt and expiry, usable only to lease/renew/complete/fail that one job. Extend mcp_server bearer_guard to verify them while keeping the single static bearer for Appliance. Acceptance: tests reject expired, replayed-after-completion, cross-task, cross-run and tampered credentials; the static bearer path is unchanged. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C2",
+        "C3-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C3: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C4",
+      "goal": "C4",
+      "title": "Issue-dispatch lane adapter with one vendor canary fixture",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add the cloud-session lane adapter from section 3.2: open one GitHub issue per attempt with the signed packet, idempotent by run/task/attempt, with a pluggable trigger step per vendor (assignment, mention, or Routine fire). Implement the adapter and a fake vendor for tests; real vendor triggers stay disabled behind configuration. Acceptance: duplicate dispatch creates one issue; two returned PRs resolve to one winner with a receipt for the loser; adapter never merges. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C3"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C4: Issue-dispatch lane adapter with one vendor canary fixture"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C4-fix"
+    },
+    {
+      "id": "C4-fix",
+      "goal": "C4",
+      "title": "Fix review findings for C4",
+      "instructions": "The independent review of C4 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add the cloud-session lane adapter from section 3.2: open one GitHub issue per attempt with the signed packet, idempotent by run/task/attempt, with a pluggable trigger step per vendor (assignment, mention, or Routine fire). Implement the adapter and a fake vendor for tests; real vendor triggers stay disabled behind configuration. Acceptance: duplicate dispatch creates one issue; two returned PRs resolve to one winner with a receipt for the loser; adapter never merges. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C3",
+        "C4"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C4: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C4-fix2"
+    },
+    {
+      "id": "C4-fix2",
+      "goal": "C4",
+      "title": "Second fix attempt for C4",
+      "instructions": "The independent review of C4 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add the cloud-session lane adapter from section 3.2: open one GitHub issue per attempt with the signed packet, idempotent by run/task/attempt, with a pluggable trigger step per vendor (assignment, mention, or Routine fire). Implement the adapter and a fake vendor for tests; real vendor triggers stay disabled behind configuration. Acceptance: duplicate dispatch creates one issue; two returned PRs resolve to one winner with a receipt for the loser; adapter never merges. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C3",
+        "C4-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C4: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C5",
+      "goal": "C5",
+      "title": "Conductor-owned merge and bitcadence/score required status",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Implement conductor-owned squash merge of an accepted PR and posting of the bitcadence/score commit status on the accepted head, both dark by default behind an explicit gateway flag and a digest-bound grant. Detect and record out-of-band human merges without re-merging. Acceptance: tests for head moved after acceptance, merge conflict, out-of-band merge, GitHub error mid-merge (no duplicate merge, run pauses). Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C4"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C5: Conductor-owned merge and bitcadence/score required status"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C5-fix"
+    },
+    {
+      "id": "C5-fix",
+      "goal": "C5",
+      "title": "Fix review findings for C5",
+      "instructions": "The independent review of C5 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Implement conductor-owned squash merge of an accepted PR and posting of the bitcadence/score commit status on the accepted head, both dark by default behind an explicit gateway flag and a digest-bound grant. Detect and record out-of-band human merges without re-merging. Acceptance: tests for head moved after acceptance, merge conflict, out-of-band merge, GitHub error mid-merge (no duplicate merge, run pauses). Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C4",
+        "C5"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C5: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C5-fix2"
+    },
+    {
+      "id": "C5-fix2",
+      "goal": "C5",
+      "title": "Second fix attempt for C5",
+      "instructions": "The independent review of C5 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Implement conductor-owned squash merge of an accepted PR and posting of the bitcadence/score commit status on the accepted head, both dark by default behind an explicit gateway flag and a digest-bound grant. Detect and record out-of-band human merges without re-merging. Acceptance: tests for head moved after acceptance, merge conflict, out-of-band merge, GitHub error mid-merge (no duplicate merge, run pauses). Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C4",
+        "C5-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C5: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C6",
+      "goal": "C6",
+      "title": "Cloud deployment definition for gateway, conductor and gate UI",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Author the reviewed deployment definition in infra/aws for one always-on gateway+conductor container with Postgres, SSM-only access, a Cloudflare Tunnel for public HTTPS and Cloudflare Access in front of the human console. Author and validate only: terraform validate and plan against no real account; do not apply, create cloud resources, or store credentials. Acceptance: terraform validate passes; a runbook in docs lists exact apply, verify (/readyz with Beast off) and rollback steps. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C5"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C6: Cloud deployment definition for gateway, conductor and gate UI"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C6-fix"
+    },
+    {
+      "id": "C6-fix",
+      "goal": "C6",
+      "title": "Fix review findings for C6",
+      "instructions": "The independent review of C6 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Author the reviewed deployment definition in infra/aws for one always-on gateway+conductor container with Postgres, SSM-only access, a Cloudflare Tunnel for public HTTPS and Cloudflare Access in front of the human console. Author and validate only: terraform validate and plan against no real account; do not apply, create cloud resources, or store credentials. Acceptance: terraform validate passes; a runbook in docs lists exact apply, verify (/readyz with Beast off) and rollback steps. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C5",
+        "C6"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C6: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C6-fix2"
+    },
+    {
+      "id": "C6-fix2",
+      "goal": "C6",
+      "title": "Second fix attempt for C6",
+      "instructions": "The independent review of C6 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Author the reviewed deployment definition in infra/aws for one always-on gateway+conductor container with Postgres, SSM-only access, a Cloudflare Tunnel for public HTTPS and Cloudflare Access in front of the human console. Author and validate only: terraform validate and plan against no real account; do not apply, create cloud resources, or store credentials. Acceptance: terraform validate passes; a runbook in docs lists exact apply, verify (/readyz with Beast off) and rollback steps. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C5",
+        "C6-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C6: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C7",
+      "goal": "C7",
+      "title": "Outbound-only Beast site agent",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add a site agent that connects outbound to the gateway, advertises capabilities, leases local-lane jobs under existing lease/epoch fencing, and finishes repository work as a pushed branch plus PR. Acceptance: tests for disconnect and reconnect mid-lease without duplicate effects, stale-epoch writes rejected, capability advertisement bounded and non-secret. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C6"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C7: Outbound-only Beast site agent"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C7-fix"
+    },
+    {
+      "id": "C7-fix",
+      "goal": "C7",
+      "title": "Fix review findings for C7",
+      "instructions": "The independent review of C7 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add a site agent that connects outbound to the gateway, advertises capabilities, leases local-lane jobs under existing lease/epoch fencing, and finishes repository work as a pushed branch plus PR. Acceptance: tests for disconnect and reconnect mid-lease without duplicate effects, stale-epoch writes rejected, capability advertisement bounded and non-secret. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C6",
+        "C7"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C7: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C7-fix2"
+    },
+    {
+      "id": "C7-fix2",
+      "goal": "C7",
+      "title": "Second fix attempt for C7",
+      "instructions": "The independent review of C7 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add a site agent that connects outbound to the gateway, advertises capabilities, leases local-lane jobs under existing lease/epoch fencing, and finishes repository work as a pushed branch plus PR. Acceptance: tests for disconnect and reconnect mid-lease without duplicate effects, stale-epoch writes rejected, capability advertisement bounded and non-secret. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C6",
+        "C7-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C7: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C8",
+      "goal": "C8",
+      "title": "API lane with atomic cost reservations",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add the api lane worker contract and a cost ledger with atomic reserve-before-dispatch, settle-on-receipt and retain-on-unknown semantics, a per-Score monthly ceiling and a kill switch. No real provider keys in tests. Acceptance: concurrent reservation tests never exceed the ceiling; unknown outcomes retain reservation; ceiling exhaustion pauses only the affected path. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C7"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C8: API lane with atomic cost reservations"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C8-fix"
+    },
+    {
+      "id": "C8-fix",
+      "goal": "C8",
+      "title": "Fix review findings for C8",
+      "instructions": "The independent review of C8 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add the api lane worker contract and a cost ledger with atomic reserve-before-dispatch, settle-on-receipt and retain-on-unknown semantics, a per-Score monthly ceiling and a kill switch. No real provider keys in tests. Acceptance: concurrent reservation tests never exceed the ceiling; unknown outcomes retain reservation; ceiling exhaustion pauses only the affected path. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C7",
+        "C8"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C8: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C8-fix2"
+    },
+    {
+      "id": "C8-fix2",
+      "goal": "C8",
+      "title": "Second fix attempt for C8",
+      "instructions": "The independent review of C8 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Add the api lane worker contract and a cost ledger with atomic reserve-before-dispatch, settle-on-receipt and retain-on-unknown semantics, a per-Score monthly ceiling and a kill switch. No real provider keys in tests. Acceptance: concurrent reservation tests never exceed the ceiling; unknown outcomes retain reservation; ceiling exhaustion pauses only the affected path. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C7",
+        "C8-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C8: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "C9",
+      "goal": "C9",
+      "title": "Cross-lane canary Score and evidence report",
+      "instructions": "Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Author examples/scores/cross-lane-canary.score.json and a fake-vendor harness that runs one Score where the cloud-session lane builds, the local lane reviews and the api lane triages, with the local site disconnected mid-run, ending with a complete evidence trail. Acceptance: the harness test passes end to end with deterministic fakes and the report lists every receipt. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "claude",
+      "depends_on": [
+        "C8"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C9: Cross-lane canary Score and evidence report"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C9-fix"
+    },
+    {
+      "id": "C9-fix",
+      "goal": "C9",
+      "title": "Fix review findings for C9",
+      "instructions": "The independent review of C9 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Author examples/scores/cross-lane-canary.score.json and a fake-vendor harness that runs one Score where the cloud-session lane builds, the local lane reviews and the api lane triages, with the local site disconnected mid-run, ending with a complete evidence trail. Acceptance: the harness test passes end to end with deterministic fakes and the report lists every receipt. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "claude",
+      "review_role": "codex",
+      "depends_on": [
+        "C8",
+        "C9"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C9: address review findings"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "C9-fix2"
+    },
+    {
+      "id": "C9-fix2",
+      "goal": "C9",
+      "title": "Second fix attempt for C9",
+      "instructions": "The independent review of C9 rejected its commit; the findings are appended below. Fix every finding on top of the current branch head, keeping the valid work. Design authority: docs/SCORE-CLOUD-V2.md (read it first; the packet ID below matches its section 5 table). Author examples/scores/cross-lane-canary.score.json and a fake-vendor harness that runs one Score where the cloud-session lane builds, the local lane reviews and the api lane triages, with the local site disconnected mid-run, ending with a complete evidence trail. Acceptance: the harness test passes end to end with deterministic fakes and the report lists every receipt. Files you may commit: src/*, tests/*, docs/*, examples/*, infra/*, pyproject.toml. Anything else is silently left out of the commit. New code is not done until a production entry point (CLI, worker, route, or script the user runs) calls it and a test proves that call. Dead code is a rejection finding. Run `.venv/Scripts/python -m pytest -q` and report the counts. When the work is ready and tests pass, return exactly {\"ready\": true} as the result and put the narrative in the handoff.",
+      "role": "codex",
+      "review_role": "antigravity",
+      "depends_on": [
+        "C8",
+        "C9-fix"
+      ],
+      "resources": [
+        "C:/AI/baton/wt/score-cloud-v2"
+      ],
+      "capabilities": [
+        "repository:write",
+        "evidence:write",
+        "evidence:review"
+      ],
+      "commit": {
+        "worktree_path": "C:/AI/baton/wt/score-cloud-v2",
+        "target_branch": "score/cloud-v2",
+        "allowed_paths": [
+          "src/*",
+          "tests/*",
+          "docs/*",
+          "examples/*",
+          "infra/*",
+          "pyproject.toml"
+        ],
+        "commit_message": "C9: second fix"
+      },
+      "evidence": [
+        "commit_sha"
+      ],
+      "max_attempts": 1,
+      "timeout_seconds": 7200,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    }
+  ]
+}
