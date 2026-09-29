@@ -61,6 +61,13 @@ class ServiceSpec:
     role: str | None = None
     instance: str | None = None
     poll_interval: float | None = None
+    # InteractiveToken logon only starts a task while the box has an active,
+    # unlocked interactive session - fine for a desk worker, useless for a
+    # sidecar that must keep deciding while nobody is logged in. S4U runs the
+    # task as the registering user without storing a password and without
+    # requiring that user to be logged on, at the cost of no LogonTrigger
+    # (there is no logon to trigger on): BootTrigger alone starts it.
+    run_when_logged_off: bool = False
 
     @property
     def unit_name(self) -> str:
@@ -215,6 +222,7 @@ def _waker_spec(
     exec_command: str,
     instance: str | None = None,
     min_interval: float = 10.0,
+    run_when_logged_off: bool = False,
 ) -> ServiceSpec:
     return ServiceSpec(
         name=_waker_service_name(role, instance),
@@ -224,6 +232,7 @@ def _waker_spec(
         argv=_wake_argv(role, exec_command, instance=instance, min_interval=min_interval),
         description=f"BitCadence waker for {role}{('/' + instance) if instance else ''}",
         restart_on_failure=True,
+        run_when_logged_off=run_when_logged_off,
     )
 
 
@@ -267,8 +276,11 @@ def _waker_windows_task_xml(
     exec_command: str,
     instance: str | None = None,
     min_interval: float = 10.0,
+    run_when_logged_off: bool = False,
 ) -> str:
-    return _service_windows_task_xml(_waker_spec(role, exec_command, instance, min_interval))
+    return _service_windows_task_xml(
+        _waker_spec(role, exec_command, instance, min_interval, run_when_logged_off=run_when_logged_off)
+    )
 
 
 def _poll_windows_task_xml(
@@ -301,6 +313,11 @@ def _service_windows_task_xml(spec: ServiceSpec) -> str:
       <Enabled>true</Enabled>
     </TimeTrigger>
 """
+    elif spec.run_when_logged_off:
+        triggers = """    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+"""
     else:
         triggers = """    <BootTrigger>
       <Enabled>true</Enabled>
@@ -309,6 +326,7 @@ def _service_windows_task_xml(spec: ServiceSpec) -> str:
       <Enabled>true</Enabled>
     </LogonTrigger>
 """
+    logon_type = "S4U" if spec.run_when_logged_off else "InteractiveToken"
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -319,7 +337,7 @@ def _service_windows_task_xml(spec: ServiceSpec) -> str:
   </Triggers>
   <Principals>
     <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
+      <LogonType>{logon_type}</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
@@ -840,8 +858,12 @@ def install_waker(
     exec_command: str,
     instance: str | None = None,
     min_interval: float = 10.0,
+    run_when_logged_off: bool = False,
 ) -> tuple[bool, str]:
-    spec = _waker_spec(role, exec_command, instance=instance, min_interval=min_interval)
+    spec = _waker_spec(
+        role, exec_command, instance=instance, min_interval=min_interval,
+        run_when_logged_off=run_when_logged_off,
+    )
     if os.name == "nt":
         return _win_install_service(spec)
     if sys.platform == "darwin":

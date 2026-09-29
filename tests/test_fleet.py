@@ -42,6 +42,42 @@ mode = "off"
     assert workers["codex-beast"].mode == "poll"
     assert workers["codex-beast"].poll_interval == 1800
     assert workers["disabled"].active_service_name is None
+    assert workers["opencode-beast"].background is False
+
+
+def test_load_fleet_parses_background_flag_for_always_on_workers(tmp_path):
+    config = _write(
+        tmp_path / "fleet.toml",
+        """
+[workers.claude-cio]
+role = "cio"
+instance = "claude-cio"
+mode = "waker"
+exec = "C:/Users/masta/.mco/bin/claude-cio-run.cmd"
+background = true
+""",
+    )
+
+    workers = fleet.load_fleet(config)
+
+    assert workers["claude-cio"].background is True
+
+
+def test_load_fleet_rejects_non_boolean_background(tmp_path):
+    config = _write(
+        tmp_path / "fleet.toml",
+        """
+[workers.bad]
+role = "cio"
+instance = "claude-cio"
+mode = "waker"
+exec = "run.cmd"
+background = "yes"
+""",
+    )
+
+    with pytest.raises(fleet.FleetConfigError, match="background"):
+        fleet.load_fleet(config)
 
 
 def test_load_fleet_missing_file_is_clear(tmp_path):
@@ -112,8 +148,9 @@ mode = "off"
     monkeypatch.setattr(
         fleet.service,
         "install_waker",
-        lambda role, exec_command, instance=None, min_interval=10.0: (
-            calls.append(("waker", role, exec_command, instance, min_interval)) or (True, "waker installed")
+        lambda role, exec_command, instance=None, min_interval=10.0, run_when_logged_off=False: (
+            calls.append(("waker", role, exec_command, instance, min_interval, run_when_logged_off))
+            or (True, "waker installed")
         ),
     )
     monkeypatch.setattr(
@@ -127,13 +164,40 @@ mode = "off"
     summaries = fleet.apply_fleet(config)
 
     assert ("uninstall", "BitCadence-poll-opencode-opencode-beast") in calls
-    assert ("waker", "opencode", "opencode-run.cmd", "opencode-beast", 7.0) in calls
+    assert ("waker", "opencode", "opencode-run.cmd", "opencode-beast", 7.0, False) in calls
     assert ("uninstall", "BitCadence-wake-codex-beast") in calls
     assert ("poll", "codex", "codex-run.cmd", "codex-beast", 900.0) in calls
     assert ("uninstall", "BitCadence-poll-codex-disabled") in calls
     assert ("uninstall", "BitCadence-wake-old-old") in calls
     assert any("opencode-beast: waker OK" in line for line in summaries)
     assert any("codex-beast: poll OK" in line for line in summaries)
+
+
+def test_apply_passes_background_flag_through_to_install_waker(monkeypatch, tmp_path):
+    config = _write(
+        tmp_path / "fleet.toml",
+        """
+[workers.claude-cio]
+role = "cio"
+instance = "claude-cio"
+mode = "waker"
+exec = "claude-cio-run.cmd"
+background = true
+""",
+    )
+    calls = []
+    monkeypatch.setattr(fleet.service, "list_status", lambda: [])
+    monkeypatch.setattr(
+        fleet.service,
+        "install_waker",
+        lambda role, exec_command, instance=None, min_interval=10.0, run_when_logged_off=False: (
+            calls.append((role, instance, run_when_logged_off)) or (True, "waker installed")
+        ),
+    )
+
+    fleet.apply_fleet(config)
+
+    assert ("cio", "claude-cio", True) in calls
 
 
 def test_fleet_status_lists_configured_workers(monkeypatch, tmp_path):

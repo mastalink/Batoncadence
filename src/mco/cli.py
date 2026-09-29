@@ -1421,6 +1421,39 @@ def score_list(database: Path = typer.Option(DEFAULT_SCORE_DB, "--db")):
 jev_app = typer.Typer(help="Ask Jev bounded, annotation-only questions. Never authorizes an effect.")
 app.add_typer(jev_app, name="jev")
 
+cio_app = typer.Typer(help="Deterministic policy checks backing ops/cio-sidecar-brief.md.")
+app.add_typer(cio_app, name="cio")
+
+
+@cio_app.command("check")
+def cio_check(
+    decider: str = typer.Option(..., "--decider", help="Identity about to render the verdict (e.g. claude-cio)."),
+    project: str = typer.Option("", "--project", help="Project the spend/plan is against."),
+    spend_cents: int = typer.Option(0, "--spend-cents", help="Proposed spend, in cents."),
+    proposed_by: str = typer.Option("", "--proposed-by", help="Identity that authored the proposal."),
+    category: list[str] = typer.Option([], "--category", help="Repeatable; a policy category the proposal touches."),
+):
+    """Check one proposal against the brief's mechanical rules and print a verdict.
+
+    This is the mechanical half of the sidecar's own judgment, not a
+    replacement for it: `claude-cio` (or any session reading
+    ops/cio-sidecar-brief.md) runs this before approving/rejecting/escalating
+    a plan, so the parts of the brief that are a fixed rule - a self-approval
+    check, a spend cap, a prohibited category - are enforced the same way
+    every time instead of re-derived from a vibe. Exits 0 with JSON always;
+    the verdict field carries approve/reject/escalate.
+    """
+    from mco.orchestrator.cio_policy import Proposal, evaluate
+
+    proposal = Proposal(
+        project=project,
+        spend_cents=spend_cents,
+        categories=frozenset(category),
+        proposed_by=proposed_by,
+    )
+    decision = evaluate(proposal, decider=decider)
+    print(json.dumps({"verdict": decision.verdict, "reasons": list(decision.reasons)}))
+
 
 @jev_app.command("route-model")
 def jev_route_model(
