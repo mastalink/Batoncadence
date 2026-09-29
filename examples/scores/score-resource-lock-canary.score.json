@@ -1,0 +1,49 @@
+{
+  "score_version": 1,
+  "id": "score-resource-lock-canary",
+  "revision": 1,
+  "objective": "Prove a shared abstract resource stays locked through review and unlocks only after acceptance, without repository or cloud mutation.",
+  "constraints": [
+    "Both tasks share the abstract resource score-canary-lane; the second must wait until the first is accepted.",
+    "No repository:write, no cloud:change, no absolute host paths.",
+    "budget_cents is 0; every max_cost_cents is 0.",
+    "Fixed non-LLM handlers only; no secrets in evidence."
+  ],
+  "budget_cents": 0,
+  "max_parallel": 2,
+  "launch_requires": ["SRL-second"],
+  "tasks": [
+    {
+      "id": "SRL-first",
+      "goal": "ResourceLock",
+      "title": "Hold the lane through build and review",
+      "instructions": "Write score-runs/{run_id}/resource-lock-first.json under the shared lane lease. Return path and sha256. Release the lane only after independent acceptance.",
+      "role": "score-canary-worker",
+      "review_role": "score-canary-review",
+      "depends_on": [],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["canary_artifact"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "SRL-second",
+      "goal": "ResourceLock",
+      "title": "Acquire the lane after first acceptance",
+      "instructions": "After SRL-first is accepted, write score-runs/{run_id}/resource-lock-second.json on the same abstract lane. Confirm the lane was not usable before acceptance. Return path and sha256.",
+      "role": "score-canary-worker",
+      "review_role": "score-canary-review",
+      "depends_on": [],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["canary_artifact"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    }
+  ]
+}

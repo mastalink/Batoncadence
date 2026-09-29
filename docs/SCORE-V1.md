@@ -1,6 +1,6 @@
 # BitCadence Score v1
 
-Status: implemented **offline contract, compiler and sandbox policy kernel**, plus one deployed fixed-function cloud audit adapter. It is not yet a general installed conductor, authenticated score gateway endpoint, durable score-run store, or live agent dispatcher. Source base: cc01c60a7a44cb522c334ba42b886f3ce37cad90. Worktree: C:/AI/baton/wt/score-v1, branch codex/score-v1. The audit adapter's acceptance record is `docs/VIA-SCORE-CLOUD-RUNNER-ACCEPTANCE-20260914.md`; it does not make arbitrary Score packets executable.
+Status: implemented **offline contract, compiler and sandbox policy kernel**, the local Score bridge/conductor/dispatcher/sweep, and one deployed fixed-function cloud audit adapter. Score Cloud v2 (always-on Postgres conductor, git-native PR evidence, multi-lane workers) is design-only — see `docs/SCORE-CLOUD-V2.md` and `docs/SCORE-CLOUD-V2-PACKETS.md`. Historical source base for the v1 contract: cc01c60a7a44cb522c334ba42b886f3ce37cad90. The audit adapter's acceptance record is `docs/VIA-SCORE-CLOUD-RUNNER-ACCEPTANCE-20260914.md`; it does not make arbitrary Score packets executable.
 
 ## Decision
 
@@ -37,20 +37,26 @@ These are inspected code capabilities, not assertions of the deployed gateway re
 
 ## Usage
 
-From the isolated worktree with its source on PYTHONPATH:
+From a checkout with `src` on `PYTHONPATH` (or an editable install):
 
-```powershell
-$env:PYTHONPATH = 'C:\AI\baton\wt\score-v1\src'
-& C:\AI\baton\Batoncadence\.venv\Scripts\python.exe -m mco.orchestrator.scores validate examples/scores/via-cloud.score.json
-& C:\AI\baton\Batoncadence\.venv\Scripts\python.exe -m mco.orchestrator.scores compile examples/scores/via-cloud.score.json
-& C:\AI\baton\Batoncadence\.venv\Scripts\python.exe -m mco.orchestrator.scores preview examples/scores/via-cloud.score.json
+```bash
+PYTHONPATH=src python -m mco.orchestrator.scores validate examples/scores/via-cloud.score.json
+PYTHONPATH=src python -m mco.orchestrator.scores compile examples/scores/via-cloud.score.json
+PYTHONPATH=src python -m mco.orchestrator.scores preview examples/scores/via-cloud.score.json
 ```
 
-On another host use that environment's Python and checkout path. Output is JSON on stdout. Invalid files exit2. There is intentionally no submit or launch command yet.
+Windows PowerShell equivalent (adjust the checkout path):
+
+```powershell
+$env:PYTHONPATH = 'C:\path\to\BitCadence\src'
+python -m mco.orchestrator.scores validate examples/scores/via-cloud.score.json
+```
+
+Output is JSON on stdout. Invalid files exit 2. There is intentionally no submit or launch command on this offline module surface.
 
 ## VIA's first score
 
-`examples/scores/via-cloud.score.json` maps all14 goals from the existing VIA roadmap. G08 defines Lorain launch acceptance. Expansion G09–G13 and G14 operations follow their dependencies; G14 represents setup/one accepted operating cycle, with recurring cloud operations configured as its deliverable—not a job claiming to finish forever.
+`examples/scores/via-cloud.score.json` maps all 14 goals from the existing VIA roadmap. G08 defines Lorain launch acceptance. Expansion G09–G13 and G14 operations follow their dependencies; G14 represents setup/one accepted operating cycle, with recurring cloud operations configured as its deliverable—not a job claiming to finish forever.
 
 No human checkpoint was invented. `checkpoint: null` means no score-authored human gate; external authority is still required. The budget is zero until measured limits are authorized. A zero budget is not a prediction of free operation, and agents cannot label chargeable work free to bypass accounting. Production actions are disabled in this prototype regardless of the example's requested capability strings.
 

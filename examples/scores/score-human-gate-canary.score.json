@@ -1,0 +1,52 @@
+{
+  "score_version": 1,
+  "id": "score-human-gate-canary",
+  "revision": 1,
+  "objective": "Prove a human checkpoint blocks launch until an owner decision, after an evidence-only build and independent review, with zero budget and no cloud mutation.",
+  "constraints": [
+    "Evidence-only until the owner checkpoint; no repository:write and no cloud:change.",
+    "Agents cannot approve the human checkpoint.",
+    "Abstract lane resources only; no absolute host paths or secrets.",
+    "budget_cents is 0; every max_cost_cents is 0."
+  ],
+  "budget_cents": 0,
+  "max_parallel": 1,
+  "launch_requires": ["SHG-launch"],
+  "tasks": [
+    {
+      "id": "SHG-build",
+      "goal": "HumanGate",
+      "title": "Evidence-only preflight before the owner gate",
+      "instructions": "Write score-runs/{run_id}/human-gate-preflight.json summarizing readiness. Return path and sha256. Do not claim launch authority.",
+      "role": "score-canary-worker",
+      "review_role": "score-canary-review",
+      "depends_on": [],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["artifact_digest", "acceptance_report"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "SHG-launch",
+      "goal": "HumanGate",
+      "title": "Owner checkpoint before any further effect",
+      "instructions": "After SHG-build acceptance, wait for an explicit human owner approval. Record the decision id. Do not start any further work, push, merge, or deploy from this task.",
+      "role": "score-canary-worker",
+      "review_role": "score-canary-review",
+      "depends_on": ["SHG-build"],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["acceptance_report"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": {
+        "id": "owner-launch",
+        "reason": "Explicit owner gate before launch_requires is satisfied"
+      }
+    }
+  ]
+}
