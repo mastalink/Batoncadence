@@ -1,7 +1,8 @@
-"""Durable read-only score bridge; live gateway create_with_id v1 required.
+"""Durable Score bridge; live gateway create_with_id v1 required.
 
 Local SQLite is a development control plane, not VIA production infrastructure.
-No production mutation, budgeted tasks or human-gate authorization supported.
+Budgeted tasks are refused. Human checkpoints require an injected gate_service;
+without one, checkpointed tasks wait rather than self-authorize.
 """
 import hashlib
 import json

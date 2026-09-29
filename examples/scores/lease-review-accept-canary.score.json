@@ -1,0 +1,51 @@
+{
+  "score_version": 1,
+  "id": "lease-review-accept-canary",
+  "revision": 1,
+  "objective": "Prove the minimal lease then independent review then accept chain with fixed non-LLM handlers and zero budget.",
+  "constraints": [
+    "Isolated canary lane only (score-canary-lane); no release lane access.",
+    "Fixed non-LLM handler execution only; no LLM dispatch and no paid provider calls.",
+    "Deterministic evidence written only under score-runs/{run_id}/.",
+    "Strict separation of duty: worker and reviewer roles differ; author cannot review own work.",
+    "No cloud:change, no repository:write, no secrets, tokens, or absolute host paths in resources.",
+    "budget_cents remains 0; max_cost_cents remains 0 on every task."
+  ],
+  "budget_cents": 0,
+  "max_parallel": 1,
+  "launch_requires": ["LRA-accept"],
+  "tasks": [
+    {
+      "id": "LRA-build",
+      "goal": "LRA",
+      "title": "Lease and write deterministic canary artifact",
+      "instructions": "Under a fenced lease, write a deterministic JSON artifact under score-runs/{run_id}/lease-review-accept.json and return its relative path and sha256. Do not call LLMs, mutate repositories, or touch host paths outside the run artifact root.",
+      "role": "score-canary-worker",
+      "review_role": "score-canary-review",
+      "depends_on": [],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["canary_artifact"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "LRA-accept",
+      "goal": "LRA",
+      "title": "Independent hash verification and acceptance",
+      "instructions": "Independently fetch the LRA-build artifact, verify exact bytes and sha256, confirm author and reviewer identities differ, and record an acceptance report. Reject on mismatch, traversal, or self-review.",
+      "role": "score-canary-review",
+      "review_role": "score-canary-worker",
+      "depends_on": ["LRA-build"],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["acceptance_report"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    }
+  ]
+}
