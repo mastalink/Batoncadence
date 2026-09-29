@@ -112,6 +112,24 @@ def test_windows_waker_task_xml_has_restart_on_failure_settings():
     assert "--instance opencode-beast" in xml
 
 
+def test_windows_waker_task_xml_defaults_to_interactive_logon():
+    xml = service._waker_windows_task_xml("cio", "cio-worker-run", instance="claude-cio")
+    assert "<LogonType>InteractiveToken</LogonType>" in xml
+    assert "<LogonTrigger>" in xml
+
+
+def test_windows_waker_task_xml_can_run_with_no_user_logged_on():
+    xml = service._waker_windows_task_xml(
+        "cio", "cio-worker-run", instance="claude-cio", run_when_logged_off=True,
+    )
+    minidom.parseString(xml.encode("utf-16"))
+    assert "<LogonType>S4U</LogonType>" in xml
+    assert "<RunLevel>LeastPrivilege</RunLevel>" in xml
+    assert "<BootTrigger>" in xml
+    # There is no interactive logon to wait for, so no LogonTrigger is emitted.
+    assert "<LogonTrigger>" not in xml
+
+
 def test_windows_gateway_task_xml_has_restart_on_failure_settings():
     xml = service._windows_task_xml("127.0.0.1", 18789)
     assert "<RestartOnFailure>" in xml

@@ -17,7 +17,7 @@ from mco import service
 
 FLEET_CONFIG_PATH = Path.home() / ".mco" / "fleet.toml"
 VALID_MODES = {"waker", "poll", "off"}
-ALLOWED_FIELDS = {"role", "instance", "mode", "exec", "min_interval", "poll_interval"}
+ALLOWED_FIELDS = {"role", "instance", "mode", "exec", "min_interval", "poll_interval", "background"}
 
 
 class FleetConfigMissing(FileNotFoundError):
@@ -37,6 +37,10 @@ class WorkerConfig:
     exec_command: str | None
     min_interval: float
     poll_interval: float
+    # True (S4U scheduled task, no stored password) lets a waker run whether or
+    # not a user is logged on. Default False preserves every existing worker's
+    # InteractiveToken behavior; only a sidecar that must never go dark opts in.
+    background: bool = False
 
     @property
     def waker_service_name(self) -> str:
@@ -108,6 +112,7 @@ def parse_fleet_data(data: dict[str, Any]) -> dict[str, WorkerConfig]:
             exec_command=exec_command,
             min_interval=_number(raw.get("min_interval", 10), "min_interval", worker),
             poll_interval=_number(raw.get("poll_interval", 1800), "poll_interval", worker),
+            background=_bool(raw.get("background", False), "background", worker),
         )
     return parsed
 
@@ -158,6 +163,7 @@ def apply_fleet(path: Path = FLEET_CONFIG_PATH) -> list[str]:
                 worker.exec_command or "",
                 instance=worker.instance,
                 min_interval=worker.min_interval,
+                run_when_logged_off=worker.background,
             )
             summaries.append(_format_result(worker.worker, "waker", ok_flag, detail))
             if not ok_flag:
@@ -247,6 +253,12 @@ def _optional_string(raw: dict[str, Any], key: str, worker: str) -> str | None:
     return value.strip() or None
 
 
+def _bool(value: Any, key: str, worker: str) -> bool:
+    if not isinstance(value, bool):
+        raise FleetConfigError(f"workers.{worker}.{key} must be a boolean")
+    return value
+
+
 def _number(value: Any, key: str, worker: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise FleetConfigError(f"workers.{worker}.{key} must be a number")
@@ -283,10 +295,15 @@ def _format_result(worker: str, mode: str, ok_flag: bool, detail: str) -> str:
     return f"{worker}: {mode} {'OK' if ok_flag else 'FAILED'} - {detail}"
 
 
-def _coerce_assignment_value(key: str, value: str) -> str | int | float:
+def _coerce_assignment_value(key: str, value: str) -> str | int | float | bool:
     if key in {"min_interval", "poll_interval"}:
         number = float(value)
         return int(number) if number.is_integer() else number
+    if key == "background":
+        lowered = value.strip().lower()
+        if lowered not in {"true", "false"}:
+            raise FleetConfigError("background must be true or false")
+        return lowered == "true"
     if key == "mode" and value not in VALID_MODES:
         raise FleetConfigError("mode must be one of: off, poll, waker")
     return value
@@ -294,7 +311,7 @@ def _coerce_assignment_value(key: str, value: str) -> str | int | float:
 
 def _render_fleet_toml(workers: dict[str, Any]) -> str:
     lines: list[str] = []
-    field_order = ["role", "instance", "mode", "exec", "min_interval", "poll_interval"]
+    field_order = ["role", "instance", "mode", "exec", "min_interval", "poll_interval", "background"]
     for worker, raw in workers.items():
         lines.append(f"[workers.{_toml_key(worker)}]")
         for field in field_order:
