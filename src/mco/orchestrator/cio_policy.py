@@ -80,8 +80,22 @@ def chief_is_online(claude_desktop_last_seen_seconds: Optional[float]) -> bool:
     return claude_desktop_last_seen_seconds < CHIEF_ONLINE_THRESHOLD_SECONDS
 
 
+def _normalize_project(project: str) -> str:
+    return (project or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def known_project(project: str) -> bool:
+    """True when `project` has a defined spend cap in the brief.
+
+    A project the brief never mentions has no defined cap to check against,
+    which is not the same as "no cap" - `evaluate` must fail closed on it
+    rather than reading absence-of-a-rule as approval.
+    """
+    return _normalize_project(project) in SPEND_CAPS_CENTS
+
+
 def over_spend_cap(project: str, spend_cents: int) -> bool:
-    key = (project or "").strip().lower().replace(" ", "_").replace("-", "_")
+    key = _normalize_project(project)
     cap = SPEND_CAPS_CENTS.get(key)
     if cap is None:
         return False
@@ -96,10 +110,24 @@ def evaluate(proposal: Proposal, *, decider: str) -> Decision:
     `decider` is the identity about to render the verdict - passed
     explicitly (never inferred) so a self-approval check cannot be skipped
     by a caller who forgot to set it.
+
+    Fails closed, not open: a proposal missing the identity needed to rule
+    out self-approval, or naming spend against a project this module has no
+    cap for, is escalated rather than silently approved. An LLM under time
+    pressure is exactly the caller most likely to round a missing field in
+    its own favor, which is the failure mode this module exists to remove.
     """
     reasons: list[str] = []
 
-    if proposal.proposed_by and decider and proposal.proposed_by == decider:
+    if not proposal.proposed_by:
+        return Decision(
+            ESCALATE,
+            ("proposal has no `proposed_by` identity; self-approval cannot be "
+             "ruled out, so it may not be auto-approved (route to Grok or to "
+             "Joseph)",),
+        )
+
+    if decider and proposal.proposed_by == decider:
         return Decision(
             ESCALATE,
             (f"{decider} proposed this and may not also approve it (self-approval "
@@ -117,7 +145,12 @@ def evaluate(proposal: Proposal, *, decider: str) -> Decision:
     if escalating:
         reasons.extend(f"escalation category: {category}" for category in escalating)
 
-    if over_spend_cap(proposal.project, proposal.spend_cents):
+    if proposal.spend_cents > 0 and not known_project(proposal.project):
+        reasons.append(
+            f"project '{proposal.project or '(unspecified)'}' has no defined spend "
+            f"cap; spend of ${proposal.spend_cents / 100:.2f} cannot be auto-approved"
+        )
+    elif over_spend_cap(proposal.project, proposal.spend_cents):
         reasons.append(
             f"spend ${proposal.spend_cents / 100:.2f} is at or over the "
             f"{proposal.project or 'unspecified'} cap"

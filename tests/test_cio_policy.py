@@ -91,3 +91,44 @@ def test_chief_online_threshold_uses_five_minute_heartbeat():
     assert cio_policy.chief_is_online(299) is True
     assert cio_policy.chief_is_online(300) is False
     assert cio_policy.chief_is_online(None) is False
+
+
+def test_missing_proposed_by_fails_closed_to_escalate():
+    proposal = Proposal(
+        project="via",
+        spend_cents=100,
+        categories=frozenset(),
+        proposed_by="",
+    )
+
+    decision = cio_policy.evaluate(proposal, decider="claude-cio")
+
+    assert decision.verdict == cio_policy.ESCALATE
+    assert "proposed_by" in decision.reasons[0]
+
+
+def test_unknown_project_spend_fails_closed_to_escalate():
+    proposal = Proposal(
+        project="a-new-client-nobody-defined-a-cap-for",
+        spend_cents=100,
+        categories=frozenset(),
+        proposed_by="chief-beast",
+    )
+
+    decision = cio_policy.evaluate(proposal, decider="claude-cio")
+
+    assert decision.verdict == cio_policy.ESCALATE
+    assert any("no defined spend cap" in reason for reason in decision.reasons)
+
+
+def test_unknown_project_with_zero_spend_is_not_penalized():
+    proposal = Proposal(
+        project="a-new-client-nobody-defined-a-cap-for",
+        spend_cents=0,
+        categories=frozenset(),
+        proposed_by="chief-beast",
+    )
+
+    decision = cio_policy.evaluate(proposal, decider="claude-cio")
+
+    assert decision.verdict == cio_policy.APPROVE
