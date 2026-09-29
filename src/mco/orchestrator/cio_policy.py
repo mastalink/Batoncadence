@@ -119,7 +119,8 @@ def evaluate(proposal: Proposal, *, decider: str) -> Decision:
     """
     reasons: list[str] = []
 
-    if not proposal.proposed_by:
+    proposed_by = proposal.proposed_by.strip()
+    if not proposed_by:
         return Decision(
             ESCALATE,
             ("proposal has no `proposed_by` identity; self-approval cannot be "
@@ -127,7 +128,16 @@ def evaluate(proposal: Proposal, *, decider: str) -> Decision:
              "Joseph)",),
         )
 
-    if decider and proposal.proposed_by == decider:
+    decider_normalized = (decider or "").strip()
+    if not decider_normalized:
+        return Decision(
+            ESCALATE,
+            ("no `decider` identity was given; self-approval cannot be ruled "
+             "out, so it may not be auto-approved (route to Grok or to "
+             "Joseph)",),
+        )
+
+    if proposed_by.casefold() == decider_normalized.casefold():
         return Decision(
             ESCALATE,
             (f"{decider} proposed this and may not also approve it (self-approval "
