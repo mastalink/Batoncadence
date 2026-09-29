@@ -1,0 +1,50 @@
+{
+  "score_version": 1,
+  "id": "score-on-reject-chain-canary",
+  "revision": 1,
+  "objective": "Exercise an on_reject fix chain: builder, independent reviewer, and a third-identity fix attempt, all evidence-only with zero budget.",
+  "constraints": [
+    "Evidence-only; no repository:write and no cloud:change.",
+    "Builder, reviewer, and fixer are three different roles.",
+    "Abstract lane resources only; no absolute host paths or secrets.",
+    "budget_cents is 0; every max_cost_cents is 0."
+  ],
+  "budget_cents": 0,
+  "max_parallel": 1,
+  "launch_requires": ["SOR-build"],
+  "tasks": [
+    {
+      "id": "SOR-build",
+      "goal": "OnReject",
+      "title": "Initial canary build subject to independent review",
+      "instructions": "Write score-runs/{run_id}/on-reject-build.json and return path and sha256. On review rejection the conductor routes to SOR-fix.",
+      "role": "score-canary-worker",
+      "review_role": "score-canary-review",
+      "depends_on": [],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["canary_artifact"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null,
+      "on_reject": "SOR-fix"
+    },
+    {
+      "id": "SOR-fix",
+      "goal": "OnReject",
+      "title": "Third-identity fix after review rejection",
+      "instructions": "Apply review findings to produce score-runs/{run_id}/on-reject-fix.json. Do not reuse the original builder or reviewer identity. Return path and sha256 for independent re-review.",
+      "role": "score-canary-fixer",
+      "review_role": "score-canary-review",
+      "depends_on": ["SOR-build"],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["canary_artifact"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    }
+  ]
+}

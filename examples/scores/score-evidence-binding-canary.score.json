@@ -1,0 +1,50 @@
+{
+  "score_version": 1,
+  "id": "score-evidence-binding-canary",
+  "revision": 1,
+  "objective": "Exercise digest-bound evidence acceptance: a builder produces an artifact digest and an independent reviewer binds acceptance to that exact digest.",
+  "constraints": [
+    "Evidence-only canary; no repository:write and no cloud:change.",
+    "No LLM dispatch, no paid provider calls, no secrets in artifacts.",
+    "Resources are abstract lane names only; never absolute host paths.",
+    "budget_cents is 0; every max_cost_cents is 0.",
+    "Reviewer identity must differ from builder identity."
+  ],
+  "budget_cents": 0,
+  "max_parallel": 1,
+  "launch_requires": ["SEB-review"],
+  "tasks": [
+    {
+      "id": "SEB-build",
+      "goal": "EvidenceBinding",
+      "title": "Produce a digest-bound evidence artifact",
+      "instructions": "Write a deterministic JSON body under score-runs/{run_id}/evidence-binding.json. Return strict JSON with path and sha256. Do not mutate any repository or cloud resource.",
+      "role": "score-canary-worker",
+      "review_role": "score-canary-review",
+      "depends_on": [],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["artifact_digest"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    },
+    {
+      "id": "SEB-review",
+      "goal": "EvidenceBinding",
+      "title": "Bind acceptance to the exact artifact digest",
+      "instructions": "Verify the SEB-build artifact bytes match the claimed sha256, confirm the binding names the same run and task attempt, and return an acceptance_report. Fail closed on digest mismatch or self-review.",
+      "role": "score-canary-review",
+      "review_role": "score-canary-worker",
+      "depends_on": ["SEB-build"],
+      "resources": ["score-canary-lane"],
+      "capabilities": ["evidence:write", "evidence:review"],
+      "evidence": ["acceptance_report"],
+      "max_attempts": 1,
+      "timeout_seconds": 300,
+      "max_cost_cents": 0,
+      "checkpoint": null
+    }
+  ]
+}

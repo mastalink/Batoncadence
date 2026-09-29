@@ -243,6 +243,68 @@ def test_via_repository_continuation_avoids_exhausted_provider():
     )
 
 
+def _stealth_example_scores():
+    root = Path(__file__).parents[1] / "examples/scores"
+    names = [
+        "lease-review-accept-canary.score.json",
+        "score-evidence-binding-canary.score.json",
+        "score-resource-lock-canary.score.json",
+        "score-on-reject-chain-canary.score.json",
+        "score-human-gate-canary.score.json",
+    ]
+    return [(name, load_score((root / name).read_text(encoding="utf-8"))) for name in names]
+
+
+@pytest.mark.parametrize("name,value", _stealth_example_scores())
+def test_stealth_example_scores_are_safe_and_independently_reviewed(name, value):
+    """Pin overnight Stealth canaries: zero budget, no cloud:change, no host paths."""
+    assert value["budget_cents"] == 0
+    assert all(t["max_cost_cents"] == 0 for t in value["tasks"])
+    assert all("cloud:change" not in t["capabilities"] for t in value["tasks"])
+    assert all("repository:write" not in t["capabilities"] for t in value["tasks"])
+    assert all(t["role"] != t["review_role"] for t in value["tasks"])
+    for task in value["tasks"]:
+        for resource in task["resources"]:
+            # Abstract lane names only: no absolute host paths.
+            assert not resource.startswith(("C:/", "C:\\", "/Users/", "/home/")), resource
+            assert "/" not in resource and "\\" not in resource, resource
+    # Without issued grants nothing may start.
+    assert SandboxRun(value, f"preview-{value['id']}").ready() == []
+
+
+def test_lease_review_accept_canary_shape():
+    path = Path(__file__).parents[1] / "examples/scores/lease-review-accept-canary.score.json"
+    value = load_score(path.read_text(encoding="utf-8"))
+    assert [t["id"] for t in value["tasks"]] == ["LRA-build", "LRA-accept"]
+    assert value["launch_requires"] == ["LRA-accept"]
+    assert value["tasks"][1]["depends_on"] == ["LRA-build"]
+
+
+def test_score_on_reject_chain_canary_wires_fix_task():
+    path = Path(__file__).parents[1] / "examples/scores/score-on-reject-chain-canary.score.json"
+    value = load_score(path.read_text(encoding="utf-8"))
+    assert value["tasks"][0]["on_reject"] == "SOR-fix"
+    assert "SOR-build" in value["tasks"][1]["depends_on"]
+    roles = {(t["role"], t["review_role"]) for t in value["tasks"]}
+    assert ("score-canary-fixer", "score-canary-review") in roles
+
+
+def test_score_human_gate_canary_ends_at_owner_checkpoint():
+    path = Path(__file__).parents[1] / "examples/scores/score-human-gate-canary.score.json"
+    value = load_score(path.read_text(encoding="utf-8"))
+    gated = [t["id"] for t in value["tasks"] if t["checkpoint"]]
+    assert gated == ["SHG-launch"] and value["launch_requires"] == ["SHG-launch"]
+    assert value["tasks"][1]["checkpoint"]["id"] == "owner-launch"
+
+
+def test_score_resource_lock_canary_shares_abstract_lane():
+    path = Path(__file__).parents[1] / "examples/scores/score-resource-lock-canary.score.json"
+    value = load_score(path.read_text(encoding="utf-8"))
+    assert [t["id"] for t in value["tasks"]] == ["SRL-first", "SRL-second"]
+    assert all(t["resources"] == ["score-canary-lane"] for t in value["tasks"])
+    assert all(t["depends_on"] == [] for t in value["tasks"])
+
+
 def test_on_reject_valid():
     value = score()
     fix_task = copy.deepcopy(value["tasks"][0])
