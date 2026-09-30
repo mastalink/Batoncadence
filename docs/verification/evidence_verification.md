@@ -4,7 +4,7 @@
 **Task**: `EVIDENCE-repair1` ("Bind completion claims to real artifacts")  
 **Base HEAD SHA**: `3eafe4596241d1ca016f6c94b443bc5ea7203e08`  
 **Branch**: `score/mco-pipeline-improvements-20260927`  
-**Worktree**: `C:\AI\mco-pipeline-score-work`  
+**Worktree**: (local score worktree)  
 **Timestamp**: `2026-09-27T20:31:00-04:00` (2026-09-28T00:31:00Z)  
 
 ---
@@ -55,12 +55,10 @@
 
 ### E. Superseding Receipts Reconciliation Without Deleting History
 - **MyMeals PR #3 Stale Review Job Reconciliation**:
-  - Identified stale failed review job `baac2546-2732-4a02-bac5-514916348757` ("Review MyMeals PR #3: product and UI impact", failed due to muse access restriction).
-  - Reconciled with superseding completed review job `51e999df-b66f-45c4-8281-ba82beac6f1d` ("UI/product review of MyMeals PR #3 (replaces blocked muse job baac2546)").
-  - Bidirectional reassignment linkage:
-    - `baac2546.reassigned_to_job_id = "51e999df-b66f-45c4-8281-ba82beac6f1d"`
-    - `51e999df.reassigned_from_job_id = "baac2546-2732-4a02-bac5-514916348757"`
-  - Safely archived `baac2546` via standard `mco_archive` tool, removing it from default board clutter while keeping its complete history and audit trail intact.
+  - Identified a stale failed review job ("Review MyMeals PR #3: product and UI impact", failed due to muse access restriction).
+  - Reconciled with a superseding completed review job ("UI/product review of MyMeals PR #3 (replaces blocked muse job)").
+  - Bidirectional reassignment linkage established between the stale and superseding job records via `reassigned_to_job_id` / `reassigned_from_job_id`.
+  - Safely archived the stale job via standard `mco_archive` tool, removing it from default board clutter while keeping its complete history and audit trail intact.
 
 ---
 
@@ -84,19 +82,16 @@ python -m pytest -o pythonpath=src -v tests/test_evidence_binding_integrity.py t
 - **Duration**: 13.45s
 
 ### Verifiable Artifacts
-1. **Raw Pytest Output Transcript**:
-   - `docs/verification/pytest_evidence_repair1.txt`
-   - Replicated to `C:\Users\masta\.mco\score-artifacts\score-runs\mco-pipeline-improvements-20260927-01\pytest_evidence_repair1.txt`
-2. **JUnit XML Report**:
-   - `docs/verification/junit_evidence_repair1.xml`
-   - Replicated to `C:\Users\masta\.mco\score-artifacts\score-runs\mco-pipeline-improvements-20260927-01\junit_evidence_repair1.xml`
+Raw pytest output and JUnit XML reports were captured during the run and
+replicated to the local Score artifact store; they are not included in this
+public repository.
 
 ---
 
 ## 3. Policy & Constraint Compliance
 
 1. **Zero Spent / Zero Deploy**: No metered tokens spent, no AWS operations, no cloud infrastructure mutations.
-2. **Preserve Checkouts**: Only isolated worktree `C:\AI\mco-pipeline-score-work` modified.
+2. **Preserve Checkouts**: Only the isolated local score worktree modified.
 3. **No Direct Git Commit**: Working tree modified as instructed; conductor commits allowed paths.
 4. **No Protected Score Document Edits**: Score definitions and runtime database configurations untouched.
 5. **Claude Exclusion**: Claude exclusion until Tuesday 11:00 AM preserved.
