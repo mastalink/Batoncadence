@@ -647,7 +647,7 @@ async def export_evidence_pack(payload: dict = None,
         raise HTTPException(status_code=400, detail="Database not configured")
 
     events = db.table("agent_job_events").select("*").order("created_at", desc=False).execute().data or []
-    jobs = db.table("agent_jobs").select("*").order("created_at", desc=True).limit(500).execute().data or []
+    jobs = db.table("agent_jobs").select("*").order("created_at", desc=True).execute().data or []
     jobs_by_id = {j.get("id"): j for j in jobs}
     caller_org = agent_org(caller)
 

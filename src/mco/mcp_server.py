@@ -8,7 +8,7 @@ scheduler instead of running a `mco listen` daemon. Identity comes from env
 IMPORTANT: stdio is the MCP transport — never print to stdout here.
 """
 
-from typing import List
+from typing import List, Optional
 
 try:
     # mcp >= 2.0 (the 2026-07-28 spec): FastMCP was replaced by MCPServer.
@@ -155,10 +155,10 @@ def mco_retry(task_id: str) -> dict:
 
 
 @mcp.tool()
-def mco_jobs(include_archived: bool = False) -> List[dict]:
+def mco_jobs(include_archived: bool = False, limit: Optional[int] = None) -> List[dict]:
     """List the most recent jobs on the board (any status, your org only).
     Archived jobs are hidden unless include_archived=True."""
-    return _client().jobs(include_archived=include_archived)
+    return _client().jobs(include_archived=include_archived, limit=limit)
 
 
 @mcp.tool()

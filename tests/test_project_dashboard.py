@@ -136,14 +136,14 @@ def test_assignment_validates_and_respects_org_boundary(project_api):
     assert http.post("/api/jobs/mine/project", json={"name": "x" * 81}).status_code == 400
 
 
-def test_project_view_pages_beyond_job_board_window(project_api):
+def test_project_view_pages_beyond_job_board_limit(project_api):
     db, http = project_api
     for i in range(135):
         db.table("agent_jobs").insert({
             "id": f"job-{i}", "title": f"Job {i}", "status": "completed",
             "org_id": "default", "created_at": f"2026-01-{(i % 28) + 1:02d}T00:00:00Z",
         }).execute()
-    assert len(http.get("/api/jobs").json()) == 100
+    assert len(http.get("/api/jobs?limit=100").json()) == 100
     project_view = http.get("/api/jobs/project-view").json()
     assert project_view["count"] == 135
     assert len(project_view["jobs"]) == 135

@@ -515,11 +515,16 @@ class GatewayClient:
             r.raise_for_status()
             return r.json()
 
-    def jobs(self, include_archived: bool = False) -> List[dict]:
+    def jobs(self, include_archived: bool = False, limit: Optional[int] = None) -> List[dict]:
         """Most recent jobs on the board (any status). Archived jobs are
         hidden by default - pass include_archived=True to see everything."""
+        params = {}
+        if include_archived:
+            params["include_archived"] = True
+        if limit is not None:
+            params["limit"] = limit
         with self._client() as c:
-            r = c.get("/api/jobs", params={"include_archived": include_archived} if include_archived else None)
+            r = c.get("/api/jobs", params=params or None)
             r.raise_for_status()
             return r.json()
 
