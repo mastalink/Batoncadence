@@ -35,6 +35,8 @@ from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -92,9 +94,18 @@ class ResourceArbiter:
             self.tz = ZoneInfo(tz_name)
         else:
             self.tz = datetime.now().astimezone().tzinfo
+        # An OS-level advisory lock on a sidecar file, held across every
+        # _read() ... _write() critical section below. acquire/release/
+        # enforce_deadlines are invoked by independent, unrelated processes
+        # (the CLI is re-invoked fresh per call) with no other synchronization
+        # between them, so without this lock two processes can both read
+        # holder=None and both be granted the same "exclusive" lease.
+        self._lock = FileLock(str(self.state_path) + ".lock",
+                               timeout=self.config.get("lock_timeout_seconds", 30))
         if not self.state_path.exists():
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            self._write({})
+            with self._lock:
+                self._write({})
 
     # -- persistence --
     def _read(self) -> dict[str, ResourceState]:
@@ -137,36 +148,37 @@ class ResourceArbiter:
         Fires the resource's `on_idle_to_busy` hook exactly once, the moment
         the resource goes from unheld to held."""
         now = now or _now()
-        states = self._read()
-        rs = states.setdefault(resource_id, ResourceState())
-        self._apply_hard_deadline(resource_id, rs, now)
-        self._apply_soft_deadline(rs, now)
+        with self._lock:
+            states = self._read()
+            rs = states.setdefault(resource_id, ResourceState())
+            self._apply_hard_deadline(resource_id, rs, now)
+            self._apply_soft_deadline(rs, now)
 
-        if rs.holder and rs.holder.owner == owner:
-            rs.holder.deadline = deadline
-            rs.holder.priority = priority
+            if rs.holder and rs.holder.owner == owner:
+                rs.holder.deadline = deadline
+                rs.holder.priority = priority
+                self._write(states)
+                return {"granted": True, "holder": rs.holder.owner}
+
+            was_idle = rs.holder is None
+            if was_idle:
+                rs.holder = Holder(owner=owner, priority=priority,
+                                    acquired_at=now.isoformat(), deadline=deadline)
+                rs.queue = [w for w in rs.queue if w.owner != owner]
+                self._write(states)
+                self._run_hook(resource_id, "on_idle_to_busy")
+                return {"granted": True, "holder": owner}
+
+            existing = next((w for w in rs.queue if w.owner == owner), None)
+            if existing:
+                existing.priority, existing.deadline = priority, deadline
+            else:
+                rs.queue.append(Waiter(owner=owner, priority=priority,
+                                        requested_at=now.isoformat(), deadline=deadline))
+            rs.queue.sort(key=lambda w: (-w.priority, w.requested_at))
             self._write(states)
-            return {"granted": True, "holder": rs.holder.owner}
-
-        was_idle = rs.holder is None
-        if was_idle:
-            rs.holder = Holder(owner=owner, priority=priority,
-                                acquired_at=now.isoformat(), deadline=deadline)
-            rs.queue = [w for w in rs.queue if w.owner != owner]
-            self._write(states)
-            self._run_hook(resource_id, "on_idle_to_busy")
-            return {"granted": True, "holder": owner}
-
-        existing = next((w for w in rs.queue if w.owner == owner), None)
-        if existing:
-            existing.priority, existing.deadline = priority, deadline
-        else:
-            rs.queue.append(Waiter(owner=owner, priority=priority,
-                                    requested_at=now.isoformat(), deadline=deadline))
-        rs.queue.sort(key=lambda w: (-w.priority, w.requested_at))
-        self._write(states)
-        position = [w.owner for w in rs.queue].index(owner) + 1
-        return {"granted": False, "holder": rs.holder.owner, "position": position}
+            position = [w.owner for w in rs.queue].index(owner) + 1
+            return {"granted": False, "holder": rs.holder.owner, "position": position}
 
     def release(self, resource_id: str, owner: str, *, now: datetime | None = None) -> dict:
         """Release `owner`'s hold (no-op if it is not the current holder) and
@@ -174,29 +186,31 @@ class ResourceArbiter:
         when the queue is empty, so a handoff between two queued owners never
         pauses/restores the underlying resource in between."""
         now = now or _now()
-        states = self._read()
-        rs = states.get(resource_id)
-        if rs is None or rs.holder is None or rs.holder.owner != owner:
-            return {"released": False}
-        self._promote(rs, now)
-        states[resource_id] = rs
-        self._write(states)
-        if rs.holder is None:
-            self._run_hook(resource_id, "on_busy_to_idle")
-        return {"released": True, "new_holder": rs.holder.owner if rs.holder else None}
+        with self._lock:
+            states = self._read()
+            rs = states.get(resource_id)
+            if rs is None or rs.holder is None or rs.holder.owner != owner:
+                return {"released": False}
+            self._promote(rs, now)
+            states[resource_id] = rs
+            self._write(states)
+            if rs.holder is None:
+                self._run_hook(resource_id, "on_busy_to_idle")
+            return {"released": True, "new_holder": rs.holder.owner if rs.holder else None}
 
     def status(self, resource_id: str, *, now: datetime | None = None) -> dict:
         now = now or _now()
-        states = self._read()
-        rs = states.setdefault(resource_id, ResourceState())
-        hard = self._apply_hard_deadline(resource_id, rs, now)
-        soft = self._apply_soft_deadline(rs, now)
-        if hard or soft:
-            self._write(states)
-        return {
-            "holder": asdict(rs.holder) if rs.holder else None,
-            "queue": [asdict(w) for w in rs.queue],
-        }
+        with self._lock:
+            states = self._read()
+            rs = states.setdefault(resource_id, ResourceState())
+            hard = self._apply_hard_deadline(resource_id, rs, now)
+            soft = self._apply_soft_deadline(rs, now)
+            if hard or soft:
+                self._write(states)
+            return {
+                "holder": asdict(rs.holder) if rs.holder else None,
+                "queue": [asdict(w) for w in rs.queue],
+            }
 
     def enforce_deadlines(self, *, now: datetime | None = None) -> list[dict]:
         """Sweep every known resource for expired soft and hard deadlines.
@@ -204,19 +218,20 @@ class ResourceArbiter:
         process), so the hard deadline fires even if the holder crashed.
         Returns one event dict per resource whose holder actually changed."""
         now = now or _now()
-        states = self._read()
-        events = []
-        for resource_id, rs in states.items():
-            before = rs.holder.owner if rs.holder else None
-            hard = self._apply_hard_deadline(resource_id, rs, now)
-            soft = self._apply_soft_deadline(rs, now) if not hard else False
-            after = rs.holder.owner if rs.holder else None
-            if (hard or soft) and before != after:
-                events.append({"resource_id": resource_id, "expired_owner": before,
-                                "new_holder": after, "hard": hard})
-        if events:
-            self._write(states)
-        return events
+        with self._lock:
+            states = self._read()
+            events = []
+            for resource_id, rs in states.items():
+                before = rs.holder.owner if rs.holder else None
+                hard = self._apply_hard_deadline(resource_id, rs, now)
+                soft = self._apply_soft_deadline(rs, now) if not hard else False
+                after = rs.holder.owner if rs.holder else None
+                if (hard or soft) and before != after:
+                    events.append({"resource_id": resource_id, "expired_owner": before,
+                                    "new_holder": after, "hard": hard})
+            if events:
+                self._write(states)
+            return events
 
     # -- internals --
     def _apply_soft_deadline(self, rs: ResourceState, now: datetime) -> bool:

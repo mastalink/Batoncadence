@@ -1,8 +1,19 @@
+import multiprocessing
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
 from mco.orchestrator.resource_arbiter import ResourceArbiter, next_daily_deadline
+
+
+def _race_acquire(state_path_str, resource_id, owner, barrier, result_queue):
+    """Run in a separate OS process: wait for every sibling to be ready, then
+    all hit acquire() on the same resource/state file at once."""
+    arb = ResourceArbiter(Path(state_path_str), {"timezone": "UTC"})
+    barrier.wait(timeout=30)
+    result = arb.acquire(resource_id, owner)
+    result_queue.put((owner, result["granted"]))
 
 
 @pytest.fixture
@@ -137,3 +148,40 @@ def test_next_daily_deadline_rolls_to_tomorrow_if_already_past(tmp_path):
     deadline = next_daily_deadline("06:00", now)
     assert deadline.date() == (now + timedelta(days=1)).date()
     assert deadline.hour == 6
+
+
+def test_concurrent_acquire_from_real_processes_grants_exactly_one(tmp_path):
+    """Regression for the missing interprocess lock: several independent OS
+    processes (not threads - this must cross real process boundaries) all
+    call acquire() on the same resource/state file at the same instant.
+    Without a lock spanning _read()..._write(), more than one can read
+    holder=None and both be granted."""
+    state_path = tmp_path / "state.json"
+    ResourceArbiter(state_path, {"timezone": "UTC"})  # create the state file up front
+
+    n_workers = 6
+    ctx = multiprocessing.get_context("spawn")
+    barrier = ctx.Barrier(n_workers)
+    result_queue = ctx.Queue()
+    procs = [
+        ctx.Process(target=_race_acquire,
+                    args=(str(state_path), "gpu", f"owner-{i}", barrier, result_queue))
+        for i in range(n_workers)
+    ]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(timeout=60)
+        assert p.exitcode == 0, f"worker process failed with exitcode {p.exitcode}"
+
+    results = [result_queue.get(timeout=10) for _ in range(n_workers)]
+    granted = [owner for owner, was_granted in results if was_granted]
+    assert len(granted) == 1, f"expected exactly one winner, got {granted!r}"
+
+    arbiter = ResourceArbiter(state_path, {"timezone": "UTC"})
+    status = arbiter.status("gpu")
+    assert status["holder"]["owner"] == granted[0]
+    assert len(status["queue"]) == n_workers - 1
+    assert sorted(w["owner"] for w in status["queue"]) == sorted(
+        owner for owner, was_granted in results if not was_granted
+    )
