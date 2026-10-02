@@ -42,6 +42,25 @@ locals {
   # after promotion; no wildcard branch can obtain deployment credentials.
   deploy_branches = ["main", "codex/bitcadence-completion"]
   secrets         = toset(["operator", "worker", "reviewer", "tls-ca"])
+  # One deploy role serves three repositories. Subjects are exact (no wildcards).
+  # MyMeals predates GitHub's immutable-subject default (use_immutable_subject=false
+  # on the repo), so it uses the classic format; sim-lab and BitCadence are immutable.
+  # Verify with: gh api repos/mastalink/<repo>/actions/oidc/customization/sub
+  deploy_subjects = concat(
+    [for branch in local.deploy_branches : "repo:mastalink@72055896/BitCadence@1245844706:ref:refs/heads/${branch}"],
+    [
+      "repo:mastalink/MyMeals:ref:refs/heads/main",
+      "repo:mastalink/MyMeals:environment:production",
+      "repo:mastalink@72055896/sim-lab@1389530425:ref:refs/heads/main",
+      "repo:mastalink@72055896/sim-lab@1389530425:environment:production",
+    ]
+  )
+  mymeals_stack       = "mymeals"
+  mymeals_function    = "mymeals-app"
+  mymeals_lambda_role = "mymeals-app-us-east-1"
+  mymeals_data_bucket = "mymeals-${local.account}-us-east-1-data"
+  simlab_instance_id  = "i-02d48f0a32f3d5355"
+  simlab_bucket       = "simlab-${local.account}-us-east-1"
 }
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
@@ -131,7 +150,7 @@ resource "aws_iam_role" "deploy" {
   max_session_duration = 3600
   # Immutable subjects are GitHub's default for repositories created after
   # July 15, 2026. This repository's API and the live role confirm this format.
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Federated = aws_iam_openid_connect_provider.github.arn }, Action = "sts:AssumeRoleWithWebIdentity", Condition = { StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com", "token.actions.githubusercontent.com:sub" = [for branch in local.deploy_branches : "repo:mastalink@72055896/BitCadence@1245844706:ref:refs/heads/${branch}"] } } }] })
+  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Federated = aws_iam_openid_connect_provider.github.arn }, Action = "sts:AssumeRoleWithWebIdentity", Condition = { StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com", "token.actions.githubusercontent.com:sub" = local.deploy_subjects } } }] })
 }
 resource "aws_iam_role_policy" "deploy" {
   role = aws_iam_role.deploy.id
@@ -153,7 +172,17 @@ resource "aws_iam_role_policy" "deploy" {
     { Effect = "Allow", Action = ["ssm:GetParameter"], Resource = "arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/*" },
     { Effect = "Allow", Action = ["ssm:DescribeInstanceInformation", "ssm:GetCommandInvocation", "ssm:ListCommandInvocations"], Resource = "*" },
     { Effect = "Allow", Action = "ssm:SendCommand", Resource = "arn:aws:ssm:us-east-1::document/AWS-RunShellScript" },
-    { Effect = "Allow", Action = "ssm:SendCommand", Resource = "arn:aws:ec2:us-east-1:${local.account}:instance/*", Condition = { StringEquals = { "ssm:resourceTag/Project" = local.prefix } } }
+    { Effect = "Allow", Action = "ssm:SendCommand", Resource = "arn:aws:ec2:us-east-1:${local.account}:instance/*", Condition = { StringEquals = { "ssm:resourceTag/Project" = local.prefix } } },
+    # --- MyMeals (mastalink/MyMeals) - explicit ARNs only ---
+    { Sid = "MyMealsCfnStackOnly", Effect = "Allow", Action = ["cloudformation:DescribeStacks", "cloudformation:DescribeStackEvents", "cloudformation:DescribeStackResources", "cloudformation:GetTemplate", "cloudformation:GetTemplateSummary", "cloudformation:CreateChangeSet", "cloudformation:DescribeChangeSet", "cloudformation:ExecuteChangeSet", "cloudformation:DeleteChangeSet", "cloudformation:UpdateStack", "cloudformation:ListStackResources"], Resource = "arn:aws:cloudformation:us-east-1:${local.account}:stack/${local.mymeals_stack}/*" },
+    { Sid = "MyMealsLambdaFunctionOnly", Effect = "Allow", Action = ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:PublishVersion"], Resource = "arn:aws:lambda:us-east-1:${local.account}:function:${local.mymeals_function}" },
+    { Sid = "MyMealsPassExecutionRole", Effect = "Allow", Action = "iam:PassRole", Resource = "arn:aws:iam::${local.account}:role/${local.mymeals_lambda_role}", Condition = { StringEquals = { "iam:PassedToService" = "lambda.amazonaws.com" } } },
+    { Sid = "MyMealsReadExecutionRole", Effect = "Allow", Action = ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"], Resource = "arn:aws:iam::${local.account}:role/${local.mymeals_lambda_role}" },
+    { Sid = "MyMealsDataBucketOnly", Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"], Resource = ["arn:aws:s3:::${local.mymeals_data_bucket}", "arn:aws:s3:::${local.mymeals_data_bucket}/*"] },
+    # --- sim-lab (mastalink/sim-lab) - one instance, one document, releases/ prefix ---
+    { Sid = "SimLabSendCommandInstanceOnly", Effect = "Allow", Action = "ssm:SendCommand", Resource = "arn:aws:ec2:us-east-1:${local.account}:instance/${local.simlab_instance_id}" },
+    { Sid = "SimLabReleasesObjects", Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "arn:aws:s3:::${local.simlab_bucket}/releases/*" },
+    { Sid = "SimLabReleasesList", Effect = "Allow", Action = "s3:ListBucket", Resource = "arn:aws:s3:::${local.simlab_bucket}", Condition = { StringLike = { "s3:prefix" = ["releases/*"] } } }
   ] })
 }
 output "deployment_role" { value = aws_iam_role.deploy.arn }
