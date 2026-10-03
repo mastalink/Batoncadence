@@ -1,7 +1,7 @@
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -73,7 +73,7 @@ class FakeBoard:
 
 def _setup_bridge_and_executor(tmp_path, wt_dir, target_branch, initial_sha, evidence_keys):
     key = b"s05-test-key-material-is-long-enough-0001"
-    now_dt = datetime(2026, 9, 16, tzinfo=timezone.utc)
+    now_dt = datetime.now(timezone.utc)
     db_store = LocalStore(tmp_path / "live_score.db")
     grant_svc = GrantService(db_store, verification_key=key)
     executor = LiveScoreAdapterExecutor(
@@ -126,8 +126,8 @@ def _setup_bridge_and_executor(tmp_path, wt_dir, target_branch, initial_sha, evi
         "actions": ["repository:write"],
         "resources": [str(wt_dir)],
         "env": "test",
-        "not_before": "2026-09-15T00:00:00Z",
-        "expires_at": "2026-10-01T00:00:00Z",
+        "not_before": (now_dt - timedelta(days=1)).isoformat(),
+        "expires_at": (now_dt + timedelta(days=1)).isoformat(),
         "budget_cents": 0,
         "human_principal": "conductor",
     })
