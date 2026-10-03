@@ -1,101 +1,258 @@
-# Desktop Manager & System Tray
+# Desktop Manager, Installer & System Tray
 
 ## Goal
-Manage the local BitCadence server, background scheduler, and AI worker daemons using the native Windows Desktop Control window and system tray icon without keeping raw terminal windows open.
+Install, launch, operate, update, and troubleshoot the native BitCadence Windows Desktop Manager (`scripts/desktop.pyw`), system tray icon, one-click installer, and background process supervisor without keeping raw terminal windows open.
+
+---
+
+## Architecture Overview
+
+BitCadence provides a window-free, supervisor-managed desktop experience on Windows. It bridges command-line daemons and the browser Control Panel into a single executable workflow:
+
+```
+                               +-------------------------------------+
+                               |           Desktop Shortcut          |
+                               |          ("BitCadence.lnk")         |
+                               +-------------------------------------+
+                                                  |
+                                                  v
+                               +-------------------------------------+
+                               |            pythonw.exe              |
+                               |      (Subsystem: Windows GUI)       |
+                               |    No black CMD console window!     |
+                               +-------------------------------------+
+                                                  |
+                                                  v
+                               +-------------------------------------+
+                               |        scripts/desktop.pyw          |
+                               |    --start-all    --minimized       |
+                               +-------------------------------------+
+                                                  |
+                         +------------------------+------------------------+
+                         |                                                 |
+                         v                                                 v
+           +---------------------------+                     +---------------------------+
+           |     Tkinter Control UI    |                     |     Pystray Notification  |
+           |     ("Local Control")     |                     |     System Tray Icon      |
+           +---------------------------+                     +---------------------------+
+                         |                                                 |
+                         +------------------------+------------------------+
+                                                  |
+                                                  v
+                               +-------------------------------------+
+                               |      StackSupervisor Controller     |
+                               |    Windows Job Object Isolation     |
+                               +-------------------------------------+
+                                     |            |            |
+                    +----------------+            |            +----------------+
+                    |                             |                             |
+                    v                             v                             v
+           +------------------+          +------------------+          +------------------+
+           |  Gateway Server  |          | Scheduler Daemon |          |  Worker Wakers   |
+           |    mco serve     |          | mco schedule run |          |  (fleet.toml)    |
+           +------------------+          +------------------+          +------------------+
+```
 
 ---
 
 ## Step-by-Step Instructions
 
-### 1. Launch the Desktop Control Window
-From the Windows Start menu or your Desktop, open the **BitCadence** shortcut, or run from terminal:
+### 1. Installation: One-Click Installer & Desktop Shortcut
+
+BitCadence offers two installation methods on Windows:
+
+#### Method A: The One-Click Installer (`install.bat` / `scripts/install.ps1`)
+For new users and end-user workstations:
+1. Double-click **`install.bat`** in the repository root (or run `powershell -ExecutionPolicy Bypass -File scripts\install.ps1`).
+2. The installer automatically:
+   - Locates or downloads Python 3.9+.
+   - Creates a private virtual environment (`.venv`).
+   - Generates a local access token (`mco_tok_...`) and configuration (`~/.mco/.env`).
+   - Adds `mco` to your User `PATH` (`%LOCALAPPDATA%\BitCadence\bin`).
+   - Creates a **BitCadence** shortcut on your Desktop pointing to the launcher.
+
+#### Method B: Desktop Component Setup (`scripts/install_desktop.ps1`)
+For existing source checkouts or developers:
 ```powershell
-python -m mco.desktop.app
+powershell -ExecutionPolicy Bypass -File scripts\install_desktop.ps1 -Python .\.venv\Scripts\python.exe
 ```
-or launch the system tray icon directly:
-```powershell
-mco tray
-```
+This script:
+1. Installs desktop UI dependencies (`pystray`, `Pillow`) into `.codex/desktopdeps`.
+2. Generates the official multi-resolution icon (`.codex/bitcadence.ico`).
+3. Verifies that `pythonw.exe` exists in your Python directory.
+4. Generates standard Windows shortcuts (`BitCadence.lnk`) in both your **Desktop** and **Start Menu Programs** folders pointing to:
+   ```
+   Target: <path-to>\pythonw.exe "<repo-root>\scripts\desktop.pyw"
+   Start In: <repo-root>
+   ```
+
+---
+
+### 2. First Launch & Guided Startup
+
+Double-click the **BitCadence** icon on your Desktop or Start menu.
 
 ![BitCadence Desktop Control Window](img/19-desktop-control-window.png)
 
-### 2. Start and Inspect Stack Components
-1. In the top toolbar, click **Start all**. The Desktop Manager starts:
-   - The Gateway API server (`mco serve`)
-   - The Scheduler daemon (`mco schedule run`)
-   - Configured local worker agents (`codex-worker`, `claude-worker`, etc.)
-2. Check the component table to ensure all rows display status **running** with valid Process IDs (PIDs).
-3. If you have legacy workers running as Windows Scheduled Tasks, click **Move workers into app** to migrate them under the desktop supervisor.
-
-### 3. Open the Web Console
-Click **Open console** in the top right. Your default browser will launch immediately to `http://127.0.0.1:18789/console`.
-
-### 4. Filter Live Logs
-Click any row in the component table (such as `gateway` or `scheduler`) to filter the bottom live log pane specifically to that service.
-
-### 5. Minimize to System Tray
-Click the **X** (close) button on the top-right of the window. 
-The window disappears from the taskbar, and BitCadence continues running quietly in your Windows Notification Area (System Tray).
-
-### 6. Restoring or Exiting from the Tray
-1. Right-click the **BitCadence** icon in your system tray.
-2. Select **Open BitCadence** to restore the window.
-3. Select **Exit** when you want to stop all child processes, workers, and the gateway simultaneously.
+#### What Happens on First Launch:
+1. **Window-Free Launch:** Launched via `pythonw.exe`, so no black command prompt window flashes or remains on your screen.
+2. **Single-Instance Guard:** If BitCadence is already running, launching the shortcut again does not start a duplicate server. Instead, it signals the existing instance via `~/.mco/desktop/show-window` and brings the existing window to the front.
+3. **Automatic Component Discovery:** The app inspects your system to identify running gateways, schedulers, and workers.
+4. **Clicking "Start All":**
+   - Starts the Gateway API server (`http://127.0.0.1:18789`).
+   - Waits for the `/readyz` health probe to pass (up to 30 seconds).
+   - Starts the background Scheduler daemon.
+   - Starts all configured workers in `~/.mco/fleet.toml` whose mode is set to `waker` or `poll`.
 
 ---
 
-## The CLI Equivalent
+### 3. What Starts Automatically
 
-You can control all background processes and query their operational health directly from PowerShell:
+When you click **Start all** (or launch with `--start-all`), the supervisor starts the complete local stack in strict topological order:
+
+| Component | Command Invoked | Purpose |
+|---|---|---|
+| **Gateway Server** | `python.exe -m mco.cli serve --host 127.0.0.1 --port 18789` | Local API server, SQLite database interface, SSE event bus, and Web Console backend. |
+| **Scheduler** | `python.exe -m mco.cli schedule run` | Evaluates cron loops and interval automation declared in `~/.mco/schedules.yaml`. |
+| **Fleet Workers** | Commands configured in `~/.mco/fleet.toml` | Starts event wakers or polling processes for each active agent (e.g., `codex-beast`, `claude-cio`). |
+
+> **Process Guard (Windows Job Object):** All child processes spawned by the supervisor are attached to a Windows Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. If the desktop supervisor terminates unexpectedly or crashes, the Windows kernel automatically terminates all child worker processes, preventing orphaned background zombies.
+
+---
+
+### 4. System Tray & Minimized Behavior
+
+The Desktop Manager integrates with the Windows Notification Area (System Tray):
+
+- **Minimizing to Tray on Close (X):** Clicking the **X** button in the window title bar does **not** terminate BitCadence. It withdraws the window into the notification tray, keeping all background agents and the gateway running uninterrupted.
+- **Starting Minimized at Boot:** Running with the `--minimized` flag starts the application directly in the notification tray without ever flashing a GUI window:
+  ```powershell
+  pythonw.exe scripts\desktop.pyw --start-all --minimized
+  ```
+- **System Tray Context Menu:** Right-clicking the BitCadence tray icon provides:
+  - **Open BitCadence:** Restores the main Control window.
+  - **Start all:** Starts all configured stack components.
+  - **Stop all:** Gracefully stops workers, scheduler, and gateway.
+  - **Open console:** Launches your default web browser directly to `http://127.0.0.1:18789/console`.
+  - **Exit:** Gracefully terminates all supervisor-owned child processes and exits the application completely.
+
+---
+
+### 5. Configuring Autostart on Sign-in
+
+To have BitCadence automatically start in the tray whenever you log in to Windows:
 
 ```powershell
-# Start gateway in background
-mco start
+powershell -ExecutionPolicy Bypass -File scripts\desktop_autostart.ps1 -Pythonw "C:\path\to\.venv\Scripts\pythonw.exe"
+```
 
-# Check process status and diagnostics
-mco status
+This places a shortcut in `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` configured with `--start-all --minimized`.
 
-# Stop background gateway
-mco stop
-
-# Apply worker fleet run modes
-mco fleet apply
-
-# Inspect worker fleet status
-mco fleet status
+To remove autostart:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\desktop_autostart.ps1 -Remove
 ```
 
 ---
 
-## What You'll See
+### 6. Where the Logs Live
 
-- **Desktop Window:** A native Windows window showing:
-  - Header with overall health light (Green dot for healthy gateway).
-  - Component table listing Component Name, Status (`running`, `standby`, `disabled`), PID, and Last Error.
-  - Controls: `Start all`, `Stop all`, `Restart all`, `Start selected`, `Stop selected`, `Restart selected`, `Fleet settings`, `Reload settings`.
-  - Dark terminal log viewer updating every 500ms with live output.
-- **System Tray:** A custom BitCadence logo in the Windows notification tray with options to restore the UI or stop all processes.
-- **Process Guard:** All spawned child processes are attached to a Windows Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), guaranteeing that if the desktop manager terminates, no orphaned background workers are left consuming CPU or memory.
+BitCadence organizes logs cleanly on disk:
+
+| Log File | Path | What It Contains |
+|---|---|---|
+| **Desktop Supervisor** | `~/.mco/desktop/logs/desktop.log` | Supervisor lifecycle events, start/stop requests, and process health checks. |
+| **Component Logs** | `~/.mco/desktop/logs/<component>.log` | Combined stdout/stderr for each individual managed component (`gateway.log`, `scheduler.log`, `<instance>.log`). |
+| **Standalone Gateway** | `~/.mco/logs/gateway.log` | Gateway server logs when run outside the desktop supervisor. |
+| **Individual Agent Logs** | `~/.mco/logs/<instance>.log` | Output generated by worker CLI executors. |
+
+#### Filtering Logs in the GUI:
+In the Desktop Control window:
+1. Click any row in the **Component table** (e.g., `gateway` or `claude-cio`).
+2. The bottom log viewer instantly filters to show the last 100 lines of output for that selected component.
+3. Deselecting rows returns to the unified log stream.
+
+---
+
+### 7. Updating BitCadence
+
+#### Updating Source Installations:
+The setup script includes automated upstream update checks:
+1. Open PowerShell in the BitCadence directory:
+   ```powershell
+   git pull --ff-only origin main
+   ```
+2. In the Desktop Control window, click **Reload settings** to pick up configuration changes, or click **Restart all** to restart services with updated code.
+
+#### Updating Package Installations:
+If installed via pip:
+```powershell
+pip install --upgrade "bitcadence[desktop]"
+```
+
+---
+
+### 8. Uninstalling
+
+To cleanly remove BitCadence from your computer:
+1. **Exit the Desktop Manager:** Right-click the system tray icon and select **Exit** (or run `python -m mco.desktop.app --quit`).
+2. **Remove Autostart:**
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\desktop_autostart.ps1 -Remove
+   ```
+3. **Remove Shortcuts:** Delete `BitCadence.lnk` from your Desktop and Start Menu Programs folders.
+4. **Clean up Configuration & Logs:** Delete the `~/.mco` directory (`Remove-Item -Recurse ~/.mco`).
+5. **Delete Repository / Environment:** Delete the BitCadence installation folder.
+
+---
+
+## Operating System Compatibility: Linux & macOS Status
+
+| Platform | Desktop Manager GUI (`desktop.pyw`) | Background Service Deployment | Browser Web Console |
+|---|:---:|:---:|:---:|
+| **Windows 10/11** | **Full Support** (Native Tkinter + Pystray + Job Objects) | Task Scheduler (`schtasks`) | Supported |
+| **Linux (Ubuntu/Debian/RHEL)** | *Not Supported* (CLI returns error) | Native `systemd` user units | Supported |
+| **macOS (Apple Silicon & Intel)** | *Not Supported* (CLI returns error) | Native `launchd` user plists | Supported |
+
+### Linux Alternative:
+On Linux, the Desktop GUI is deliberately disabled (`if os.name != "nt": raise SystemExit("The desktop manager currently supports Windows.")`). Instead, Linux operators use native `systemd` user units:
+```bash
+mco service install
+systemctl --user enable --now bitcadence-gateway
+systemctl --user enable --now bitcadence-scheduler
+```
+Access the UI via browser at `http://127.0.0.1:18789/console`.
+
+### macOS Alternative:
+On macOS, background persistence is managed via native `launchd`:
+```bash
+mco service install
+launchctl load ~/Library/LaunchAgents/com.bitcadence.gateway.plist
+```
+Access the UI via browser at `http://127.0.0.1:18789/console`.
 
 ---
 
 ## If It Goes Wrong
 
-### 1. "Pillow or pystray not found"
-- **Cause:** Python environment was installed without the desktop extra dependencies.
-- **Fix:** Install desktop dependencies in your environment:
+### 1. "SupervisorAlreadyRunning" Error on Startup
+- **Cause:** Another instance of `desktop.pyw` is already running or held open in the system tray.
+- **Fix:** Check your system tray (notification area overflow arrow). If present, right-click and choose **Open BitCadence**. If stuck, terminate lingering Python processes:
   ```powershell
-  pip install "bitcadence[desktop]"
-  ```
-  or run the helper installer:
-  ```powershell
-  .\scripts\install_desktop.ps1
+  python -m mco.desktop.app --quit
   ```
 
-### 2. "Gateway failed readiness probe"
-- **Cause:** Another process is bound to port 18789, or an existing gateway crashed and left a lock.
-- **Fix:** Select the `gateway` row in the table, click **Stop selected**, wait 2 seconds, then click **Start selected**.
+### 2. "Pillow or pystray not found"
+- **Cause:** Python environment was installed without desktop dependencies.
+- **Fix:** Run the dependency installer:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\install_desktop.ps1
+  ```
 
-### 3. "Closing window terminates server instead of hiding in tray"
-- **Cause:** System tray support failed to initialize due to notification area permissions or display server isolation.
-- **Fix:** Check the status label at the top. If tray initialization failed, the status displays `Tray unavailable`. Use `mco start` to run as a persistent background daemon instead.
+### 3. "Gateway failed readiness probe"
+- **Cause:** Port 18789 is occupied by an orphaned process or external server.
+- **Fix:** Check what process is listening on port 18789:
+  ```powershell
+  Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | Select-Object OwningProcess
+  ```
+  Terminate the lingering process or change the port in Desktop settings.
