@@ -46,6 +46,35 @@ Every user-facing task taking more than 2 steps or requiring technical knowledge
 | **13** | **Configuring LLM Provider Keys** | 5 | 2 | API keys, secret vaults, provider URLs | **Persona A:** Doesn't know what an API key is or where to get one from Anthropic/OpenAI.<br>**Persona B:** Expects "Sign in with Google / Apple" subscription billing. | **High** | `img/02-console-settings.png` |
 | **14** | **Reassigning a Failed Job** | 4 | 1 | Clone linking, role capabilities, audit lineage | **Persona A:** Doesn't understand why they can't just "fix the bug" in place.<br>**Persona B:** Expects an automatic "Try Again" button that uses a smarter model. | **Medium** | `img/15-job-detail-drawer.png` |
 | **15** | **Authoring a Score Contract** | 10 | 4 | JSON Schema, cryptographic digests, locks, budget cents | **Persona A & B:** Both completely blocked. Score authoring is strictly for distributed systems engineers. | **High** | `img/16-autonomy-scores-modal.png` |
+| **16** | **Installing Desktop GUI & Dependencies** | N/A | 3 | PowerShell execution policy, Python path resolution, pip target folders | **Persona A:** Blocked by default Windows ExecutionPolicy `Restricted` error. Fears running scripts.<br>**Persona B:** Expects a double-click `.exe` installer; refuses to run terminal commands to install an app. | **High** *(Needs Terminal)* | `img/19-desktop-control-window.png` |
+| **17** | **Configuring Autostart on Sign-in** | N/A | 3 | Absolute file paths, `pythonw.exe` vs `python.exe`, Windows Startup folder | **Persona A:** Cannot locate where `pythonw.exe` is installed. Does not know how to pass arguments.<br>**Persona B:** Expects a simple toggle switch in Settings ("Launch on startup") like Discord or Spotify. | **High** *(Needs Terminal)* | `img/19-desktop-control-window.png` |
+| **18** | **Declarative Fleet Orchestration (`fleet.toml`)** | 3 | 4 | TOML table syntax, file path escaping, worker modes (`waker`, `poll`, `off`) | **Persona A:** Clicking "Fleet settings" opens a terrifying code file in Notepad. Syntax error crashes app.<br>**Persona B:** Expects an "Add Agent" button with dropdowns, not hand-editing configuration files. | **High** *(Needs Terminal & Editor)* | `img/19-desktop-control-window.png` |
+| **19** | **Installing Background Sidecars with S4U Logon** | N/A | 3 | Windows UAC, Administrator elevation, Task Scheduler S4U security model | **Persona A:** Blocked by "Access is denied". Panics at "Run as administrator" blue prompt.<br>**Persona B:** Never uses a terminal or admin elevation. Unattended background workers fail silently. | **Critical** *(REQUIRES ADMIN)* | `img/08-console-agents.png` |
+| **20** | **Elevated System Admin Pack (`admin-pack.ps1`)** | N/A | 4 | Windows Administrator rights, service account creation, ACL manipulation, firewall rules | **Persona A:** Cannot find "Run as Administrator" in Start Menu search. Panics when asked to type `YES`.<br>**Persona B:** Completely alienated by command-line system administration. | **Critical** *(REQUIRES ADMIN)* | `img/06-console-governance.png` |
+| **21** | **Authoring & Wiring `claude-cio` Sidecar Policy** | N/A | 5 | Policy kernels, spend arithmetic, CLI flags (`--spend-cents`), token files | **Persona A:** Does not understand how an AI deputy makes decisions. Overwhelmed by spend caps.<br>**Persona B:** Wonders why there isn't an iOS-style "Ask to Buy" notification sent to their phone. | **High** *(Needs Terminal & Tokens)* | `img/05-console-approvals.png` |
+| **22** | **Diagnosing "Online/Standby" Locked Log Lockout** | N/A | 6 | File sharing locks, Windows process inspection, PID resolution, process termination | **Persona A:** Completely misled by the green status light. Thinks it works while jobs sit forever.<br>**Persona B:** Sees nothing happening, assumes app is broken, abandons it. | **Critical** *(Needs Terminal & Diagnostics)* | `img/08-console-agents.png` |
+| **23** | **Detecting & Resolving Duplicate Wake Processes** | N/A | 5 | Windows WMI/CIM process queries, Task Scheduler syntax, race conditions, worktree locks | **Persona A:** Baffled by duplicate tasks, random errors like `409 Conflict` or git `index.lock`.<br>**Persona B:** Expects the app to prevent or merge duplicate instances automatically. | **Critical** *(Needs Terminal & WMI)* | `img/19-desktop-control-window.png` |
+| **24** | **Migrating Scheduled Tasks to Desktop App** | 2 | 3 | Task Scheduler vs Desktop Supervisor process ownership | **Persona A:** Doesn't understand what "Move workers into app" means. Fears it might delete work.<br>**Persona B:** Confused why there are multiple ways workers run in the first place. | **Medium** *(Multi-step migration)* | `img/19-desktop-control-window.png` |
+
+---
+
+### Critical Friction Analysis: Elevation & Terminal Barriers
+
+A focused audit of sidecar management and desktop operations reveals a severe divide between the GUI vision and operational reality:
+
+#### 1. Tasks Blocked by "Run as Administrator" (UAC Elevation)
+- **Installing Unattended Sidecars (`background = true` / S4U Logon):** Windows Task Scheduler refuses to register S4U logon tasks from unattended or standard user shells without Administrator elevation (`Access is denied`).
+- **Local Service Accounts & ACL Hardening (`admin-pack.ps1`):** Creating dedicated service accounts and locking them out of private directories (`%USERPROFILE%`, personal documents, SSH keys) requires full local Administrator rights.
+- **Port Narrowing & Firewall Rules:** Narrowing inbound ports to localhost (`127.0.0.1`) requires elevated PowerShell.
+- **Impact on Personas:**
+  - **Persona A (Older Adult):** Freezes at Windows UAC prompts. Cannot locate "Run as administrator" in the Start Menu and assumes system warnings indicate dangerous activity.
+  - **Persona B (Teen):** Has never encountered an administrative prompt or terminal on mobile devices. Assumes the software is fundamentally broken when permission errors occur.
+
+#### 2. Tasks Forcing Users into a Terminal / PowerShell
+- **Desktop Shortcut & Dependency Setup:** `install_desktop.ps1` requires running a command line with explicit `-Python` paths.
+- **Autostart at Sign-in:** `desktop_autostart.ps1` requires passing `-Pythonw "C:\path\to\pythonw.exe"`. Neither persona knows where their virtual environment's `pythonw.exe` binary resides.
+- **Fleet Reconciliation (`fleet.toml`):** Changing worker allocation requires editing TOML syntax in Notepad and running `mco fleet apply`.
+- **Silent Failure Diagnostics (Locked Logs & Duplicate Wakers):** When a worker appears "online" but fails silently, diagnosing locked files (`~/.mco/logs/<instance>.log`) or detecting duplicate wakers requires complex PowerShell commands (`Get-Process`, `Get-CimInstance Win32_Process`, `schtasks /query`).
 
 ---
 

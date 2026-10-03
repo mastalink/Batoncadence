@@ -1,7 +1,9 @@
 # OS Services & Fleet Configuration
 
 ## Goal
-Configure BitCadence processes (gateway, scheduler, wakers) as boot-persistent operating system services, and declare worker fleet topologies in `fleet.toml`.
+Configure BitCadence processes (gateway, scheduler, wakers) as boot-persistent operating system services, declare worker fleet topologies in `fleet.toml`, and reconcile services via `mco fleet apply`.
+
+> **See Also:** For in-depth coverage of background deputies, the `claude-cio` Chief sidecar, elevated admin-pack flows, health verification levels, and locked-log/duplicate-waker troubleshooting, see [**Sidecars & Autonomous Fleet Daemons**](sidecars-and-fleet-daemons.md).
 
 ---
 
@@ -11,24 +13,22 @@ Configure BitCadence processes (gateway, scheduler, wakers) as boot-persistent o
 BitCadence defines worker deployment topologies in `~/.mco/fleet.toml`:
 
 ```toml
-[defaults]
-gateway_url = "http://127.0.0.1:18789"
-
 [workers.codex-builder]
 role = "codex"
-mode = "listen"                 # "listen" (daemon), "wake" (on demand), or "off"
-command = "python workers/codex.py"
-instances = 2
+instance = "codex-beast"
+mode = "waker"                 # "waker" (event-driven), "poll" (timer), or "off"
+exec = "C:/AI/BitCadence/scripts/workers/codex-worker-run.ps1"
+min_interval = 10
+poll_interval = 1800
+background = false             # Set true for unattended S4U Windows Task
 
-[workers.claude-researcher]
-role = "claude"
-mode = "wake"
-command = "python workers/claude.py"
-
-[workers.gemini-qa]
-role = "gemini"
-mode = "listen"
-instances = 1
+[workers.claude-cio]
+role = "chief"
+instance = "claude-cio"
+mode = "waker"
+exec = "python -m mco.orchestrator.cio_runner"
+min_interval = 10
+background = true              # Survives user sign-out
 ```
 
 ### 2. Applying Fleet Run Modes

@@ -32,7 +32,8 @@ Every guide in this wiki is written from real, hands-on execution. Whether you p
 15. [**Workers & Background Listening**](workers-and-daemon-listening.md) — Connecting AI models (Claude, Codex, Antigravity) via `mco listen`, `mco wake`, and MCP.
 16. [**Scheduling & Recurring Loops**](scheduling-and-loops.md) — Launchers, interval schedules, cron triggers, and persistent loop execution.
 17. [**OS Services & Fleet Configuration**](services-and-fleet.md) — Boot persistence via Windows Services / systemd, and declarative worker run modes via `fleet.toml`.
-18. [**Complete `mco` CLI Reference**](mco-cli-reference.md) — Recursive reference for all 43 commands and options in the BitCadence command-line tool.
+18. [**Sidecars & Autonomous Fleet Daemons**](sidecars-and-fleet-daemons.md) — What sidecars are in plain English, installing, starting, stopping, checking, the `claude-cio` sidecar, elevated admin-pack reconcile, health verification levels, and locked log / duplicate waker troubleshooting.
+19. [**Complete `mco` CLI Reference**](mco-cli-reference.md) — Recursive reference for all 43 commands and options in the BitCadence command-line tool.
 
 ---
 
