@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Schedules - BitCadence mockup</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><nav class="nav" aria-label="Main"><a href="03-home.html">Home</a><a href="05-ask.html">Ask</a><a href="06-helpers.html">Helpers</a><a href="07-schedules.html" class=on>Schedules</a><a href="08-approvals.html">Approvals</a><a href="09-settings.html">Settings</a></nav><span class="sp"></span><a class="btn small" href="index.html">All mockups</a><button class="btn small" onclick="bcTheme()" aria-label="Switch light or dark">🌓</button></div>
+<main class="wrap">
+<div class="mock-note">Design mockup. Nothing here is connected to a real backend.</div>
+
+<h1>Schedules</h1><p class="sub">Pick a time like you would for an alarm.</p>
+<div class="grid" style="margin-bottom:18px">
+ <div class="card"><b>Morning summary</b><p class="hint">Every weekday at 7:00 AM</p><label class="switch"><input type="checkbox" checked aria-label="On"> On</label></div>
+ <div class="card"><b>Weekly release</b><p class="hint">Every Friday at 2:00 PM</p><label class="switch"><input type="checkbox" checked aria-label="On"> On</label></div>
+</div>
+<div class="card"><h2 style="margin-top:0">New schedule</h2>
+<label for="what">What should run?</label><select id="what"><option>Weekly release</option><option>Morning summary</option><option>Tidy the docs</option></select>
+<label>How often?</label>
+<div class="chips"><button class="chip on" data-group="f">Every day</button><button class="chip" data-group="f">Every weekday</button><button class="chip" data-group="f">Certain days</button><button class="chip" data-group="f">Every hour</button></div>
+<label for="t">At what time?</label><input id="t" type="time" value="02:00">
+<label for="tz">Your time zone</label><select id="tz"><option>Detected from your computer (Eastern)</option></select>
+<div class="card" style="margin-top:14px;background:var(--runbg)"><b>Every weekday at 2:00 AM</b><div class="hint">Next run: tomorrow at 2:00 AM</div></div>
+<p><button class="btn good big" data-toast="Saved. Every weekday at 2:00 AM.">Save</button></p></div>
+
+</main><nav class="tabbar" aria-label="Main"><a href="03-home.html"><b>🏠</b>Home</a><a href="05-ask.html"><b>✨</b>Ask</a><a href="06-helpers.html"><b>🤖</b>Helpers</a><a href="07-schedules.html" class=on><b>⏰</b>Schedules</a><a href="08-approvals.html"><b>✋</b>Approvals</a><a href="09-settings.html"><b>⚙️</b>Settings</a></nav></body></html>
