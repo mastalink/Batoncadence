@@ -34,7 +34,7 @@ If you prefer not to have a persistent polling process consuming memory:
 Use `mco wake` to spawn your worker script only when pending work arrives in the mailbox:
 
 ```powershell
-mco wake --role codex --command "python run_worker.py"
+mco wake --role codex --exec "python run_worker.py"
 ```
 
 ### 4. Connecting via MCP (Model Context Protocol)

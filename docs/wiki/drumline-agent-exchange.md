@@ -40,16 +40,16 @@ When a discussion reaches a solid conclusion:
 
 ```powershell
 # List active discussion threads
-mco exchange list
+mco exchange list --job <job-id>
 
 # Post a new proposal or response
 mco exchange post `
-  --title "Refactor Auth Token Expiry" `
-  --content "Recommend moving from 24h static tokens to rolling 1h JWTs with refresh tokens." `
-  --kind proposal
+  proposal `
+  "Recommend moving from 24h static tokens to rolling 1h JWTs with refresh tokens." `
+  --job <job-id>
 
 # Promote a discussion thread to shared memory
-mco exchange promote <exchange-id> --kind decision
+mco exchange promote <exchange-id> --to decision
 ```
 
 ---

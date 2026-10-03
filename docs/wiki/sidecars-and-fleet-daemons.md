@@ -139,15 +139,15 @@ To stop or remove a sidecar cleanly:
 1. **Via `fleet.toml`:**
    Change the worker's mode to `off`:
    ```powershell
-   mco fleet set claude-cio mode off
+   mco fleet set claude-cio mode=off
    mco fleet apply
    ```
    Or remove the `[workers.claude-cio]` section entirely from `~/.mco/fleet.toml` and run `mco fleet apply`.
 
 2. **Via `mco service` CLI:**
    ```powershell
-   # Stop a running service immediately
-   mco service stop BitCadence-wake-chief-claude-cio
+   # Stop a running task immediately (there is no `mco service stop`)
+   Stop-ScheduledTask -TaskName BitCadence-wake-chief-claude-cio
 
    # Uninstall the scheduled task from the OS
    mco service uninstall BitCadence-wake-chief-claude-cio
@@ -267,13 +267,13 @@ Do not rely solely on "Green" or "Online" lights in dashboards. True operational
 To verify that a sidecar is actually capable of executing work, send an inert, reply-only smoke test:
 
 ```powershell
-mco send chief --instance claude-cio -t "FLEET SMOKE TEST - reply only" `
-  -m "Do NOT edit files or commit. Call mco_complete(task_id, output) with your AGENT_INSTANCE_ID, the UTC time, and 'fleet smoke ok'. Then stop."
+mco send chief --instance claude-cio --title "FLEET SMOKE TEST - reply only" `
+  --message "Do NOT edit files or commit. Call mco_complete(task_id, output) with your AGENT_INSTANCE_ID, the UTC time, and 'fleet smoke ok'. Then stop."
 ```
 
-Then check job progression:
+Then follow the job (the job id is printed by `mco send`) in the Job Board or its audit trail:
 ```powershell
-mco jobs --limit 5
+mco audit <job-id>
 ```
 Verify the task moves from **`pending`** to **`leased`** and finally **`completed`**.
 
@@ -331,8 +331,8 @@ When a single job is posted, two different instances attempt to process it simul
 
 #### The Root Cause:
 A waker was registered in multiple supervisors at the same time:
-1. Installed as a Windows Scheduled Task or systemd service via `mco service install-waker` or `mco fleet apply`.
-2. Simultaneously started manually in a PowerShell terminal via `mco wake --role ...` or `mco listen ...`, OR launched by the Desktop Control Manager (`desktop.pyw`).
+1. Installed as a Windows Scheduled Task or systemd service via `mco service install-waker ROLE --exec COMMAND` or `mco fleet apply`.
+2. Simultaneously started manually in a PowerShell terminal via `mco wake` or `mco listen`, OR launched by the Desktop Control Manager (`desktop.pyw`).
 
 Both processes receive the SSE notification simultaneously and race to lease the job.
 

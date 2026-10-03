@@ -32,7 +32,7 @@ When the installer asks:
 ```text
 Would you like to start BitCadence now? [Y/n]
 ```
-Press **Enter**. 
+Press **Enter**.
 
 The server window appears, displays your generated access token, copies it automatically to your Windows clipboard, and opens your default web browser to `http://127.0.0.1:18789/console`.
 

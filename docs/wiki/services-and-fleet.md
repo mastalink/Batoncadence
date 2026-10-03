@@ -42,7 +42,7 @@ mco fleet apply
 mco fleet status
 
 # Change an individual worker mode
-mco fleet set codex-builder mode off
+mco fleet set codex-builder mode=off
 ```
 
 ### 3. Installing OS Services
@@ -58,7 +58,7 @@ mco service install
 mco service install-scheduler
 
 # Install the event waker service
-mco service install-waker
+mco service install-waker codex --exec "python run_worker.py"
 ```
 
 **On Linux:**

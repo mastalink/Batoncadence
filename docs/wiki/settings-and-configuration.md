@@ -51,7 +51,7 @@ mco setup
 mco settings
 
 # Update a setting safely
-mco settings set MCO_DRUMLINE_DISTILL true
+mco settings MCO_DRUMLINE_DISTILL true
 
 # Show active edition and feature availability
 mco edition
@@ -82,5 +82,5 @@ mco doctor
 - **Cause:** Attempting to use a connector or multi-org tenancy while edition is set to `community`.
 - **Fix:** Pin the edition in your `.env` or run:
   ```powershell
-  mco settings set MCO_EDITION enterprise
+  mco settings MCO_EDITION enterprise
   ```

@@ -8,7 +8,7 @@ Implement human-in-the-loop oversight, authorize or reject high-risk agent opera
 ## Step-by-Step Instructions
 
 ### 1. Navigate to the Approval Queue
-Click **Approval Queue** (or *"Needs your OK"*) in the left navigation sidebar. 
+Click **Approval Queue** (or *"Needs your OK"*) in the left navigation sidebar.
 The badge next to the menu item shows the count of jobs currently halted at an approval gate.
 
 ![Approval Queue Panel](img/05-console-approvals.png)
@@ -61,10 +61,10 @@ mco reject <job-id> --reason "Production deployment window closed"
 mco audit <job-id>
 
 # Export a signed cryptographic audit checkpoint
-mco audit-checkpoint
+mco audit-checkpoint <job-id> checkpoint.json
 
 # Enable emergency kill switch from terminal
-mco settings set MCO_KILL_SWITCH true
+mco settings MCO_KILL_SWITCH true
 mco restart
 ```
 
@@ -86,12 +86,12 @@ mco restart
 - **Cause:** The bearer token used to approve the job belongs to an agent role that is not listed in `MCO_APPROVER_ROLES`.
 - **Fix:** By default, approver roles are `human,admin,operator`. Re-authenticate with an admin or human token, or configure:
   ```powershell
-  mco settings set MCO_APPROVER_ROLES "human,admin,operator,reviewer"
+  mco settings MCO_APPROVER_ROLES "human,admin,operator,reviewer"
   ```
 
 ### 2. "Kill switch active: Cannot lease task"
 - **Cause:** The kill switch was left enabled (`MCO_KILL_SWITCH=true`).
 - **Fix:** In the Governance screen, switch the panic toggle to OFF, or run:
   ```powershell
-  mco settings set MCO_KILL_SWITCH false
+  mco settings MCO_KILL_SWITCH false
   ```

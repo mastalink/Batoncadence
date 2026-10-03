@@ -44,9 +44,6 @@ To obtain a quick operational snapshot from your terminal:
 # Health check and diagnostic summary
 mco status
 
-# List active and pending jobs
-mco jobs list
-
 # List all agents and their online presence
 mco agents
 ```

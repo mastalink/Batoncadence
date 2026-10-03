@@ -30,7 +30,7 @@ Run Jev decision queries directly from your shell:
 
 ```powershell
 # Query Jev model routing recommendation
-mco jev route-model "Write comprehensive unit tests for local SQLite WAL concurrency"
+mco jev route-model --task "Write comprehensive unit tests for local SQLite WAL concurrency"
 
 # Inspect Jev operations health
 curl http://127.0.0.1:18789/api/jev/health `

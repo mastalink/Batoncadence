@@ -61,10 +61,10 @@ Every Job Board action maps directly to the `mco` command-line tool:
 
 ```powershell
 # Drop a new job into an agent's inbox
-mco send "Summarize the repository" `
-  --role codex `
-  --instructions "Review recent commits on main and summarize changes." `
-  --approval
+mco send codex `
+  --title "Summarize the repository" `
+  --message "Review recent commits on main and summarize changes." `
+  --approve
 
 # Inspect tamper-evident audit history
 mco audit <job-id>

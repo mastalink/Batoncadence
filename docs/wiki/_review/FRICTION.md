@@ -131,44 +131,49 @@ The audit identified **five distinct surfaces** where workflows, execution flows
 
 ### 3. Score Data Available to Auto-Generate a Live Flowchart
 
-BitCadence already maintains rich, deterministic data in its SQLite / PostgreSQL storage that can auto-generate a real-time flowchart without manual drawing:
+Score state is split between the immutable score document and the run's execution tables. Column names below are from `src/mco/migrations/2026-09_score_store.sql` (Postgres) and the task shape validated in `src/mco/orchestrator/scores.py`. The local SQLite conductor (`~/.mco/score-runs.db`) keeps the same concepts but is a separate store; check its schema before binding a UI to it.
 
-| Data Element | Storage Source / Schema | Representation in Live Flowchart |
+| Data Element | Where it actually lives | Representation in a Live Flowchart |
 |---|---|---|
-| **Nodes (Tasks / Goals)** | `score_tasks` / `score_documents.goals` | Visual node cards labeled with Goal ID and Title |
-| **Dependencies** | `score_tasks.depends_on` (UUID or ID list) | Directed arrows connecting prerequisite nodes to dependents |
-| **Execution States** | `score_tasks.status` | Real-time status coloring:<br>• `planned` / `waiting` (grey)<br>• `running` (pulsing blue)<br>• `review` (amber/purple)<br>• `checkpoint_waiting` (flashing gold ⏸)<br>• `accepted` / `completed` (solid green)<br>• `failed` (red) |
-| **Resource Locks** | `score_tasks.resource_locks` | Lock badge on nodes sharing concurrency lanes (e.g., `repo-write-lane`) |
-| **Assigned Workers** | `score_tasks.leased_by` / `score_providers` | Worker avatar / role chip on active node |
-| **Budget & Progress** | `score_runs.authorized_budget_cents`, progress % | Top-level progress bar and cumulative cost meter |
-| **Human Checkpoints** | `score_tasks.checkpoint == true` | Prominent shield icon or pause gate barrier on node |
+| **Nodes (Tasks / Goals)** | `score_documents.document` (JSONB): `tasks[]` with `id`, `goal`, `title`, `role`; run-time rows in `score_tasks` (`run_id`, `task_id`, `attempt`) | Node cards labeled with task id and title |
+| **Dependencies** | `depends_on` list on each task inside `score_documents.document`. It is **not** a `score_tasks` column. | Directed arrows from prerequisite to dependent |
+| **Execution States** | `score_tasks.status`. Statuses seen in the conductor code include `running`, `review`, `accepted`; the full set is defined in `scores.py`, not in the migration. | Status coloring, mapped from whatever values the conductor emits |
+| **Resource Locks** | `resources` list on each task inside the score document. Tasks that share a resource are serialized by the conductor; there is no lock column. | Badge on nodes that share a resource lane |
+| **Assigned Workers** | `score_tasks.author_id` and `score_tasks.author_provider`; reviewers in `score_reviews.reviewer_id`; catalog in `score_providers` | Worker chip on the active node |
+| **Budget** | `score_runs.authorized_budget_cents`, `score_grants.budget_cents`; per-task `max_cost_cents` in the document | Run-level cost meter |
+| **Human Checkpoints** | `checkpoint` flag on the task inside the document; approval recorded in `score_tasks.checkpoint_approved` (boolean) | Shield icon or pause barrier on the node |
+| **History** | `score_events` (append-only: `seq`, `run_id`, `kind`, `task_id`, `at`, `actor`, `payload`) | Timeline or replay |
 
 ---
 
 ### 4. APIs & Events Available for Live Updates
 
-A live flowchart front-end can achieve zero-refresh reactivity using the following existing gateway interfaces:
+Verified against the gateway routes in `src/mco/cli.py`, `src/mco/orchestrator/routes.py` and `score_gate_routes.py`:
 
 1. **WebSocket Broadcast Feed (`/ws/broadcast`):**
-   - Gateway broadcasts real-time JSON frames on every status change:
+   - The gateway pushes one frame per job event. The envelope is `type` plus a nested `payload`, which carries the event name and the full job row:
      ```json
      {
-       "event": "status:completed",
-       "job_id": "88f57ed8-4069-...",
-       "actor_id": "codex-build-1",
-       "created_at": "2026-10-03T12:25:00Z"
+       "type": "event",
+       "payload": {
+         "event": "status:completed",
+         "job": { "id": "88f57ed8-4069-...", "status": "completed" }
+       }
      }
      ```
-   - Flowchart can update node border colors and trigger edge dash animations in <50ms.
+   - Frames are filtered per connection: non-admin identities only receive jobs addressed to their own role or instance. No latency figure has been measured, so none is claimed here.
 
 2. **Job Event Stream API (`GET /api/jobs/{id}/events`):**
-   - Returns the tamper-evident chronological event log for any task.
+   - Returns the tamper-evident event log for one job.
 
-3. **Score Run Inspector (`GET /api/scores/runs/{run_id}`):**
-   - Returns the complete state tree for an active autonomous run: tasks, attempts, grant status, and evidence digests.
+3. **Project view (`GET /api/jobs/project-view`):**
+   - Grouped job data that the Projects dashboard polls.
 
-4. **Score Events Stream (`GET /api/scores/{digest}/events`):**
-   - Append-only event sequence for a score run, ideal for event-sourced diagram replay.
+4. **Score gates and grants (`/api/score/gates`, `/api/score/grants`):**
+   - These are the only Score HTTP routes in the gateway today. They expose human gates and grants, not run or task state.
 
-5. **Polling Fallback:**
-   - If WebSocket is blocked by corporate proxies, `GET /api/jobs` or `GET /api/project-view` can be polled on an adaptive 4s / 30s interval.
+5. **No Score run or event routes yet:**
+   - There is no `GET /api/scores/runs/{run_id}` and no `GET /api/scores/{digest}/events`. A live Score flowchart would need new read-only routes over `score_runs`, `score_tasks` and `score_events`, or it can read run state through `mco score status --run-id <run-id>` on the conductor host.
+
+6. **Polling Fallback:**
+   - If WebSocket is blocked by a corporate proxy, poll `GET /api/jobs` or `GET /api/jobs/project-view` on a short interval.

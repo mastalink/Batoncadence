@@ -16,7 +16,7 @@ In the left-hand navigation sidebar, click **Projects**.
 The dashboard automatically groups jobs based on their `input_payload.project` attribute (e.g., `gateway-reliability`, `agent-operations`, `release-2.4`):
 - Each project card displays:
   - **Project Name & Slug**
-  - **Health Indicator:** 
+  - **Health Indicator:**
     - 🟢 **Healthy:** Active jobs completing without errors.
     - 🟡 **Warning:** Jobs paused at approval gates or waiting on retries.
     - 🔴 **Blocked:** One or more jobs permanently failed, rejected, or stalled.
@@ -53,7 +53,7 @@ curl -X POST http://127.0.0.1:18789/api/jobs/<job-id>/project `
   -d '{"project": "gateway-reliability"}'
 
 # Fetch project-level aggregate view
-curl http://127.0.0.1:18789/api/project-view `
+curl http://127.0.0.1:18789/api/jobs/project-view `
   -H "Authorization: Bearer $env:MCO_AGENT_TOKEN"
 ```
 

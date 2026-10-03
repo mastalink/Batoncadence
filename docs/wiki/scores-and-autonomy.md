@@ -50,16 +50,16 @@ Manage and advance Score Conductor runs from PowerShell:
 
 ```powershell
 # Check status of conductor and active score runs
-mco score status
+mco score status --run-id <run-id>
 
-# List registered score documents and runs
+# List the runs in the conductor database
 mco score list
 
 # Advance the conductor sweep engine
-mco score tick
+mco score tick --run-id <run-id>
 
 # Grant local development policy authority
-mco score grant-local <run-id>
+mco score grant-local examples/scores/via-cloud.score.json --run-id <run-id> --action <action> --resource <resource>
 ```
 
 ---

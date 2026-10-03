@@ -1,31 +1,28 @@
 # BitCadence Bug & Usability Anomaly Inventory
 
-This document details all reproducible bugs, edge-case regressions, and UI anomalies identified during the hands-on review. Per the review instructions, these bugs are documented with exact reproduction steps and impact assessments for resolution in follow-up redesign PRs.
+Five observations from the hands-on review. Each lists the evidence type: **source** means confirmed by reading the cited code on `main` at the time of writing; **UI** means observed in the running console but not re-verified in a test. An earlier draft listed two more items (a persistent invisible backdrop after backdrop-click, and an invalid `"\B"` escape warning). Neither could be reproduced or located in source, so both were removed.
 
 ---
 
-### Bug 1: New Job Modal Backdrop Trapping & Escape Key Ineffectiveness
+### Bug 1: New Job modal does not close on Escape
 
-- **Severity:** High
-- **Surface:** Web Console (`/console` — Job Board)
-- **Component:** `src/mco/console_src/5adac14f-6645-4e02-866b-22c4e571989b.js` (`NewJobForm` / Modal Container)
-- **Reproduction Steps:**
-  1. Navigate to `http://127.0.0.1:18789/console`.
-  2. Select the **Job Board** tab.
-  3. Click **+ New job** to open the composer modal dialog.
-  4. Press the `Escape` key on your keyboard to dismiss the modal, or click outside the dialog card on the dark backdrop.
-  5. Attempt to click on any job row in the underlying table.
-- **Expected Behavior:** Pressing `Escape` or clicking the backdrop should dismiss the modal and remove all overlay elements from the DOM.
-- **Actual Behavior:** The dialog remains open or invisible backdrop `div` elements continue intercepting all mouse pointer events (`<div> subtree intercepts pointer events`), permanently freezing interaction with the underlying table until the explicit Cancel button is found and clicked.
+- **Severity:** Low
+- **Evidence:** source
+- **Surface:** Web Console, Job Board
+- **Component:** `src/mco/console_src/5adac14f-6645-4e02-866b-22c4e571989b.js` (`NewJobForm`, opened by the **+ New job** button)
+- **Finding:** Clicking the backdrop or the `×` button closes the drawer. No `keydown` / `Escape` handler exists anywhere in `src/mco/console_src`, so pressing Escape does nothing.
+- **Reproduce:** Open `/console`, Job Board, **+ New job**, press `Escape`. The form stays open.
+- **Expected:** Escape dismisses the modal, as most users assume.
 
 ---
 
-### Bug 2: "Register Agent" Button Inexplicably Hidden in Demo Mode
+### Bug 2: "Register agent" button is hidden in Demo Mode
 
 - **Severity:** Medium
-- **Surface:** Web Console (`/console` — Agent Fleet)
+- **Evidence:** source
+- **Surface:** Web Console, Agent Fleet
 - **Component:** `src/mco/console_src/2ed3f6b1-e1c6-43fc-8b29-31917195cbd5.js:215`
-- **Code Reference:**
+- **Code:**
   ```javascript
   {live ? (
     <Btn kind="primary" small onClick={() => setShowRegister((v) => !v)}>
@@ -33,65 +30,44 @@ This document details all reproducible bugs, edge-case regressions, and UI anoma
     </Btn>
   ) : null}
   ```
-- **Reproduction Steps:**
-  1. Open the console in the default Demo Mode (`http://127.0.0.1:18789/console`).
-  2. Click on the **Agent Fleet** tab.
-  3. Observe the upper-right area of the screen where actions typically live.
-- **Expected Behavior:** Users in Demo Mode should see a disabled or informative "Register agent" button explaining that agent registration is available once connected to a live server, or allow simulated registration.
-- **Actual Behavior:** The button is completely omitted (`null`), leading first-time users to conclude that BitCadence has no graphical interface for registering agents.
+- **Reproduce:** Open `/console` without connecting a live token, go to **Agent Fleet**.
+- **Finding:** With `live` false the button renders nothing, so a first-time user sees no graphical way to register an agent and no hint that connecting is required.
+- **Expected:** A disabled button or a short note explaining that registration needs a live connection.
 
 ---
 
-### Bug 3: `Start BitCadence.bat` Blind Browser Launch on Startup Crash
+### Bug 3: `Start BitCadence.bat` opens the browser even if the server failed to start
 
 - **Severity:** Medium
-- **Surface:** Windows Launch Script (`Start BitCadence.bat:77`)
-- **Code Reference:**
+- **Evidence:** source
+- **Surface:** `Start BitCadence.bat:77-79`
+- **Code:**
   ```bat
   start "" /b cmd /c "timeout /t 5 /nobreak >nul & start http://127.0.0.1:18789/console"
   ".venv\Scripts\python.exe" -m mco.cli serve
   ```
-- **Reproduction Steps:**
-  1. Introduce a port conflict or syntax error in `.env` so `mco serve` exits immediately on startup.
-  2. Double-click `Start BitCadence.bat`.
-  3. Observe the command window and browser behavior.
-- **Expected Behavior:** The launch script should check if the server started successfully before launching the browser.
-- **Actual Behavior:** The script spawns an unconditional background `cmd.exe` sleep timer. Five seconds after the server has already crashed, the browser pops up to `http://127.0.0.1:18789/console` displaying a confusing browser `ERR_CONNECTION_REFUSED` error page.
+- **Reproduce:** Make `mco serve` exit immediately (for example, occupy port 18789 first), then run the script.
+- **Finding:** The browser launch is an unconditional five-second timer. If the server has already exited, the browser opens onto a connection-refused page.
+- **Expected:** Probe the port (or `/readyz`) before launching the browser.
 
 ---
 
-### Bug 4: Desktop Manager Window Hard-Crashes in Headless or Non-GUI Sessions
+### Bug 4: Desktop Manager creates its Tk root without a guard
 
 - **Severity:** Medium
-- **Surface:** Desktop Manager (`src/mco/desktop/app.py:33`)
-- **Reproduction Steps:**
-  1. Invoke `python -m mco.desktop.app` from an SSH remote shell, Windows Service account session (session 0), or a container without an active Windows desktop display.
-- **Expected Behavior:** The application should catch `TclError: no display name and no $DISPLAY environment variable` or GDI allocation errors, log an informative warning, and fall back to CLI mode (`mco status`).
-- **Actual Behavior:** The process crashes immediately with an unhandled exception trace.
+- **Evidence:** source (crash not exercised in a headless session)
+- **Surface:** `src/mco/desktop/app.py`, `DesktopApp.__init__`
+- **Finding:** `self.root = tk.Tk()` is called with no `try/except`. On a host with no display, `tk.Tk()` raises `TclError`, which would surface as an unhandled traceback rather than a message pointing at `mco status`.
+- **Reproduce:** Run `python -m mco.desktop.app` from an SSH session or other host with no desktop display.
+- **Expected:** Catch the error, print a one-line explanation, and exit non-zero.
 
 ---
 
-### Bug 5: String Escape Sequence Warning on Python 3.12+ for Windows Paths
-
-- **Severity:** Low (Cosmetic Warning)
-- **Surface:** Script Generation & Path Helpers
-- **Reproduction Steps:**
-  1. Run scripts that format Windows file paths like `C:\BitCadence` or `\BitCadence` using standard strings on Python 3.12+.
-- **Expected Behavior:** Clean execution without interpreter warnings.
-- **Actual Behavior:** Python emits:
-  ```text
-  SyntaxWarning: "\B" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\B"? A raw string is also an option.
-  ```
-
----
-
-### Bug 6: Inconsistent Workflow Definitions Across Dual Flow Builders
+### Bug 5: Two flow builders do not share a draft
 
 - **Severity:** Medium
-- **Surface:** `/console#workflows` vs `/flow#design`
-- **Reproduction Steps:**
-  1. Open `/console` and build a 3-step workflow in the Workflows tab.
-  2. Navigate to `/flow` and click **Design workflow**.
-  3. Inspect the canvas.
-- **Expected Behavior:** Both visual workflow surfaces should share a unified local storage draft or server draft.
-- **Actual Behavior:** The two builders operate with completely separate memory models. A user who spent 10 minutes designing a graph in one builder finds the other canvas completely empty.
+- **Evidence:** source and UI
+- **Surface:** `/console` Workflows tab versus `/flow` Design mode
+- **Finding:** `/flow` is a standalone page (`src/mco/static/flow.html`) and the console builder is part of the console bundle. A search of both for draft persistence found no shared storage; the only `localStorage` key used by `flow.html` is the access token. A workflow drawn in one builder does not appear in the other, except through YAML export and import.
+- **Reproduce:** Build a three-step workflow in the console Workflows tab, then open `/flow` and choose **Design workflow**. The canvas is empty.
+- **Expected:** One shared draft, or a single builder.
