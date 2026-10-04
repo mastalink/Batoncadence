@@ -631,7 +631,7 @@ def _make_cover_pdf(lines: list[str]) -> bytes:
 
 
 @governance_router.post("/evidence-pack")
-async def export_evidence_pack(payload: dict = None,
+def export_evidence_pack(payload: dict = None,
                                caller: dict = Depends(require_scopes("jobs:read"))):
     """Return a PDF/JSON evidence bundle for approval and audit history."""
     from mco.orchestrator.routes import agent_org, job_org, get_db_client

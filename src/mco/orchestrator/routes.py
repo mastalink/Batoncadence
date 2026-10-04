@@ -336,7 +336,7 @@ STATUS_SORT_ORDER = {
 
 
 @router.get("")
-async def get_jobs(
+def get_jobs(
     include_archived: bool = False,
     sort: str = None,
     limit: Optional[int] = None,
@@ -414,7 +414,7 @@ async def get_jobs(
 
 
 @router.get("/project-view")
-async def get_project_view_jobs(agent: dict = Depends(require_scopes("jobs:read"))):
+def get_project_view_jobs(agent: dict = Depends(require_scopes("jobs:read"))):
     """Return the complete non-archived job set used by the Projects view.
 
     The Job Board keeps its fast 100-row window. This path pages explicitly so
@@ -689,7 +689,7 @@ def _pending_for_agent(db_client, role: str, instance_id, agent: dict) -> list:
 
 
 @router.get("/pending")
-async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Depends(require_scopes("jobs:read"))):
+def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Depends(require_scopes("jobs:read"))):
     """Retrieve pending jobs for a role. Dropbox rule: you may only poll your own mail."""
     if role.lower() != agent["role"].lower():
         raise HTTPException(status_code=403, detail="Cannot poll jobs for a role you are not registered as")
@@ -710,7 +710,7 @@ async def get_pending_jobs(role: str, instance_id: str = None, agent: dict = Dep
 
 
 @router.get("/{job_id}")
-async def get_job(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
+def get_job(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
     """Return one job to its creator, addressee, target role, or an admin."""
     db_client = get_db_client()
     if not db_client:
@@ -957,7 +957,7 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
 
 
 @router.get("/{job_id}/events")
-async def get_job_events(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
+def get_job_events(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
     """Immutable audit trail for one job, oldest event first."""
     db_client = get_db_client()
     if not db_client:
@@ -970,7 +970,7 @@ async def get_job_events(job_id: str, agent: dict = Depends(require_scopes("jobs
 
 
 @events_router.get("")
-async def get_recent_events(
+def get_recent_events(
     since: str = "",
     limit: int = 100,
     agent: dict = Depends(require_scopes("jobs:read")),
@@ -1319,7 +1319,7 @@ async def unarchive_job(job_id: str, agent: dict = Depends(require_scopes("jobs:
 
 
 @router.get("/{job_id}/duplicates")
-async def get_job_duplicates(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
+def get_job_duplicates(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
     """Best-effort duplicate check: other jobs with the same title and target
     role, plus anything already linked via reassignment. Use before manually
     reposting a failed job's work, or to answer 'did someone already redo
@@ -1550,7 +1550,7 @@ async def batch_job_action(payload: dict, agent: dict = Depends(require_agent)):
 
 
 @agents_router.get("")
-async def get_agents(agent: dict = Depends(require_scopes("agents:read"))):
+def get_agents(agent: dict = Depends(require_scopes("agents:read"))):
     """Registered agents with derived presence (effective_status,
     last_seen_seconds, connected) and what each is doing (state:
     working/standby/broken/offline/disabled, with state_reason for broken).
@@ -1601,7 +1601,7 @@ async def renew_job(job_id: str, payload: dict, agent: dict = Depends(require_sc
 
 
 @router.get("/{job_id}/checkpoint")
-async def export_checkpoint(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
+def export_checkpoint(job_id: str, agent: dict = Depends(require_scopes("jobs:read"))):
     from mco.orchestrator.audit import make_checkpoint, drain_outbox
     db = get_db_client()
     _load_job_in_org(db, job_id, agent)
