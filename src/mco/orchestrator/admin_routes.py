@@ -98,7 +98,7 @@ def _public(row: dict) -> dict:
 # ── Agent management ─────────────────────────────────────────────────────────
 
 @agents_admin_router.get("/orgs")
-async def list_orgs(caller: dict = Depends(require_scopes("agents:read"))):
+def list_orgs(caller: dict = Depends(require_scopes("agents:read"))):
     """Orgs available for registration (powers the Control Panel dropdown).
 
     Host operators see the configured allowlist plus any orgs already in use
@@ -121,7 +121,7 @@ async def list_orgs(caller: dict = Depends(require_scopes("agents:read"))):
 
 
 @agents_admin_router.post("")
-async def register_agent(payload: dict, caller: dict = Depends(require_scopes("agents:manage"))):
+def register_agent(payload: dict, caller: dict = Depends(require_scopes("agents:manage"))):
     """Register a new agent and return its access token - shown exactly once.
 
     Stricter than `mco register`: an existing instance_id is a 409, never a
@@ -186,7 +186,7 @@ async def register_agent(payload: dict, caller: dict = Depends(require_scopes("a
 
 
 @agents_admin_router.post("/{instance_id}/reset-token")
-async def reset_agent_token(instance_id: str, caller: dict = Depends(require_scopes("agents:manage"))):
+def reset_agent_token(instance_id: str, caller: dict = Depends(require_scopes("agents:manage"))):
     """Rotate an agent's access token. The old token stops working immediately;
     the new one is returned exactly once."""
     db = _db()
@@ -201,7 +201,7 @@ async def reset_agent_token(instance_id: str, caller: dict = Depends(require_sco
 
 
 @agents_admin_router.patch("/{instance_id}")
-async def update_agent(instance_id: str, payload: dict,
+def update_agent(instance_id: str, payload: dict,
                        caller: dict = Depends(require_scopes("agents:manage"))):
     """Edit an agent's role, scopes, or status."""
     db = _db()
@@ -238,7 +238,7 @@ async def update_agent(instance_id: str, payload: dict,
 
 
 @agents_admin_router.delete("/{instance_id}")
-async def delete_agent(instance_id: str, caller: dict = Depends(require_scopes("agents:manage"))):
+def delete_agent(instance_id: str, caller: dict = Depends(require_scopes("agents:manage"))):
     """Remove an agent registration. Its token stops working immediately."""
     db = _db()
     _get_agent_row(db, instance_id, caller)
@@ -357,7 +357,7 @@ _TRUTHY = ("1", "true", "on", "yes")
 
 
 @settings_router.get("")
-async def get_settings(caller: dict = Depends(require_scopes("admin"))):
+def get_settings(caller: dict = Depends(require_scopes("admin"))):
     """Current settings (secrets masked to set/unset), UI metadata, the
     edition matrix, and the scope vocabulary - everything the Control Panel
     needs in one call."""
@@ -383,7 +383,7 @@ async def get_settings(caller: dict = Depends(require_scopes("admin"))):
 
 
 @settings_router.put("")
-async def put_settings(payload: dict, caller: dict = Depends(require_scopes("admin"))):
+def put_settings(payload: dict, caller: dict = Depends(require_scopes("admin"))):
     """Apply settings changes. Only whitelisted keys; values persist to the
     global config home (~/.mco/.env) and take effect immediately in-process.
     Empty string clears a key back to its default."""
@@ -469,7 +469,7 @@ async def put_settings(payload: dict, caller: dict = Depends(require_scopes("adm
 
 
 @settings_router.post("/test-connector")
-async def test_connector(payload: dict, caller: dict = Depends(require_scopes("admin"))):
+def test_connector(payload: dict, caller: dict = Depends(require_scopes("admin"))):
     """Rebuild connectors from the saved credentials and report one's health -
     the same reachability/auth probe the terminal setup wizard runs, surfaced
     in the console so an operator can set up and verify without a shell."""
@@ -632,7 +632,7 @@ def _make_cover_pdf(lines: list[str]) -> bytes:
 
 @governance_router.post("/evidence-pack")
 def export_evidence_pack(payload: dict = None,
-                               caller: dict = Depends(require_scopes("jobs:read"))):
+                         caller: dict = Depends(require_scopes("jobs:read"))):
     """Return a PDF/JSON evidence bundle for approval and audit history."""
     from mco.orchestrator.routes import agent_org, job_org, get_db_client
 
@@ -804,13 +804,13 @@ def _jev_public(db, caller: dict) -> dict:
 
 
 @jev_router.get("")
-async def get_jev_configuration(caller: dict = Depends(require_scopes("admin"))):
+def get_jev_configuration(caller: dict = Depends(require_scopes("admin"))):
     """Offline capability discovery. Never contacts TypeSafe or returns a key."""
     return _jev_public(_db(), caller)
 
 
 @jev_router.put("")
-async def put_jev_configuration(payload: dict, caller: dict = Depends(require_scopes("admin"))):
+def put_jev_configuration(payload: dict, caller: dict = Depends(require_scopes("admin"))):
     """Configure Jev without exposing its credential or silently enabling it."""
     allowed = {"mode", "model", "timeout_seconds", "max_retries", "api_key"}
     if not isinstance(payload, dict) or not payload:
@@ -846,14 +846,14 @@ async def put_jev_configuration(payload: dict, caller: dict = Depends(require_sc
 
 
 @jev_router.post("/test")
-async def test_jev_configuration(caller: dict = Depends(require_scopes("admin"))):
+def test_jev_configuration(caller: dict = Depends(require_scopes("admin"))):
     """Perform explicit model discovery; ordinary capability checks are offline."""
     provider = jev.build_provider(get_config(), _db(), _caller_org(caller))
     return provider.health()
 
 
 @jev_router.post("/route")
-async def route_jev_codex_task(payload: dict, caller: dict = Depends(require_scopes("jev:route"))):
+def route_jev_codex_task(payload: dict, caller: dict = Depends(require_scopes("jev:route"))):
     """Route a Codex task through Jev; this endpoint authorizes no effect."""
     if not isinstance(payload, dict) or not str(payload.get("task") or "").strip():
         raise HTTPException(status_code=400, detail="task is required")
@@ -881,7 +881,7 @@ async def route_jev_codex_task(payload: dict, caller: dict = Depends(require_sco
 
 
 @jev_router.get("/metrics")
-async def get_jev_metrics_endpoint(caller: dict = Depends(require_scopes("admin"))):
+def get_jev_metrics_endpoint(caller: dict = Depends(require_scopes("admin"))):
     """Additive Jev decision metrics: calls, latency, low-confidence, disagreements, fallbacks, errors."""
     return jev.get_jev_metrics()
 
@@ -930,14 +930,14 @@ def _vault_http_error(exc: VaultError) -> HTTPException:
 
 
 @llm_connections_router.get("/providers")
-async def list_llm_providers(caller: dict = Depends(require_scopes("admin"))):
+def list_llm_providers(caller: dict = Depends(require_scopes("admin"))):
     """Provider metadata for the Add Connection form."""
     return {p: {"label": m["label"], "base_url_editable": m["base_url"] is None}
             for p, m in llm_connections.PROVIDERS.items()}
 
 
 @llm_connections_router.get("")
-async def list_llm_connections(caller: dict = Depends(require_scopes("admin"))):
+def list_llm_connections(caller: dict = Depends(require_scopes("admin"))):
     db = _db()
     res = db.table("llm_connections").select("*").execute()
     rows = [r for r in (res.data or []) if (r.get("org_id") or "default") == _caller_org(caller)]
@@ -950,7 +950,7 @@ async def list_llm_connections(caller: dict = Depends(require_scopes("admin"))):
 
 
 @llm_connections_router.post("")
-async def create_llm_connection(payload: dict, caller: dict = Depends(require_scopes("admin"))):
+def create_llm_connection(payload: dict, caller: dict = Depends(require_scopes("admin"))):
     name = (payload.get("name") or "").strip()
     provider = (payload.get("provider") or "").strip().lower()
     base_url = (payload.get("base_url") or "").strip() or None
@@ -995,7 +995,7 @@ async def create_llm_connection(payload: dict, caller: dict = Depends(require_sc
 
 
 @llm_connections_router.patch("/{conn_id}")
-async def update_llm_connection(conn_id: str, payload: dict,
+def update_llm_connection(conn_id: str, payload: dict,
                                 caller: dict = Depends(require_scopes("admin"))):
     """Edit name/model/base_url, and optionally rotate the API key. A blank
     api_key leaves the stored key untouched (mirrors the Settings pattern)."""
@@ -1040,7 +1040,7 @@ async def update_llm_connection(conn_id: str, payload: dict,
 
 
 @llm_connections_router.delete("/{conn_id}")
-async def delete_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
+def delete_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
     db = _db()
     _get_llm_row(db, conn_id, caller)
     try:
@@ -1053,7 +1053,7 @@ async def delete_llm_connection(conn_id: str, caller: dict = Depends(require_sco
 
 
 @llm_connections_router.post("/{conn_id}/test")
-async def test_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
+def test_llm_connection(conn_id: str, caller: dict = Depends(require_scopes("admin"))):
     """Make one cheap, real call to the provider to prove the key/base_url
     actually authenticate. Never returns the key itself."""
     db = _db()

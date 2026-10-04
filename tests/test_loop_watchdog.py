@@ -40,6 +40,28 @@ def test_stall_dumps_stacks_once_then_exits(tmp_path):
     assert exits == [STALL_EXIT_CODE]
 
 
+def test_stall_logs_then_attempts_exit_only_once(tmp_path, caplog):
+    clock, exits = FakeClock(), []
+
+    def exit_after_log(code):
+        assert any("supervisor restarts" in record.getMessage() for record in caplog.records)
+        exits.append(code)
+
+    wd = LoopWatchdog(
+        dump_after=60,
+        exit_after=300,
+        dump_dir=tmp_path,
+        clock=clock,
+        exit_fn=exit_after_log,
+    )
+    clock.now += 301
+
+    wd.check()
+    wd.check()
+
+    assert exits == [STALL_EXIT_CODE]
+
+
 def test_recovered_loop_is_left_alone_and_a_new_stall_dumps_again(tmp_path):
     clock, exits = FakeClock(), []
     wd = make(tmp_path, clock, exits)

@@ -280,7 +280,7 @@ def trusted_header_agent(request: Optional[Request]) -> Optional[dict]:
 
 # ── FastAPI dependencies ─────────────────────────────────────────────────────
 
-async def require_agent(
+def require_agent(
     request: Request = None,
     authorization: str = Header(default=""),
 ) -> dict:
@@ -351,7 +351,7 @@ def require_scopes(*scopes: str):
     """
     needed: Iterable[str] = scopes
 
-    async def _dep(agent: dict = Depends(require_agent)) -> dict:
+    def _dep(agent: dict = Depends(require_agent)) -> dict:
         missing = [s for s in needed if not has_scope(agent, s)]
         if missing:
             raise HTTPException(

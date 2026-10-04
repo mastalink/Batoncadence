@@ -2,6 +2,7 @@
 
 import logging
 from typing import Any, Callable, Coroutine, Dict, Optional
+from starlette.concurrency import run_in_threadpool
 from mco.orchestrator.contracts import JobStatus
 from mco.orchestrator.audit import record_event
 from mco.orchestrator.leases import acquire_lease, fenced_update, LeaseError
@@ -46,7 +47,9 @@ async def handle_job_create(
         return
 
     try:
-        status = _initial_status(db_client, depends_on, requires_approval)
+        status = await run_in_threadpool(
+            _initial_status, db_client, depends_on, requires_approval
+        )
 
         data = {
             "title": title,
@@ -68,15 +71,24 @@ async def handle_job_create(
         if escalate_to_role:
             data["escalate_to_role"] = escalate_to_role
 
-        res = db_client.table("agent_jobs").insert(data).execute()
+        res = await run_in_threadpool(
+            lambda: db_client.table("agent_jobs").insert(data).execute()
+        )
         if not res.data:
             await send_error("Failed to insert job into database", correlation_id)
             return
 
         new_job = res.data[0]
 
-        record_event(db_client, new_job.get("id"), "created", source_agent_id, source_agent_role,
-                     {"status": status, "target_agent_role": target_agent_role})
+        await run_in_threadpool(
+            record_event,
+            db_client,
+            new_job.get("id"),
+            "created",
+            source_agent_id,
+            source_agent_role,
+            {"status": status, "target_agent_role": target_agent_role},
+        )
 
         # Send ACK to creator
         await send_ack({"status": "job_created", "job": new_job})
@@ -117,11 +129,15 @@ async def handle_job_lease(
 
     try:
         # Atomic database-level lease function (uses Supabase RPC lease_task)
-        success = acquire_lease(db_client, task_id, agent_instance_id)
+        success = await run_in_threadpool(
+            acquire_lease, db_client, task_id, agent_instance_id
+        )
 
         if success:
             # Fetch updated job details
-            job_res = db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+            job_res = await run_in_threadpool(
+                lambda: db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+            )
             if job_res.data:
                 job = job_res.data[0]
                 # ACK to the leasing agent
@@ -171,18 +187,33 @@ async def handle_job_update(
         claim = {k: payload.get(k) for k in ("lease_id", "lease_epoch", "lease_incarnation")}
         claim["agent_instance_id"] = actor.get("instance_id")
         try:
-            updated_job = fenced_update(db_client, task_id, claim, update_data)
+            updated_job = await run_in_threadpool(
+                fenced_update, db_client, task_id, claim, update_data
+            )
         except LeaseError as exc:
-            record_event(db_client, task_id, "write_fenced", actor.get("instance_id"),
-                         actor.get("role"), {"reason": exc.reason})
+            await run_in_threadpool(
+                record_event,
+                db_client,
+                task_id,
+                "write_fenced",
+                actor.get("instance_id"),
+                actor.get("role"),
+                {"reason": exc.reason},
+            )
             await send_error("FENCED: " + exc.reason, correlation_id)
             return
 
         replayed = updated_job.pop('_replayed', False)
-        record_event(db_client, task_id, f"status:{status}",
-                     actor.get("instance_id"), actor.get("role"),
-                     {"error_message": error_message} if error_message else None,
-                     outbox_id=f"attempt-status:{claim['lease_id']}:{status}" if claim.get('lease_id') else None)
+        await run_in_threadpool(
+            record_event,
+            db_client,
+            task_id,
+            f"status:{status}",
+            actor.get("instance_id"),
+            actor.get("role"),
+            {"error_message": error_message} if error_message else None,
+            outbox_id=f"attempt-status:{claim['lease_id']}:{status}" if claim.get('lease_id') else None,
+        )
         if replayed:
             # A result may have committed before its downstream work or its
             # response survived. Dependency release is idempotent and repairable.
@@ -209,10 +240,17 @@ async def handle_job_update(
                 from mco.config import get_config
                 if str(get_config().get("MCO_DRUMLINE_DISTILL") or "true").lower() != "false":
                     from mco.orchestrator.drumline import distill_job
-                    entry = distill_job(db_client, updated_job)
+                    entry = await run_in_threadpool(distill_job, db_client, updated_job)
                     if entry:
-                        record_event(db_client, task_id, "context_distilled", "system", "drumline",
-                                     {"context_id": entry.get("id"), "kind": entry.get("kind")})
+                        await run_in_threadpool(
+                            record_event,
+                            db_client,
+                            task_id,
+                            "context_distilled",
+                            "system",
+                            "drumline",
+                            {"context_id": entry.get("id"), "kind": entry.get("kind")},
+                        )
             except Exception as e:
                 logger.debug(f"Drumline distillation skipped for {task_id}: {e}")
 
@@ -236,7 +274,11 @@ async def _unlock_dependents(
     advanced only by a conductor after review-ready/accepted Score state, never
     by a worker completing an ``agent_jobs.depends_on`` parent.
     """
-    waiting_res = db_client.table("agent_jobs").select("*").eq("status", JobStatus.WAITING.value).execute()
+    waiting_res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").select("*").eq(
+            "status", JobStatus.WAITING.value
+        ).execute()
+    )
     for waiting_job in (waiting_res.data or []):
         input_payload = waiting_job.get("input_payload") or {}
         score_stamp = input_payload.get("score") if isinstance(input_payload, dict) else None
@@ -246,7 +288,11 @@ async def _unlock_dependents(
         if task_id not in depends_on:
             continue
         # Check all parent statuses
-        parents_res = db_client.table("agent_jobs").select("status").in_("id", depends_on).execute()
+        parents_res = await run_in_threadpool(
+            lambda: db_client.table("agent_jobs").select("status").in_(
+                "id", depends_on
+            ).execute()
+        )
         all_completed = len(parents_res.data or []) == len(set(depends_on)) and all(
             parent.get("status") == JobStatus.COMPLETED.value
             for parent in (parents_res.data or [])
@@ -262,20 +308,39 @@ async def _unlock_dependents(
             next_status = JobStatus.PENDING.value
             event_name = "job_pending"
 
-        unlock_res = db_client.table("agent_jobs").update({"status": next_status}).eq("id", waiting_job["id"]).eq("status", "waiting").execute()
+        unlock_res = await run_in_threadpool(
+            lambda: db_client.table("agent_jobs").update({"status": next_status}).eq(
+                "id", waiting_job["id"]
+            ).eq("status", "waiting").execute()
+        )
         if unlock_res.data:
             unlocked_job = unlock_res.data[0]
-            record_event(db_client, waiting_job["id"], f"status:{next_status}",
-                         "system", "orchestrator", {"unlocked_by": task_id})
+            await run_in_threadpool(
+                record_event,
+                db_client,
+                waiting_job["id"],
+                f"status:{next_status}",
+                "system",
+                "orchestrator",
+                {"unlocked_by": task_id},
+            )
             try:
                 if next_status == JobStatus.NEEDS_APPROVAL.value:
                     from mco.notifiers.ntfy import notify_job_needs_approval
-                    notify_job_needs_approval(waiting_job["id"], unlocked_job.get("title", ""),
-                                              unlocked_job.get("target_agent_role", "unknown"))
+                    await run_in_threadpool(
+                        notify_job_needs_approval,
+                        waiting_job["id"],
+                        unlocked_job.get("title", ""),
+                        unlocked_job.get("target_agent_role", "unknown"),
+                    )
                 else:
                     from mco.notifiers.ntfy import notify_job_created
-                    notify_job_created(waiting_job["id"], unlocked_job.get("title", ""),
-                                       unlocked_job.get("target_agent_role", "unknown"))
+                    await run_in_threadpool(
+                        notify_job_created,
+                        waiting_job["id"],
+                        unlocked_job.get("title", ""),
+                        unlocked_job.get("target_agent_role", "unknown"),
+                    )
             except Exception:
                 pass
             await broadcast_event(event_name, unlocked_job)
@@ -295,18 +360,27 @@ async def _handle_failure(
     escalate_to_role = job.get("escalate_to_role")
 
     if retry_count < max_retries:
-        requeue = db_client.table("agent_jobs").update({
-            "status": JobStatus.PENDING.value,
-            "retry_count": retry_count + 1,
-            "leased_by_instance_id": None,
-            "lease_id": None,
-            "lease_expires_at": None,
-            "started_at": None,
-        }).eq("id", job_id).eq("status", "failed").execute()
+        requeue = await run_in_threadpool(
+            lambda: db_client.table("agent_jobs").update({
+                "status": JobStatus.PENDING.value,
+                "retry_count": retry_count + 1,
+                "leased_by_instance_id": None,
+                "lease_id": None,
+                "lease_expires_at": None,
+                "started_at": None,
+            }).eq("id", job_id).eq("status", "failed").execute()
+        )
         if requeue.data:
             requeued_job = requeue.data[0]
-            record_event(db_client, job_id, "retried", "system", "orchestrator",
-                         {"attempt": retry_count + 1, "max_retries": max_retries})
+            await run_in_threadpool(
+                record_event,
+                db_client,
+                job_id,
+                "retried",
+                "system",
+                "orchestrator",
+                {"attempt": retry_count + 1, "max_retries": max_retries},
+            )
             await broadcast_event("job_pending", requeued_job)
         return
 
@@ -320,9 +394,20 @@ async def _handle_failure(
             from mco.connectors import get_connector
             bridge = get_connector(bridge_name)
             if bridge:
-                ref = bridge.escalate(job, error_message or job.get("error_message") or "unknown")
-                record_event(db_client, job_id, "escalated_external", "system", "orchestrator",
-                             {"connector": bridge.name, "platform_ref": ref})
+                ref = await run_in_threadpool(
+                    bridge.escalate,
+                    job,
+                    error_message or job.get("error_message") or "unknown",
+                )
+                await run_in_threadpool(
+                    record_event,
+                    db_client,
+                    job_id,
+                    "escalated_external",
+                    "system",
+                    "orchestrator",
+                    {"connector": bridge.name, "platform_ref": ref},
+                )
     except NotImplementedError:
         pass
     except Exception as e:
@@ -348,17 +433,38 @@ async def _handle_failure(
     # Escalations stay inside the failed job's org.
     if (job.get("org_id") or "default") != "default":
         escalation["org_id"] = job["org_id"]
-    esc_res = db_client.table("agent_jobs").insert(escalation).execute()
+    esc_res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").insert(escalation).execute()
+    )
     if esc_res.data:
         esc_job = esc_res.data[0]
-        record_event(db_client, job_id, "escalated", "system", "orchestrator",
-                     {"escalation_job_id": esc_job.get("id"), "escalate_to_role": escalate_to_role})
-        record_event(db_client, esc_job.get("id"), "created", "system", "orchestrator",
-                     {"escalated_from": job_id, "status": JobStatus.PENDING.value})
+        await run_in_threadpool(
+            record_event,
+            db_client,
+            job_id,
+            "escalated",
+            "system",
+            "orchestrator",
+            {"escalation_job_id": esc_job.get("id"), "escalate_to_role": escalate_to_role},
+        )
+        await run_in_threadpool(
+            record_event,
+            db_client,
+            esc_job.get("id"),
+            "created",
+            "system",
+            "orchestrator",
+            {"escalated_from": job_id, "status": JobStatus.PENDING.value},
+        )
         try:
             from mco.notifiers.ntfy import notify_job_escalated
-            notify_job_escalated(job_id, job.get("title", ""), escalate_to_role,
-                                 error_message or "unknown")
+            await run_in_threadpool(
+                notify_job_escalated,
+                job_id,
+                job.get("title", ""),
+                escalate_to_role,
+                error_message or "unknown",
+            )
         except Exception:
             pass
         await broadcast_event("job_pending", esc_job)

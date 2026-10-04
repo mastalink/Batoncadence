@@ -13,6 +13,7 @@ from uuid import UUID
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
+from starlette.concurrency import run_in_threadpool
 from mco.orchestrator.contracts import (
     ARCHIVABLE_STATUSES,
     CANCELLABLE_STATUSES,
@@ -506,7 +507,7 @@ def _can_read_job(agent: dict, job: dict) -> bool:
 @router.post("")
 async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
     """Create a job. Any authenticated agent may send to any target ('drop mail')."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
     if kill_switch_active():
@@ -536,7 +537,7 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
             requires_approval = True
 
         from mco.orchestrator.handlers import _initial_status
-        status = _initial_status(db_client, depends_on, requires_approval)
+        status = await run_in_threadpool(_initial_status, db_client, depends_on, requires_approval)
 
         data = {
             "title": title,
@@ -582,13 +583,15 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
             data["create_intent_hash"] = intent_hash
 
         try:
-            res = db_client.table("agent_jobs").insert(data).execute()
+            res = await run_in_threadpool(
+                lambda: db_client.table("agent_jobs").insert(data).execute()
+            )
         except Exception:
             # Insert first: the UUID primary key, not a racy preflight SELECT,
             # chooses the sole creator. A matching row also recovers the case
             # where the database committed but its response was lost.
             if explicit_id is not None:
-                existing = _read_job_by_id(db_client, explicit_id)
+                existing = await run_in_threadpool(_read_job_by_id, db_client, explicit_id)
                 stored_hash = str((existing or {}).get("create_intent_hash") or "")
                 if existing and hmac.compare_digest(stored_hash, intent_hash or ""):
                     return {"success": True, "job": existing}
@@ -597,9 +600,15 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
             raise
         if res.data:
             new_job = res.data[0]
-            record_event(db_client, new_job.get("id"), "created",
-                         agent["instance_id"], agent["role"],
-                         {"status": status, "target_agent_role": target_agent_role})
+            await run_in_threadpool(
+                record_event,
+                db_client,
+                new_job.get("id"),
+                "created",
+                agent["instance_id"],
+                agent["role"],
+                {"status": status, "target_agent_role": target_agent_role},
+            )
 
             # Optional Jev shadow triage (only runs when mode != "disabled")
             try:
@@ -610,10 +619,20 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
                         evaluate_shadow_triage,
                         persist_decision_receipt,
                     )
-                    j_provider = build_provider(get_config(), db_client, agent_org(agent))
-                    j_receipt = evaluate_shadow_triage(j_provider, new_job)
+                    j_provider = await run_in_threadpool(
+                        build_provider, get_config(), db_client, agent_org(agent)
+                    )
+                    j_receipt = await run_in_threadpool(
+                        evaluate_shadow_triage, j_provider, new_job
+                    )
                     if j_receipt is not None:
-                        persist_decision_receipt(db_client, new_job.get("id"), "jev_shadow_triage", j_receipt)
+                        await run_in_threadpool(
+                            persist_decision_receipt,
+                            db_client,
+                            new_job.get("id"),
+                            "jev_shadow_triage",
+                            j_receipt,
+                        )
             except Exception as j_exc:
                 logger.debug(f"Jev shadow triage bypassed or failed: {j_exc}")
 
@@ -632,13 +651,15 @@ async def create_job(payload: dict, agent: dict = Depends(require_scopes("jobs:w
             # ntfy webhook addon (if enabled via NTFY_* env vars)
             try:
                 if status == JobStatus.NEEDS_APPROVAL.value:
-                    notify_job_needs_approval(
+                    await run_in_threadpool(
+                        notify_job_needs_approval,
                         job_id=new_job.get("id", "unknown"),
                         title=new_job.get("title", "Untitled job"),
                         to_role=new_job.get("target_agent_role", "unknown"),
                     )
                 else:
-                    notify_job_created(
+                    await run_in_threadpool(
+                        notify_job_created,
                         job_id=new_job.get("id", "unknown"),
                         title=new_job.get("title", "Untitled job"),
                         to_role=new_job.get("target_agent_role", "unknown"),
@@ -741,7 +762,7 @@ async def lease_next_job(payload: dict = None, agent: dict = Depends(require_sco
     loser getting a bare 403. Here a lost race just falls through to the next
     candidate, because acquire_lease is the atomic arbiter either way.
     """
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
     if kill_switch_active():
@@ -756,30 +777,43 @@ async def lease_next_job(payload: dict = None, agent: dict = Depends(require_sco
             raise HTTPException(status_code=403, detail="Cannot lease on behalf of another agent")
         estimated_seconds = payload.get("estimated_seconds")
 
-    touch_agent_presence(db_client, agent)
-    reclaim_stale_leases(db_client)
+    await run_in_threadpool(touch_agent_presence, db_client, agent)
+    await run_in_threadpool(reclaim_stale_leases, db_client)
 
     try:
-        candidates = _pending_for_agent(db_client, role, instance_id, agent)
+        candidates = await run_in_threadpool(
+            _pending_for_agent, db_client, role, instance_id, agent
+        )
         ttl = effective_lease_ttl(estimated_seconds)
         for job in candidates:
             task_id = job.get("id")
             if not task_id:
                 continue
-            lease = acquire_lease(db_client, task_id, instance_id, ttl_seconds=ttl)
+            lease = await run_in_threadpool(
+                acquire_lease, db_client, task_id, instance_id, ttl_seconds=ttl
+            )
             if lease is None:
                 # Someone else took it between the read and the write. Not an
                 # error - try the next one down rather than failing the call.
                 continue
 
-            record_event(db_client, task_id, "leased", instance_id, role,
-                         {"estimated_seconds": estimated_seconds, "lease_ttl_seconds": ttl})
+            await run_in_threadpool(
+                record_event,
+                db_client,
+                task_id,
+                "leased",
+                instance_id,
+                role,
+                {"estimated_seconds": estimated_seconds, "lease_ttl_seconds": ttl},
+            )
             try:
-                notify_job_leased(task_id, instance_id, role)
+                await run_in_threadpool(notify_job_leased, task_id, instance_id, role)
             except Exception as ntfy_err:
                 logger.debug(f"ntfy lease hook skipped: {ntfy_err}")
 
-            fresh = db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+            fresh = await run_in_threadpool(
+                lambda: db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+            )
             leased_job = fresh.data[0] if fresh.data else job
             if _broadcast_callback:
                 try:
@@ -805,7 +839,7 @@ async def lease_next_job(payload: dict = None, agent: dict = Depends(require_sco
 @router.post("/lease")
 async def lease_job(payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
     """Atomically lease a job. Dropbox rule: you may only lease as yourself."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
     if kill_switch_active():
@@ -819,7 +853,9 @@ async def lease_job(payload: dict, agent: dict = Depends(require_scopes("jobs:wr
             raise HTTPException(status_code=403, detail="Cannot lease on behalf of another agent")
 
         # Tenant isolation: you can only lease jobs inside your own org.
-        pre = db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+        pre = await run_in_threadpool(
+            lambda: db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+        )
         if pre.data and job_org(pre.data[0]) != agent_org(agent):
             raise HTTPException(status_code=404, detail="Job not found")
 
@@ -843,20 +879,33 @@ async def lease_job(payload: dict, agent: dict = Depends(require_scopes("jobs:wr
                 )
 
         ttl = effective_lease_ttl(payload.get("estimated_seconds"))
-        lease = acquire_lease(db_client, task_id, agent_instance_id, ttl_seconds=ttl)
+        lease = await run_in_threadpool(
+            acquire_lease, db_client, task_id, agent_instance_id, ttl_seconds=ttl
+        )
         success = lease is not None
 
         if success:
-            record_event(db_client, task_id, "leased", agent_instance_id, agent["role"],
-                         {"estimated_seconds": payload.get("estimated_seconds"), "lease_ttl_seconds": ttl})
+            await run_in_threadpool(
+                record_event,
+                db_client,
+                task_id,
+                "leased",
+                agent_instance_id,
+                agent["role"],
+                {"estimated_seconds": payload.get("estimated_seconds"), "lease_ttl_seconds": ttl},
+            )
             try:
-                notify_job_leased(task_id, agent_instance_id, agent["role"])
+                await run_in_threadpool(
+                    notify_job_leased, task_id, agent_instance_id, agent["role"]
+                )
             except Exception as ntfy_err:
                 logger.debug(f"ntfy lease hook skipped: {ntfy_err}")
 
         if success and _broadcast_callback:
             try:
-                job_res = db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+                job_res = await run_in_threadpool(
+                    lambda: db_client.table("agent_jobs").select("*").eq("id", task_id).execute()
+                )
                 if job_res.data:
                     await _broadcast_callback("job_leased", job_res.data[0])
             except Exception as e:
@@ -874,12 +923,14 @@ async def lease_job(payload: dict, agent: dict = Depends(require_scopes("jobs:wr
 @router.put("/{job_id}")
 async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
     """Update job status/results. Dropbox rule: you may only update mail addressed to you."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
     try:
         # Authorization: the job must be addressed to the calling agent's role or instance.
-        job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+        job_res = await run_in_threadpool(
+            lambda: db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+        )
         if job_res.data:
             j = job_res.data[0]
             if job_org(j) != agent_org(agent):
@@ -942,9 +993,11 @@ async def update_job_status(job_id: str, payload: dict, agent: dict = Depends(re
             jid = (updated_job or {}).get("id", job_id)
 
             if final_status in ("completed", "success", "done"):
-                notify_job_completed(jid, final_status, role)
+                await run_in_threadpool(notify_job_completed, jid, final_status, role)
             elif final_status in ("failed", "error"):
-                notify_job_failed(jid, error_message or "Unknown error", role)
+                await run_in_threadpool(
+                    notify_job_failed, jid, error_message or "Unknown error", role
+                )
         except Exception as ntfy_err:
             logger.debug(f"ntfy completion/failure hook skipped: {ntfy_err}")
 
@@ -1032,14 +1085,16 @@ def get_recent_events(
 
 async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str = "") -> dict:
     """Shared approve/reject flow for jobs paused at the human-in-the-loop gate."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
 
     if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to decide approval gates")
 
-    job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    job_res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    )
     if not job_res.data:
         raise HTTPException(status_code=404, detail="Job not found")
     job = job_res.data[0]
@@ -1062,13 +1117,24 @@ async def _decide_approval(job_id: str, agent: dict, approve: bool, reason: str 
         }
         event, event_name = "rejected", "job_updated"
 
-    res = db_client.table("agent_jobs").update(update_data).eq("id", job_id).eq("status", "needs_approval").execute()
+    res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").update(update_data).eq(
+            "id", job_id
+        ).eq("status", "needs_approval").execute()
+    )
     if not res.data:
         raise HTTPException(status_code=500, detail="Approval decision failed to persist")
     decided_job = res.data[0]
 
-    record_event(db_client, job_id, event, agent["instance_id"], agent["role"],
-                 {"reason": reason} if reason else None)
+    await run_in_threadpool(
+        record_event,
+        db_client,
+        job_id,
+        event,
+        agent["instance_id"],
+        agent["role"],
+        {"reason": reason} if reason else None,
+    )
 
     if _broadcast_callback:
         try:
@@ -1092,13 +1158,15 @@ async def retry_job(job_id: str, agent: dict = Depends(require_scopes("jobs:appr
     Clears the lease and puts the job back to PENDING so a worker can pick it
     up again - the human override behind the console's 'Try again' button.
     """
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
     if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to re-queue jobs")
 
-    job_res = db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    job_res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").select("*").eq("id", job_id).execute()
+    )
     if not job_res.data:
         raise HTTPException(status_code=404, detail="Job not found")
     job = job_res.data[0]
@@ -1107,22 +1175,31 @@ async def retry_job(job_id: str, agent: dict = Depends(require_scopes("jobs:appr
     if job.get("status") not in (JobStatus.FAILED.value, JobStatus.REJECTED.value, "halted"):
         raise HTTPException(status_code=400, detail=f"Only failed/rejected jobs can be retried (status: {job.get('status')})")
 
-    res = db_client.table("agent_jobs").update({
-        "status": JobStatus.PENDING.value,
-        "leased_by_instance_id": None,
-        "error_message": None,
-        "lease_id": None,
-        "lease_expires_at": None,
-        "started_at": None,
-        "completed_at": None,
-        "output_payload": None,
-    }).eq("id", job_id).eq("status", job.get("status")).execute()
+    res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").update({
+            "status": JobStatus.PENDING.value,
+            "leased_by_instance_id": None,
+            "error_message": None,
+            "lease_id": None,
+            "lease_expires_at": None,
+            "started_at": None,
+            "completed_at": None,
+            "output_payload": None,
+        }).eq("id", job_id).eq("status", job.get("status")).execute()
+    )
     if not res.data:
         raise HTTPException(status_code=500, detail="Retry failed to persist")
     requeued_job = res.data[0]
 
-    record_event(db_client, job_id, "retried", agent["instance_id"], agent["role"],
-                 {"manual": True, "previous_status": job.get("status")})
+    await run_in_threadpool(
+        record_event,
+        db_client,
+        job_id,
+        "retried",
+        agent["instance_id"],
+        agent["role"],
+        {"manual": True, "previous_status": job.get("status")},
+    )
 
     # Optional Jev shadow retry triage (only runs when mode != "disabled")
     try:
@@ -1133,10 +1210,22 @@ async def retry_job(job_id: str, agent: dict = Depends(require_scopes("jobs:appr
                 evaluate_shadow_retryability,
                 persist_decision_receipt,
             )
-            j_provider = build_provider(get_config(), db_client, agent_org(agent))
-            j_receipt = evaluate_shadow_retryability(j_provider, {"error": job.get("error_message"), "status": job.get("status")})
+            j_provider = await run_in_threadpool(
+                build_provider, get_config(), db_client, agent_org(agent)
+            )
+            j_receipt = await run_in_threadpool(
+                evaluate_shadow_retryability,
+                j_provider,
+                {"error": job.get("error_message"), "status": job.get("status")},
+            )
             if j_receipt is not None:
-                persist_decision_receipt(db_client, job_id, "jev_shadow_retry_triage", j_receipt)
+                await run_in_threadpool(
+                    persist_decision_receipt,
+                    db_client,
+                    job_id,
+                    "jev_shadow_retry_triage",
+                    j_receipt,
+                )
     except Exception as j_exc:
         logger.debug(f"Jev shadow retry triage bypassed or failed: {j_exc}")
 
@@ -1168,7 +1257,7 @@ def _load_job_in_org(db_client, job_id: str, agent: dict) -> dict:
 
 
 @router.post("/{job_id}/project")
-async def assign_job_project(job_id: str, payload: dict = None,
+def assign_job_project(job_id: str, payload: dict = None,
                              agent: dict = Depends(require_scopes("jobs:write"))):
     """Set or clear a reviewed presentation-only project assignment."""
     db_client = get_db_client()
@@ -1214,22 +1303,24 @@ async def cancel_job(job_id: str, payload: dict = None, agent: dict = Depends(re
     jobs paused at the approval gate; cancel works on any non-terminal job,
     e.g. one you posted to the wrong role or that's no longer needed.
     Approver roles only, same as retry/reject."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
     if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to cancel jobs")
 
-    job = _load_job_in_org(db_client, job_id, agent)
+    job = await run_in_threadpool(_load_job_in_org, db_client, job_id, agent)
     if job.get("status") not in CANCELLABLE_STATUSES:
         raise HTTPException(status_code=400, detail=f"Job is already terminal (status: {job.get('status')})")
 
     reason = (payload or {}).get("reason", "")
-    res = db_client.table("agent_jobs").update({
-        "status": JobStatus.CANCELLED.value,
-        "leased_by_instance_id": None,
-        "error_message": f"Cancelled by {agent['instance_id']}" + (f": {reason}" if reason else ""),
-    }).eq("id", job_id).eq("status", job.get("status")).execute()
+    res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").update({
+            "status": JobStatus.CANCELLED.value,
+            "leased_by_instance_id": None,
+            "error_message": f"Cancelled by {agent['instance_id']}" + (f": {reason}" if reason else ""),
+        }).eq("id", job_id).eq("status", job.get("status")).execute()
+    )
     if not res.data:
         raise HTTPException(
             status_code=409,
@@ -1237,8 +1328,16 @@ async def cancel_job(job_id: str, payload: dict = None, agent: dict = Depends(re
         )
     cancelled_job = res.data[0]
 
-    record_event(db_client, job_id, "cancelled", agent["instance_id"], agent["role"],
-                 {"reason": reason, "previous_status": job.get("status")} if reason else {"previous_status": job.get("status")})
+    await run_in_threadpool(
+        record_event,
+        db_client,
+        job_id,
+        "cancelled",
+        agent["instance_id"],
+        agent["role"],
+        {"reason": reason, "previous_status": job.get("status")}
+        if reason else {"previous_status": job.get("status")},
+    )
 
     if _broadcast_callback:
         try:
@@ -1257,26 +1356,30 @@ async def archive_job(job_id: str, agent: dict = Depends(require_scopes("jobs:wr
     'All'/'Done'/'Problems'. Any authenticated agent may archive (it's tidying,
     not a decision), but only terminal jobs qualify so in-flight work can
     never be hidden by mistake."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
 
-    job = _load_job_in_org(db_client, job_id, agent)
+    job = await run_in_threadpool(_load_job_in_org, db_client, job_id, agent)
     if job.get("status") not in ARCHIVABLE_STATUSES:
         raise HTTPException(status_code=400, detail=f"Only terminal jobs can be archived (status: {job.get('status')})")
     if job.get("archived"):
         return {"success": True, "job": job}
 
-    res = db_client.table("agent_jobs").update({
-        "archived": True,
-        "archived_at": _utc_now_iso(),
-        "archived_by": agent["instance_id"],
-    }).eq("id", job_id).execute()
+    res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").update({
+            "archived": True,
+            "archived_at": _utc_now_iso(),
+            "archived_by": agent["instance_id"],
+        }).eq("id", job_id).execute()
+    )
     if not res.data:
         raise HTTPException(status_code=500, detail="Archive failed to persist")
     archived_job = res.data[0]
 
-    record_event(db_client, job_id, "archived", agent["instance_id"], agent["role"])
+    await run_in_threadpool(
+        record_event, db_client, job_id, "archived", agent["instance_id"], agent["role"]
+    )
 
     if _broadcast_callback:
         try:
@@ -1290,24 +1393,28 @@ async def archive_job(job_id: str, agent: dict = Depends(require_scopes("jobs:wr
 @router.post("/{job_id}/unarchive")
 async def unarchive_job(job_id: str, agent: dict = Depends(require_scopes("jobs:write"))):
     """Undo /archive - brings a job back into the default board view."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
 
-    job = _load_job_in_org(db_client, job_id, agent)
+    job = await run_in_threadpool(_load_job_in_org, db_client, job_id, agent)
     if not job.get("archived"):
         return {"success": True, "job": job}
 
-    res = db_client.table("agent_jobs").update({
-        "archived": False,
-        "archived_at": None,
-        "archived_by": None,
-    }).eq("id", job_id).execute()
+    res = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").update({
+            "archived": False,
+            "archived_at": None,
+            "archived_by": None,
+        }).eq("id", job_id).execute()
+    )
     if not res.data:
         raise HTTPException(status_code=500, detail="Unarchive failed to persist")
     unarchived_job = res.data[0]
 
-    record_event(db_client, job_id, "unarchived", agent["instance_id"], agent["role"])
+    await run_in_threadpool(
+        record_event, db_client, job_id, "unarchived", agent["instance_id"], agent["role"]
+    )
 
     if _broadcast_callback:
         try:
@@ -1365,13 +1472,13 @@ async def reassign_job(job_id: str, payload: dict, agent: dict = Depends(require
     one - so 'did a new one get done in its place?' has a direct answer:
     follow reassigned_to_job_id, or call GET /{job_id}/duplicates.
     Approver roles only, same as retry."""
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
     if (agent.get("role") or "").lower() not in utils_mod.get_approver_roles():
         raise HTTPException(status_code=403, detail="Your role is not permitted to reassign jobs")
 
-    job = _load_job_in_org(db_client, job_id, agent)
+    job = await run_in_threadpool(_load_job_in_org, db_client, job_id, agent)
     if job.get("status") not in REASSIGNABLE_STATUSES:
         raise HTTPException(status_code=400, detail=f"Only failed/rejected/cancelled jobs can be reassigned (status: {job.get('status')})")
 
@@ -1411,25 +1518,43 @@ async def reassign_job(job_id: str, payload: dict, agent: dict = Depends(require
     if requires_approval:
         new_data["requires_approval"] = True
 
-    ins = db_client.table("agent_jobs").insert(new_data).execute()
+    ins = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").insert(new_data).execute()
+    )
     if not ins.data:
         raise HTTPException(status_code=500, detail="Reassign failed to create the new job")
     new_job = ins.data[0]
 
-    record_event(db_client, new_job.get("id"), "created", agent["instance_id"], agent["role"],
-                 {"status": status, "target_agent_role": target_agent_role,
-                  "reassigned_from_job_id": job_id})
+    await run_in_threadpool(
+        record_event,
+        db_client,
+        new_job.get("id"),
+        "created",
+        agent["instance_id"],
+        agent["role"],
+        {"status": status, "target_agent_role": target_agent_role,
+         "reassigned_from_job_id": job_id},
+    )
 
-    upd = db_client.table("agent_jobs").update({
-        "reassigned_to_job_id": new_job.get("id"),
-        "archived": True,
-        "archived_at": _utc_now_iso(),
-        "archived_by": agent["instance_id"],
-    }).eq("id", job_id).execute()
+    upd = await run_in_threadpool(
+        lambda: db_client.table("agent_jobs").update({
+            "reassigned_to_job_id": new_job.get("id"),
+            "archived": True,
+            "archived_at": _utc_now_iso(),
+            "archived_by": agent["instance_id"],
+        }).eq("id", job_id).execute()
+    )
     old_job = upd.data[0] if upd.data else job
 
-    record_event(db_client, job_id, "reassigned", agent["instance_id"], agent["role"],
-                 {"reassigned_to_job_id": new_job.get("id")})
+    await run_in_threadpool(
+        record_event,
+        db_client,
+        job_id,
+        "reassigned",
+        agent["instance_id"],
+        agent["role"],
+        {"reassigned_to_job_id": new_job.get("id")},
+    )
 
     if _broadcast_callback:
         try:
@@ -1442,13 +1567,15 @@ async def reassign_job(job_id: str, payload: dict, agent: dict = Depends(require
             logger.warning(f"Error executing broadcast callback after reassign: {e}")
     try:
         if requires_approval:
-            notify_job_needs_approval(
+            await run_in_threadpool(
+                notify_job_needs_approval,
                 job_id=new_job.get("id", "unknown"),
                 title=new_job.get("title", "Untitled job"),
                 to_role=target_agent_role,
             )
         else:
-            notify_job_created(
+            await run_in_threadpool(
+                notify_job_created,
                 job_id=new_job.get("id", "unknown"),
                 title=new_job.get("title", "Untitled job"),
                 to_role=target_agent_role,
@@ -1477,7 +1604,7 @@ async def batch_job_action(payload: dict, agent: dict = Depends(require_agent)):
 
     Returns a structured summary of succeeded and failed item IDs with reasons.
     """
-    db_client = get_db_client()
+    db_client = await run_in_threadpool(get_db_client)
     if not db_client:
         raise HTTPException(status_code=400, detail="Database not configured")
 
@@ -1582,7 +1709,7 @@ def get_agents(agent: dict = Depends(require_scopes("agents:read"))):
 
 
 @router.post("/{job_id}/renew")
-async def renew_job(job_id: str, payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
+def renew_job(job_id: str, payload: dict, agent: dict = Depends(require_scopes("jobs:write"))):
     """Extend a held lease. `estimated_seconds`, if given, is how much MORE
     time the caller now thinks it needs - not the original estimate restated;
     effective_lease_ttl() adds its own buffer on top either way."""
@@ -1613,7 +1740,7 @@ def export_checkpoint(job_id: str, agent: dict = Depends(require_scopes("jobs:re
 
 
 @router.post("/{job_id}/verify")
-async def verify_job_evidence(job_id: str, payload: dict = None, agent: dict = Depends(require_scopes("jobs:read"))):
+def verify_job_evidence(job_id: str, payload: dict = None, agent: dict = Depends(require_scopes("jobs:read"))):
     from mco.orchestrator.audit import verify_chain
     db = get_db_client()
     _load_job_in_org(db, job_id, agent)

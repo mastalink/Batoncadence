@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from mco.config import get_config
 from mco.editions import require_feature
@@ -160,7 +161,7 @@ def _mapping_payload(provider_id: str, org_id: str, external_group: str, role: s
 
 
 @identity_admin_router.get("")
-async def list_identity_providers(caller: dict = Depends(require_scopes("admin"))):
+def list_identity_providers(caller: dict = Depends(require_scopes("admin"))):
     result = _db().table("identity_providers").select("*").execute()
     return [
         _provider_public(row)
@@ -170,7 +171,7 @@ async def list_identity_providers(caller: dict = Depends(require_scopes("admin")
 
 
 @identity_admin_router.post("")
-async def create_identity_provider(
+def create_identity_provider(
     payload: dict,
     caller: dict = Depends(require_scopes("admin")),
 ):
@@ -244,7 +245,7 @@ async def create_identity_provider(
 
 
 @identity_admin_router.put("/{provider_id}/role-mappings")
-async def replace_role_mappings(
+def replace_role_mappings(
     provider_id: str,
     payload: dict,
     caller: dict = Depends(require_scopes("admin")),
@@ -274,15 +275,17 @@ class DatabaseOIDCStateCache:
 
     async def set(self, key: str, value: str, expires_in: int) -> None:
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))).isoformat()
-        self._db.table("oidc_transactions").upsert({
-            "id": self._id(key),
-            "value": value,
-            "expires_at": expires_at,
-        }).execute()
+        await run_in_threadpool(
+            lambda: self._db.table("oidc_transactions").upsert({
+                "id": self._id(key),
+                "value": value,
+                "expires_at": expires_at,
+            }).execute()
+        )
 
     async def get(self, key: str):
-        result = (
-            self._db.table("oidc_transactions")
+        result = await run_in_threadpool(
+            lambda: self._db.table("oidc_transactions")
             .select("*")
             .eq("id", self._id(key))
             .execute()
@@ -297,7 +300,11 @@ class DatabaseOIDCStateCache:
         return row.get("value")
 
     async def delete(self, key: str) -> None:
-        self._db.table("oidc_transactions").delete().eq("id", self._id(key)).execute()
+        await run_in_threadpool(
+            lambda: self._db.table("oidc_transactions").delete().eq(
+                "id", self._id(key)
+            ).execute()
+        )
 
 
 def _oidc_client(provider: dict, db: Any):
@@ -332,12 +339,13 @@ def _require_oidc_session_middleware(request: Request) -> None:
 @auth_router.get("/oidc/{provider_id}/login", name="oidc_login")
 async def oidc_login(provider_id: str, request: Request):
     _require_oidc_session_middleware(request)
-    db = _db()
-    provider = _get_provider(db, provider_id)
+    db = await run_in_threadpool(_db)
+    provider = await run_in_threadpool(_get_provider, db, provider_id)
     if provider.get("protocol") != "oidc" or not provider.get("enabled", True):
         raise HTTPException(status_code=404, detail="OIDC provider is not enabled")
     redirect_uri = request.url_for("oidc_callback", provider_id=provider_id)
-    return await _oidc_client(provider, db).authorize_redirect(request, redirect_uri)
+    client = await run_in_threadpool(_oidc_client, provider, db)
+    return await client.authorize_redirect(request, redirect_uri)
 
 
 def _mapped_access(db: Any, provider: dict, claims: dict) -> tuple[str, list[str]]:
@@ -444,26 +452,31 @@ def _secure_cookie() -> bool:
 @auth_router.get("/oidc/{provider_id}/callback", name="oidc_callback")
 async def oidc_callback(provider_id: str, request: Request):
     _require_oidc_session_middleware(request)
-    db = _db()
-    provider = _get_provider(db, provider_id)
+    db = await run_in_threadpool(_db)
+    provider = await run_in_threadpool(_get_provider, db, provider_id)
     try:
-        token = await _oidc_client(provider, db).authorize_access_token(request)
+        client = await run_in_threadpool(_oidc_client, provider, db)
+        token = await client.authorize_access_token(request)
     except OAuthError as exc:
         raise HTTPException(status_code=401, detail=f"OIDC login failed: {exc.error}") from exc
     claims = dict(token.get("userinfo") or {})
-    role, scopes = _mapped_access(db, provider, claims)
-    membership = _provision_user(db, provider, claims, role, scopes)
+    role, scopes = await run_in_threadpool(_mapped_access, db, provider, claims)
+    membership = await run_in_threadpool(
+        _provision_user, db, provider, claims, role, scopes
+    )
 
     raw_session = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=8)
-    session = db.table("user_sessions").insert({
-        "org_id": membership["org_id"],
-        "user_id": membership["user_id"],
-        "session_token_hash": hashlib.sha256(raw_session.encode("utf-8")).hexdigest(),
-        "device_name": request.headers.get("user-agent", "browser")[:255],
-        "user_agent": request.headers.get("user-agent", "")[:1000],
-        "expires_at": expires_at.isoformat(),
-    }).execute().data[0]
+    await run_in_threadpool(
+        lambda: db.table("user_sessions").insert({
+            "org_id": membership["org_id"],
+            "user_id": membership["user_id"],
+            "session_token_hash": hashlib.sha256(raw_session.encode("utf-8")).hexdigest(),
+            "device_name": request.headers.get("user-agent", "browser")[:255],
+            "user_agent": request.headers.get("user-agent", "")[:1000],
+            "expires_at": expires_at.isoformat(),
+        }).execute()
+    )
     response = RedirectResponse("/console", status_code=303)
     response.set_cookie(
         "mco_session",
@@ -479,7 +492,7 @@ async def oidc_callback(provider_id: str, request: Request):
 
 
 @auth_router.get("/me")
-async def auth_me(principal: dict = Depends(require_agent)):
+def auth_me(principal: dict = Depends(require_agent)):
     return {
         "instance_id": principal.get("instance_id"),
         "user_id": principal.get("user_id"),
@@ -491,7 +504,7 @@ async def auth_me(principal: dict = Depends(require_agent)):
 
 
 @auth_router.post("/logout")
-async def auth_logout(request: Request):
+def auth_logout(request: Request):
     response = JSONResponse({"success": True})
     raw = request.cookies.get("mco_session")
     if raw:

@@ -505,7 +505,7 @@ def create_app() -> FastAPI:
                             return
                         from mco.orchestrator.auth import require_scopes
                         try:
-                            await require_scopes("jobs:write")(actor)
+                            require_scopes("jobs:write")(actor)
                             if msg_type == "job_update":
                                 result = await routes.update_job_status(payload.get("task_id", ""), payload, actor)
                             elif msg_type == "job_lease":

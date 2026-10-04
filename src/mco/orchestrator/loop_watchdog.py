@@ -63,6 +63,7 @@ class LoopWatchdog:
         self._exit = exit_fn
         self.last_beat = clock()
         self._dumped_this_stall = False
+        self._exited_this_stall = False
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.dumps: list[Path] = []
@@ -70,6 +71,7 @@ class LoopWatchdog:
     def beat(self) -> None:
         self.last_beat = self._clock()
         self._dumped_this_stall = False
+        self._exited_this_stall = False
 
     def check(self) -> None:
         """One inspection; the thread calls this every ``check_every`` s."""
@@ -78,7 +80,12 @@ class LoopWatchdog:
             self._dumped_this_stall = True
             path = self._dump(stalled_for)
             logger.error("Event loop stalled for %.0fs; thread stacks written to %s", stalled_for, path)
-        if self.exit_after > 0 and stalled_for >= self.exit_after:
+        if (
+            self.exit_after > 0
+            and stalled_for >= self.exit_after
+            and not self._exited_this_stall
+        ):
+            self._exited_this_stall = True
             logger.critical("Event loop stalled for %.0fs; exiting so the supervisor restarts the gateway",
                             stalled_for)
             self._exit(STALL_EXIT_CODE)

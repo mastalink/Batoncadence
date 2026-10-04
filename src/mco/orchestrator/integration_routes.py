@@ -27,7 +27,7 @@ def _db():
 
 
 @integrations_router.get("")
-async def get_integrations(agent: dict = Depends(require_scopes("integrations:read"))):
+def get_integrations(agent: dict = Depends(require_scopes("integrations:read"))):
     """List configured connectors with reachability/auth health."""
     out = []
     for conn in list_connectors():
@@ -36,7 +36,7 @@ async def get_integrations(agent: dict = Depends(require_scopes("integrations:re
 
 
 @integrations_router.post("/{name}/sync")
-async def sync_integration(name: str, agent: dict = Depends(require_scopes("integrations:read", "jobs:write"))):
+def sync_integration(name: str, agent: dict = Depends(require_scopes("integrations:read", "jobs:write"))):
     """Pull open platform objects into the job board (idempotent by external_id)."""
     conn = get_connector(name)
     if not conn:
@@ -51,7 +51,7 @@ async def sync_integration(name: str, agent: dict = Depends(require_scopes("inte
 
 
 @integrations_router.post("/{name}/action")
-async def run_integration_action(name: str, payload: dict, agent: dict = Depends(require_scopes("integrations:manage"))):
+def run_integration_action(name: str, payload: dict, agent: dict = Depends(require_scopes("integrations:manage"))):
     """Run a connector control action directly (approver roles only).
 
     Side effects hit a live enterprise platform, so this is gated like the
@@ -76,7 +76,7 @@ async def run_integration_action(name: str, payload: dict, agent: dict = Depends
 
 
 @integrations_router.post("/{name}/webhook")
-async def integration_webhook(
+def integration_webhook(
     name: str,
     payload: dict,
     x_mco_webhook_secret: str = Header(default=""),

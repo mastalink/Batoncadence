@@ -106,7 +106,7 @@ SCORE_SWEEP_DRAIN_SECONDS = 30
 async def delivery_once():
     """One delivery-watchdog sweep: store work in a thread, sends on the loop."""
     from mco.orchestrator import delivery, routes
-    db = routes.get_db_client()
+    db = await asyncio.to_thread(routes.get_db_client)
     if db is None:
         return None
     result = await asyncio.to_thread(delivery.sweep, db)
@@ -210,7 +210,7 @@ async def _sleep_until(interval, stop) -> bool:
         return False
 
 
-async def readyz(request: Request):
+def readyz(request: Request):
     from mco.orchestrator.routes import get_db_client, get_offline_after_seconds
     from mco.orchestrator import score_sweep
     from mco.config import get_config
