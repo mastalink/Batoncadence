@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Home - BitCadence mockup</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><nav class="nav" aria-label="Main"><a href="03-home.html" class=on>Home</a><a href="05-ask.html">Ask</a><a href="06-helpers.html">Helpers</a><a href="07-schedules.html">Schedules</a><a href="08-approvals.html">Approvals</a><a href="09-settings.html">Settings</a></nav><span class="sp"></span><a class="btn small" href="index.html">All mockups</a><button class="btn small" onclick="bcTheme()" aria-label="Switch light or dark">🌓</button></div>
+<main class="wrap">
+<div class="mock-note">Design mockup. Nothing here is connected to a real backend.</div>
+
+<h1>Good morning</h1><p class="sub">Here is what needs you, then what's running.</p>
+<h2 style="margin-top:6px">What needs you <span class="pill warn">2</span></h2>
+<div class="grid">
+ <div class="card" style="border-color:var(--warn)"><b>Publish release notes?</b><p class="hint">The Release helper finished testing. Everything passed.</p>
+  <div class="row"><button class="btn good" data-toast="Approved. Release helper is continuing.">Approve</button><a class="btn" href="08-approvals.html">Look first</a></div></div>
+ <div class="card" style="border-color:var(--bad)"><b>Tester is stuck</b><p class="hint">It stopped answering about 10 minutes ago.</p>
+  <div class="row"><button class="btn primary" data-toast="Restarted the Tester. Back to work.">Fix it</button><a class="btn" href="06-helpers.html">Details</a></div></div>
+</div>
+<h2>What's running</h2>
+<div class="grid">
+ <a href="04-score-live.html" class="card" style="text-decoration:none;color:inherit"><div class="row"><span class="dot run"></span><b>Weekly release</b><span class="pill run">Step 3 of 5</span></div>
+  <p class="hint">Reviewer is checking the changes (round 2).</p><div class="flowarrow"></div><span class="hint">Tap to watch live</span></a>
+ <a href="04-score-live.html" class="card" style="text-decoration:none;color:inherit"><div class="row"><span class="dot run"></span><b>Tidy the docs</b><span class="pill run">Step 1 of 3</span></div>
+  <p class="hint">Writer is rewriting the install page.</p><div class="flowarrow"></div><span class="hint">Tap to watch live</span></a>
+ <div class="card"><div class="row"><span class="dot ok"></span><b>Morning summary</b><span class="pill ok">Done</span></div><p class="hint">Finished at 7:02 AM.</p></div>
+</div>
+<div class="row" style="margin-top:22px"><a class="btn primary big" href="05-ask.html">✨ Ask for something</a></div>
+
+</main><nav class="tabbar" aria-label="Main"><a href="03-home.html" class=on><b>🏠</b>Home</a><a href="05-ask.html"><b>✨</b>Ask</a><a href="06-helpers.html"><b>🤖</b>Helpers</a><a href="07-schedules.html"><b>⏰</b>Schedules</a><a href="08-approvals.html"><b>✋</b>Approvals</a><a href="09-settings.html"><b>⚙️</b>Settings</a></nav></body></html>

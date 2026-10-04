@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings - BitCadence mockup</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><nav class="nav" aria-label="Main"><a href="03-home.html">Home</a><a href="05-ask.html">Ask</a><a href="06-helpers.html">Helpers</a><a href="07-schedules.html">Schedules</a><a href="08-approvals.html">Approvals</a><a href="09-settings.html" class=on>Settings</a></nav><span class="sp"></span><a class="btn small" href="index.html">All mockups</a><button class="btn small" onclick="bcTheme()" aria-label="Switch light or dark">🌓</button></div>
+<main class="wrap">
+<div class="mock-note">Design mockup. Nothing here is connected to a real backend.</div>
+
+<h1>Settings</h1><p class="sub">The everyday things are on the other pages. This is the rest.</p>
+<div class="grid">
+ <div class="card"><b>Start with my computer</b><p class="hint">Open quietly when I sign in.</p><label class="switch"><input type="checkbox" checked aria-label="On"> On</label></div>
+ <div class="card"><b>Tell me on my phone</b><p class="hint">A message when something needs you.</p><label class="switch"><input type="checkbox" checked aria-label="On"> On</label></div>
+ <div class="card"><b>Pause everything</b><p class="hint">Stops helpers from taking new work. Jobs in progress finish.</p><button class="btn" data-toast="Paused. Tap again to resume.">Pause</button></div>
+ <div class="card"><b>Spending limit</b><p class="hint">Stop and ask me if the AI costs pass this each month.</p><input value="$150" aria-label="Monthly limit"></div>
+ <div class="card"><b>Sign in to AI services</b><p class="hint">Use your Google, Apple or account login. No keys to paste.</p><button class="btn primary" data-toast="Opening sign-in…">Sign in</button></div>
+ <div class="card"><b>Memory</b><p class="hint">Things BitCadence remembers for you.</p><a class="btn" href="#" data-toast="Opens the memory list.">View</a></div>
+</div>
+<h2>Advanced</h2>
+<details class="card"><summary><b>For people who like details</b></summary>
+<table class="plain" style="margin-top:10px">
+<tr><td>Change where it listens</td><td><button class="btn small" data-toast="Shows the address and port. Rarely needed.">Show</button></td></tr>
+<tr><td>Reset sign-in for this computer</td><td><button class="btn small" data-toast="Signed out and back in. Nothing lost.">Reset</button></td></tr>
+<tr><td>Export a support report</td><td><button class="btn small" data-toast="Saved to your Downloads.">Save report</button></td></tr>
+<tr><td>Open the activity history</td><td><button class="btn small" data-toast="Opens the history.">Open</button></td></tr></table></details>
+
+</main><nav class="tabbar" aria-label="Main"><a href="03-home.html"><b>🏠</b>Home</a><a href="05-ask.html"><b>✨</b>Ask</a><a href="06-helpers.html"><b>🤖</b>Helpers</a><a href="07-schedules.html"><b>⏰</b>Schedules</a><a href="08-approvals.html"><b>✋</b>Approvals</a><a href="09-settings.html" class=on><b>⚙️</b>Settings</a></nav></body></html>
