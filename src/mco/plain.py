@@ -1,0 +1,512 @@
+"""Plain-verb layer for the CLI: start, status, ask, approve, fix and friends.
+
+Spec: design/redesign-v1/CLI.md. Every function here takes a gateway ``client``
+(GatewayClient-shaped) so the menu and the verbs run the *same* code and tests
+can drive them with a fake gateway. The old ``mco`` commands are untouched
+aliases; this module only adds the friendly front door.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, List, Optional
+
+from mco import friendly
+
+WAITING = "needs_approval"
+RUNNING = {"leased", "in_progress"}
+KILL_SWITCH = "MCO_KILL_SWITCH"
+
+# Apps `bitcadence connect` knows how to find: name -> candidate config files.
+def _connect_targets() -> dict[str, list[Path]]:
+    home = Path.home()
+    appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+    return {
+        "claude": [
+            appdata / "Claude" / "claude_desktop_config.json",
+            home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+            home / ".config" / "Claude" / "claude_desktop_config.json",
+        ],
+        "gemini": [home / ".gemini" / "settings.json"],
+        "cursor": [home / ".cursor" / "mcp.json"],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Output helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def say(text: str = "") -> None:
+    """Plain print: no markup, so NO_COLOR and pipes behave. Characters the
+    terminal can't show (a job title with a dash, say) never raise."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(text.encode(enc, errors="replace").decode(enc, errors="replace"))
+
+
+def interactive() -> bool:
+    return bool(sys.stdin and sys.stdin.isatty() and sys.stdout and sys.stdout.isatty())
+
+
+def confirm(question: str, *, default: bool = True, yes: bool = False) -> bool:
+    """One question, default in brackets, Enter accepts. Never blocks a script:
+    with no terminal the answer is "no" unless --yes was given."""
+    if yes:
+        return True
+    if not interactive():
+        return False
+    hint = "[Y/n]" if default else "[y/N]"
+    try:
+        answer = input(f"{question} {hint} ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        say()
+        return False
+    if not answer:
+        return default
+    return answer in {"y", "yes"}
+
+
+def ask_text(question: str) -> str:
+    if not interactive():
+        return ""
+    try:
+        return input(f"{question} ").strip()
+    except (EOFError, KeyboardInterrupt):
+        say()
+        return ""
+
+
+def fail(exc: BaseException, *, app_hint: str = "") -> "typer_exit":  # noqa: F821
+    """Print the plain error and exit 1. --debug / MCO_DEBUG=1 adds the trace."""
+    import typer
+
+    err = friendly.translate(exc, app_hint=app_hint)
+    say(err.render())
+    if friendly.debug_enabled():
+        import traceback
+
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+    raise typer.Exit(code=1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Snapshot of the board: one read, used by status, fix and the menu
+# ─────────────────────────────────────────────────────────────────────────────
+@dataclass
+class Problem:
+    summary: str
+    question: str = ""
+    repair: Optional[Callable[[], str]] = None
+    hint: str = ""
+
+
+@dataclass
+class Snapshot:
+    reachable: bool = True
+    waiting: List[dict] = field(default_factory=list)
+    running: List[dict] = field(default_factory=list)
+    failed: List[dict] = field(default_factory=list)
+    pending: List[dict] = field(default_factory=list)
+    helpers: List[dict] = field(default_factory=list)
+    paused: bool = False
+    error: Optional[friendly.FriendlyError] = None
+
+    def to_json(self) -> dict:
+        def brief(job: dict) -> dict:
+            return {
+                "id": job.get("id"),
+                "title": job.get("title"),
+                "status": job.get("status"),
+                "role": job.get("target_agent_role"),
+            }
+
+        return {
+            "running_gateway": self.reachable,
+            "paused": self.paused,
+            "needs_you": [brief(j) for j in self.waiting],
+            "running": [brief(j) for j in self.running],
+            "failed": [brief(j) for j in self.failed],
+            "helpers": [
+                {"name": h.get("instance_id"), "role": h.get("role"), "state": h.get("state") or h.get("effective_status")}
+                for h in self.helpers
+            ],
+            "problems": len(find_problems(self)),
+            "error": self.error.render() if self.error else None,
+        }
+
+
+def take_snapshot(client) -> Snapshot:
+    try:
+        jobs = client.jobs() or []
+    except Exception as exc:  # noqa: BLE001 - translated for the person
+        return Snapshot(reachable=False, error=friendly.translate(exc))
+    snap = Snapshot()
+    snap.waiting = [j for j in jobs if j.get("status") == WAITING]
+    snap.running = [j for j in jobs if j.get("status") in RUNNING]
+    snap.pending = [j for j in jobs if j.get("status") == "pending"]
+    snap.failed = [j for j in jobs if j.get("status") == "failed"]
+    try:
+        snap.helpers = client.agents() or []
+    except Exception:  # noqa: BLE001 - helpers are a nicety for the summary
+        snap.helpers = []
+    try:
+        groups = (client.settings() or {}).get("groups") or {}
+        for rows in groups.values():
+            for row in rows:
+                if row.get("key") == KILL_SWITCH:
+                    snap.paused = str(row.get("value")).lower() == "true"
+    except Exception:  # noqa: BLE001
+        pass
+    return snap
+
+
+def _online_roles(helpers: List[dict]) -> set:
+    return {
+        (h.get("role") or "").lower()
+        for h in helpers
+        if h.get("effective_status", h.get("status")) == "online" and h.get("state") != "disabled"
+    }
+
+
+def _title(job: dict) -> str:
+    return (job.get("title") or job.get("id") or "Untitled").strip()
+
+
+def _is_recent(job: dict, hours: int = 24) -> bool:
+    """Failures older than a day are history, not something to fix right now."""
+    raw = job.get("updated_at") or job.get("completed_at") or job.get("created_at")
+    if not raw:
+        return True
+    try:
+        when = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - when).total_seconds() <= hours * 3600
+
+
+def find_problems(snap: Snapshot, client=None) -> List[Problem]:
+    """What is wrong, in plain words, with a repair when one is safe to run."""
+    problems: List[Problem] = []
+    if not snap.reachable:
+        return problems
+    for helper in snap.helpers:
+        if helper.get("state") == "broken":
+            name = helper.get("instance_id") or helper.get("role") or "A helper"
+            reason = helper.get("state_reason")
+            problems.append(Problem(
+                f"{name} looks stuck" + (f": {reason}." if reason else "."),
+                hint="Restart it from its own window, then run: bitcadence status",
+            ))
+    for job in snap.failed:
+        if not _is_recent(job):
+            continue
+        job_id = job.get("id")
+        repair = None
+        if client is not None and job_id:
+            repair = (lambda jid=job_id: _retry(client, jid))
+        problems.append(Problem(
+            f"\"{_title(job)}\" didn't finish.",
+            "Try it again?",
+            repair,
+        ))
+    online = _online_roles(snap.helpers)
+    stuck_roles = sorted({
+        (j.get("target_agent_role") or "").lower() for j in snap.pending
+        if (j.get("target_agent_role") or "").lower() not in online
+    } - {""})
+    for role in stuck_roles:
+        problems.append(Problem(
+            f"Work is waiting for a {role} helper, but none is free.",
+            hint="Start one with: bitcadence helpers add",
+        ))
+    return problems
+
+
+def _retry(client, job_id: str) -> str:
+    res = client.retry(job_id)
+    return f"Done. It's back in line ({((res or {}).get('job') or {}).get('status', 'pending')})."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verbs (the menu calls these same functions)
+# ─────────────────────────────────────────────────────────────────────────────
+def greeting(now: Optional[datetime] = None) -> str:
+    hour = (now or datetime.now()).hour
+    return "Good morning." if hour < 12 else "Good afternoon." if hour < 18 else "Good evening."
+
+
+def do_status(client, *, as_json: bool = False) -> int:
+    snap = take_snapshot(client)
+    if as_json:
+        say(json.dumps(snap.to_json(), indent=2))
+        return 0
+    if not snap.reachable:
+        say((snap.error or friendly.translate(RuntimeError("unreachable"))).render())
+        return 0
+    say(greeting())
+    if snap.paused:
+        say("Everything is paused. Run `bitcadence resume` to carry on.")
+    problems = find_problems(snap)
+    say(f"  Needs you ({len(snap.waiting) + len(problems)})")
+    for i, job in enumerate(snap.waiting, 1):
+        say(f"    {i}. {_title(job)}?")
+    for problem in problems:
+        say(f"    - {problem.summary}")
+    if not snap.waiting and not problems:
+        say("    Nothing right now.")
+    say(f"  Running ({len(snap.running)})")
+    for job in snap.running:
+        say(f"    {_title(job)}")
+    if not snap.running:
+        say("    Nothing running.")
+    nxt = []
+    if snap.waiting:
+        nxt.append("`bitcadence approve`")
+    if problems:
+        nxt.append("`bitcadence fix`")
+    if nxt:
+        say("Run " + " or ".join(nxt) + ".")
+    return 0
+
+
+def _pick_role(snap: Snapshot) -> str:
+    online = sorted(_online_roles(snap.helpers) - {"operator", "human"})
+    if online:
+        return online[0]
+    roles = sorted({(h.get("role") or "").lower() for h in snap.helpers} - {"", "operator", "human"})
+    return roles[0] if roles else "claude"
+
+
+def do_ask(client, text: str, *, yes: bool = False) -> int:
+    text = (text or "").strip()
+    if not text:
+        text = ask_text("What would you like done?")
+    if not text:
+        say('Tell me what you want, for example: bitcadence ask "tidy the install docs"')
+        return 1
+    snap = take_snapshot(client)
+    if not snap.reachable:
+        say((snap.error or friendly.translate(RuntimeError("unreachable"))).render())
+        return 1
+    role = _pick_role(snap)
+    title = text if len(text) <= 70 else text[:67] + "..."
+    say("Here's the plan:")
+    say(f"  Do: {title}")
+    say(f"  Who: your {role} helper")
+    say("  It waits for your OK before it runs.")
+    if not confirm("Start this?", yes=yes):
+        say("Okay, I didn't start anything.")
+        return 0
+    res = client.send(
+        to_role=role, title=title, instructions=text,
+        requires_approval=True, max_retries=1,
+    )
+    job = (res or {}).get("job") or {}
+    if not (res or {}).get("success") or not job.get("id"):
+        say("That didn't go through.")
+        say("Run: bitcadence fix")
+        return 1
+    say("Started. It's waiting for your OK. Run `bitcadence approve` when you're ready.")
+    return 0
+
+
+def _match_job(waiting: List[dict], ref: str) -> Optional[dict]:
+    ref = ref.strip()
+    if ref.isdigit() and 1 <= int(ref) <= len(waiting):
+        return waiting[int(ref) - 1]
+    for job in waiting:
+        if job.get("id") == ref or str(job.get("id", "")).startswith(ref):
+            return job
+    lowered = ref.lower()
+    for job in waiting:
+        if lowered and lowered in _title(job).lower():
+            return job
+    return None
+
+
+def _approve_one(client, job: dict, snap: Snapshot) -> None:
+    client.approve(job["id"])
+    say(f"Approved: {_title(job)}.")
+    role = (job.get("target_agent_role") or "").lower()
+    if role and role not in _online_roles(snap.helpers):
+        err = friendly.no_helper_free()
+        say(err.render())
+
+
+def do_approve(client, job_ref: str = "", *, yes: bool = False) -> int:
+    snap = take_snapshot(client)
+    if not snap.reachable:
+        say((snap.error or friendly.translate(RuntimeError("unreachable"))).render())
+        return 1
+    if not snap.waiting:
+        say("Nothing is waiting for you.")
+        return 0
+    if job_ref:
+        job = _match_job(snap.waiting, job_ref)
+        if job is None:
+            # An id we cannot see in the waiting list may still be valid.
+            res = client.approve(job_ref)
+            say(f"Approved: {((res or {}).get('job') or {}).get('title') or job_ref}.")
+            return 0
+        _approve_one(client, job, snap)
+        return 0
+    if not interactive() and not yes:
+        say(f"{len(snap.waiting)} waiting:")
+        for i, job in enumerate(snap.waiting, 1):
+            say(f"  {i}. {_title(job)}")
+        say("Run `bitcadence approve` in a terminal to go through them, or pass a name or number.")
+        return 0
+    for job in snap.waiting:
+        say(f"{_title(job)}")
+        if confirm("Approve this?", yes=yes):
+            _approve_one(client, job, snap)
+            continue
+        reason = ask_text("What should change? (Enter to leave it waiting)")
+        if reason:
+            client.reject(job["id"], reason)
+            say("Sent back with your note.")
+        else:
+            say("Okay, left waiting.")
+    return 0
+
+
+def do_fix(client, *, yes: bool = False) -> int:
+    snap = take_snapshot(client)
+    if not snap.reachable:
+        say((snap.error or friendly.translate(RuntimeError("unreachable"))).render())
+        if confirm("Start BitCadence now?", yes=yes):
+            from mco import cli
+
+            cli.start()
+        return 0
+    problems = find_problems(snap, client)
+    if not problems:
+        say("Everything looks fine.")
+        return 0
+    say(f"Found {len(problems)} problem{'s' if len(problems) != 1 else ''}.")
+    for problem in problems:
+        say(f"  {problem.summary}")
+        if problem.repair and confirm(f"  {problem.question}", yes=yes):
+            try:
+                say(f"  {problem.repair()}")
+            except Exception as exc:  # noqa: BLE001
+                say("  " + friendly.translate(exc).render())
+        elif problem.hint:
+            say(f"  {problem.hint}")
+    return 0
+
+
+def do_helpers(client, *, as_json: bool = False) -> int:
+    try:
+        helpers = client.agents() or []
+    except Exception as exc:  # noqa: BLE001
+        say(friendly.translate(exc).render())
+        return 1
+    if as_json:
+        say(json.dumps(helpers, indent=2, default=str))
+        return 0
+    if not helpers:
+        say("No helpers yet. Add one with: bitcadence helpers add")
+        return 0
+    lights = {"working": "busy", "standby": "ready", "broken": "stuck", "offline": "offline", "disabled": "paused"}
+    say(f"Helpers ({len(helpers)})")
+    for h in helpers:
+        state = h.get("state") or h.get("effective_status") or "offline"
+        say(f"  {h.get('instance_id', '?'):<24} {h.get('role', ''):<12} {lights.get(state, state)}")
+    return 0
+
+
+def do_schedules(*, as_json: bool = False) -> int:
+    from mco import cli
+
+    if as_json:
+        try:
+            launchers, schedules = cli._load_schedules_or_exit()
+        except SystemExit:
+            return 1
+        say(json.dumps({n: s.describe_trigger() for n, s in sorted(schedules.items())}, indent=2))
+        return 0
+    cli.schedule_list()
+    return 0
+
+
+def do_connect(app: str = "", *, yes: bool = False) -> int:
+    targets = _connect_targets()
+    app = (app or "").strip().lower()
+    if not app:
+        names = sorted(targets)
+        say("Which AI do you want to connect?")
+        for i, name in enumerate(names, 1):
+            say(f"  {i}. {name.capitalize()}")
+        choice = ask_text("Type a number or a name:")
+        if not choice:
+            return 1
+        app = names[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(names) else choice.lower()
+    if app not in targets:
+        say(f"I don't know {app!r} yet. I can connect: {', '.join(sorted(targets))}.")
+        return 1
+    path = next((p for p in targets[app] if p.exists()), None)
+    if path is None:
+        err = friendly.app_not_found(app)
+        say(err.render())
+        return 1
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except ValueError:
+        say(f"{app.capitalize()}'s settings file isn't readable, so I left it alone.")
+        return 1
+    servers = data.setdefault("mcpServers", {})
+    if "bitcadence" in servers:
+        say(f"{app.capitalize()} is already connected.")
+        return 0
+    say(f"I'll add BitCadence to {app.capitalize()}'s settings (a backup is kept).")
+    if not confirm("Go ahead?", yes=yes):
+        say("Okay, nothing changed.")
+        return 0
+    path.with_suffix(path.suffix + ".bak").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    servers["bitcadence"] = {"command": sys.executable, "args": ["-m", "mco.cli", "mcp"]}
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    say(f"Connected. Restart {app.capitalize()} to see it.")
+    return 0
+
+
+def do_pause(client, *, yes: bool = False) -> int:
+    say("This stops work in progress and holds new work until you resume.")
+    if not confirm("Pause everything?", default=False, yes=yes):
+        say("Okay, nothing paused.")
+        return 0
+    client.settings_put({KILL_SWITCH: "true"})
+    say("Paused. Run `bitcadence resume` when you're ready.")
+    return 0
+
+
+def do_resume(client) -> int:
+    client.settings_put({KILL_SWITCH: None})
+    say("Resumed. Work will pick up again.")
+    return 0
+
+
+def do_settings(client) -> int:
+    from mco import cli
+
+    cli.settings_cmd(None, None, False)
+    return 0
+
+
+def do_remember(client, text: str, content: str = "") -> int:
+    text = (text or "").strip()
+    if not text:
+        say('Tell me what to remember, for example: bitcadence remember "Cassie likes the blue folder"')
+        return 1
+    title, body = (text, content) if content else (text if len(text) <= 60 else text[:57] + "...", text)
+    client.remember(title=title, content=body, kind="fact")
+    say("Remembered.")
+    return 0

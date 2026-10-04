@@ -70,13 +70,35 @@ def _version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def _main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False, "--version", "-V", callback=_version_callback, is_eager=True,
         help="Show the version and exit."),
+    no_menu: bool = typer.Option(
+        False, "--no-menu", help="Print help instead of opening the interactive menu."),
+    debug: bool = typer.Option(
+        False, "--debug", help="Show full error details instead of plain-English messages."),
 ):
-    """BitCadence: Multi-Client Agent Orchestrator."""
+    """BitCadence: Multi-Client Agent Orchestrator.
+
+    Run with no arguments in a terminal for a menu. Everyday words:
+    start, status, ask, approve, fix.
+    """
+    if debug:
+        os.environ["MCO_DEBUG"] = "1"
+    if ctx.invoked_subcommand is not None:
+        return
+    from mco import menu
+
+    if not no_menu and menu.should_show_menu([]):
+        raise typer.Exit(code=menu.run_menu(_gateway_client(), ctx.get_help))
+    typer.echo(ctx.get_help())
+    # Bare invocation without a terminal keeps its old exit code (usage = 2);
+    # asking for --no-menu is a deliberate request for help, so that is 0.
+    raise typer.Exit(code=0 if no_menu else 2)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Onboarding Setup Wizard
@@ -787,6 +809,14 @@ app.add_typer(fleet_app, name="fleet")
 
 schedule_app = typer.Typer(help="Schedules and loops: what work gets created, and when.")
 app.add_typer(schedule_app, name="schedule")
+
+
+@schedule_app.callback(invoke_without_command=True)
+def _schedule_home(ctx: typer.Context):
+    """Schedules and loops: what work gets created, and when."""
+    if ctx.invoked_subcommand is None:
+        from mco import plain
+        raise typer.Exit(code=plain.do_schedules())
 
 from mco.jobs.cli import jobs_app
 app.add_typer(jobs_app, name="jobs")
@@ -1856,13 +1886,29 @@ def listen(
 # ─────────────────────────────────────────────────────────────────────────────
 @app.command("status")
 def status(
+    details: bool = typer.Option(
+        False, "--details", help="Show the technical diagnostics (database path, profile, settings)."),
     show_all: bool = typer.Option(
         False,
         "--all",
         help="Show all resolved configuration keys, including unrelated process environment.",
     ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable summary."),
 ):
-    """Print BitCadence health check and diagnostics."""
+    """Plain summary: what needs you, what's running, any problems."""
+    if not (details or show_all):
+        from mco import plain
+        try:
+            raise typer.Exit(code=plain.do_status(_gateway_client(), as_json=as_json))
+        except typer.Exit:
+            raise
+        except Exception as exc:
+            plain.fail(exc)
+    _status_details(show_all)
+
+
+def _status_details(show_all: bool = False) -> None:
+    """The original diagnostics output (mco status --details)."""
     config = get_config()
     store = get_secret_store()
 
@@ -2341,9 +2387,8 @@ def send_job(
     except typer.Exit:
         raise
     except Exception as e:
-        console.print(f"[red][ERROR] {e}[/red]")
-        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(e)
 
 
 @app.command("workflow")
@@ -2511,14 +2556,19 @@ Settings, then retry selected jobs explicitly.
 
 
 @app.command("approve")
-def approve(job_id: str = typer.Argument(..., help="Job ID awaiting approval.")):
-    """Approve a job paused at the human-in-the-loop gate."""
+def approve(
+    job_id: str = typer.Argument(
+        "", help="Job to approve: its name, number in the waiting list, or ID. Leave out to go through what's waiting."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Approve without asking."),
+):
+    """Approve what's waiting for you, one at a time."""
+    from mco import plain
     try:
-        res = _gateway_client().approve(job_id)
-        console.print(f"[bold green][OK] Job {job_id} approved -> {res['job']['status']}[/bold green]")
+        raise typer.Exit(code=plain.do_approve(_gateway_client(), job_id, yes=yes))
+    except typer.Exit:
+        raise
     except Exception as e:
-        console.print(f"[red][ERROR] Approval failed: {e}[/red]")
-        raise typer.Exit(code=1)
+        plain.fail(e)
 
 
 @app.command("reject")
@@ -2531,8 +2581,8 @@ def reject(
         res = _gateway_client().reject(job_id, reason)
         console.print(f"[bold yellow][OK] Job {job_id} rejected -> {res['job']['status']}[/bold yellow]")
     except Exception as e:
-        console.print(f"[red][ERROR] Rejection failed: {e}[/red]")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(e)
 
 
 @app.command("retry")
@@ -2670,21 +2720,23 @@ def recall_context(
 
 @app.command("remember")
 def remember_context(
-    title: str = typer.Argument(..., help="Short title for this memory entry."),
-    content: str = typer.Argument(..., help="The content to remember."),
+    title: str = typer.Argument(..., help="What to remember (or a short title when you also give the content)."),
+    content: str = typer.Argument("", help="The content to remember (optional: the title alone is enough)."),
     kind: str = typer.Option("fact", "--kind", help="Entry kind: fact, decision, lesson, handoff, or artifact."),
     tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
 ):
     """Append an entry to the Drumline shared context."""
     try:
+        if not content:  # `remember "..."`: the sentence is both title and content
+            content = title
+            title = title if len(title) <= 60 else title[:57] + "..."
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         res = _gateway_client().remember(title=title, content=content, kind=kind, tags=tag_list or None)
         entry = (res or {}).get("entry") or {}
         console.print(f"[green][OK][/green] Remembered -> {entry.get('id', '?')}")
     except Exception as e:
-        console.print(f"[red][ERROR] Remember failed: {e}[/red]")
-        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(e)
 
 
 exchange_app = typer.Typer(help="Drumline Agent Exchange: non-authoritative agent discussion.")
@@ -3197,6 +3249,114 @@ def platform_action(
     except Exception as e:
         console.print(f"[red][ERROR] Action failed: {e}[/red]")
         raise typer.Exit(code=1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plain verbs (design/redesign-v1/CLI.md). Old `mco` commands stay as aliases.
+# ─────────────────────────────────────────────────────────────────────────────
+def _run_plain(fn, *args, app_hint: str = "", **kwargs):
+    from mco import plain
+    try:
+        code = fn(*args, **kwargs)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        plain.fail(e, app_hint=app_hint)
+    raise typer.Exit(code=code or 0)
+
+
+@app.command("ask")
+def ask(
+    request: str = typer.Argument("", help="What you'd like done, in plain words."),
+    file: Optional[str] = typer.Option(None, "--file", help="Load a workflow YAML file instead."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Start without asking."),
+):
+    """Say what you want done. You see the plan and OK it before anything runs."""
+    from mco import plain
+    if file:
+        return run_workflow(file)
+    _run_plain(lambda: plain.do_ask(_gateway_client(), request, yes=yes))
+
+
+@app.command("fix")
+def fix(yes: bool = typer.Option(False, "--yes", "-y", help="Repair everything without asking.")):
+    """Find what's wrong and offer to repair it."""
+    from mco import plain
+    _run_plain(lambda: plain.do_fix(_gateway_client(), yes=yes))
+
+
+helpers_app = typer.Typer(help="Your helpers: who is ready, busy or stuck.", invoke_without_command=True)
+app.add_typer(helpers_app, name="helpers")
+
+
+@helpers_app.callback()
+def helpers(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable list."),
+):
+    """Your helpers: who is ready, busy or stuck."""
+    if ctx.invoked_subcommand is None:
+        from mco import plain
+        _run_plain(lambda: plain.do_helpers(_gateway_client(), as_json=as_json))
+
+
+@helpers_app.command("add")
+def helpers_add(
+    name: str = typer.Option(..., "--name", prompt="What should this helper be called?"),
+    role: str = typer.Option(..., "--role", prompt="What is it good at (its role, e.g. codex)?"),
+):
+    """Add a helper (same as `mco register`, asking for what it needs)."""
+    try:
+        register_agent(name=name, role=role, org="default", scope=None)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        from mco import plain
+        plain.fail(e)
+
+
+@app.command("connect")
+def connect(
+    target: str = typer.Argument("", help="Which AI: claude, gemini or cursor. Leave out for a pick list."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before changing its settings."),
+):
+    """Connect an AI app to BitCadence."""
+    from mco import plain
+    _run_plain(lambda: plain.do_connect(target, yes=yes), app_hint=target)
+
+
+@app.command("pause")
+def pause(yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask first.")):
+    """Pause everything: stop work in progress and hold new work."""
+    from mco import plain
+    _run_plain(lambda: plain.do_pause(_gateway_client(), yes=yes))
+
+
+@app.command("resume")
+def resume():
+    """Resume after a pause."""
+    from mco import plain
+    _run_plain(lambda: plain.do_resume(_gateway_client()))
+
+
+@app.command(
+    "advanced",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "help_option_names": []},
+)
+def advanced(ctx: typer.Context):
+    """Run any original command, e.g. `bitcadence advanced audit <job-id>`."""
+    import click
+    if not ctx.args:
+        typer.echo("Give it an original command, e.g.: bitcadence advanced audit <job-id>")
+        raise typer.Exit(code=1)
+    command = typer.main.get_command(app)
+    try:
+        command.main(args=list(ctx.args), prog_name="mco", standalone_mode=False)
+    except click.exceptions.Exit as e:
+        raise typer.Exit(code=e.exit_code)
+    except click.ClickException as e:
+        e.show()
+        raise typer.Exit(code=e.exit_code)
 
 
 def main():
