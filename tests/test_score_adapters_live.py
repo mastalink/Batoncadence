@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -41,7 +41,7 @@ from mco.orchestrator.score_adapters_live import (
 )
 
 
-NOW = datetime(2026, 9, 16, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
 KEY = b"s05-test-key-material-is-long-enough-0001"
 DIGEST = "a" * 64
 
@@ -63,8 +63,8 @@ def grants(store):
         "actions": ["repository:write"],
         "resources": ["repo"],
         "env": "test",
-        "not_before": "2026-09-15T00:00:00Z",
-        "expires_at": "2026-10-01T00:00:00Z",
+        "not_before": (NOW - timedelta(days=1)).isoformat(),
+        "expires_at": (NOW + timedelta(days=1)).isoformat(),
         "budget_cents": 0,
         "human_principal": "joseph",
     })
@@ -591,8 +591,8 @@ def test_grant_requirement_lacking_write_action_refused(store, grants, git_workt
         "actions": ["repository:prepare"],  # missing repository:write!
         "resources": ["repo"],
         "env": "test",
-        "not_before": "2026-09-15T00:00:00Z",
-        "expires_at": "2026-10-01T00:00:00Z",
+        "not_before": (NOW - timedelta(days=1)).isoformat(),
+        "expires_at": (NOW + timedelta(days=1)).isoformat(),
         "budget_cents": 0,
         "human_principal": "joseph",
     })
@@ -633,8 +633,8 @@ def test_grant_requirement_expired_grant_refused(store, grants, git_worktree):
         "actions": ["repository:write"],
         "resources": ["repo"],
         "env": "test",
-        "not_before": "2026-09-01T00:00:00Z",
-        "expires_at": "2026-09-10T00:00:00Z",  # before NOW (2026-09-16)
+        "not_before": (NOW - timedelta(days=2)).isoformat(),
+        "expires_at": (NOW - timedelta(days=1)).isoformat(),
         "budget_cents": 0,
         "human_principal": "joseph",
     })
