@@ -334,6 +334,10 @@ class LocalStore:
             # preserves that ordering for the job fields used by the API.
             sql += " ORDER BY CAST(COALESCE(json_extract(data, ?), '') AS TEXT)"
             sql += " DESC" if desc else " ASC"
+            # Python's former stable sort preserved the table scan's rowid
+            # order for equal values. Make that tie order explicit so LIMIT
+            # and OFFSET page boundaries cannot drift across query plans.
+            sql += ", rowid"
             params.append(path)
         if q._limit is not None:
             sql += " LIMIT ?"

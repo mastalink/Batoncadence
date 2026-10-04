@@ -92,6 +92,41 @@ def test_agent_job_select_pushes_filters_order_and_window_into_sql(store, monkey
     assert null_targets == [{"id": "j1"}, {"id": "j2"}]
 
 
+def test_agent_job_select_uses_rowid_to_break_order_ties(store):
+    for job_id in ("z", "a", "m", "b"):
+        store.table("agent_jobs").insert({
+            "id": job_id,
+            "title": job_id,
+            "status": "pending",
+            "created_at": "2026-10-04T12:00:00+00:00",
+        }).execute()
+
+    statements = []
+    store._conn.set_trace_callback(statements.append)
+    try:
+        ascending = store.table("agent_jobs").select("id").order("created_at").execute().data
+        descending = (
+            store.table("agent_jobs")
+            .select("id")
+            .order("created_at", desc=True)
+            .range(1, 2)
+            .execute()
+            .data
+        )
+    finally:
+        store._conn.set_trace_callback(None)
+
+    assert ascending == [{"id": "z"}, {"id": "a"}, {"id": "m"}, {"id": "b"}]
+    assert descending == [{"id": "a"}, {"id": "m"}]
+    ordered_selects = [
+        statement.lower()
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT DATA FROM") and "order by" in statement.lower()
+    ]
+    assert len(ordered_selects) == 2
+    assert all(", rowid" in statement for statement in ordered_selects)
+
+
 def test_select_can_read_while_another_connection_holds_write_lock(tmp_path):
     path = tmp_path / "concurrent.db"
     writer = LocalStore(path)
