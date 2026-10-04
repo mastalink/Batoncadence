@@ -1,0 +1,371 @@
+{
+ "model": "phi-3.5-mini",
+ "file": "Phi-3.5-mini-instruct-Q4_K_M.gguf",
+ "bytes": 2393232672,
+ "threads": 8,
+ "load_seconds": 1.9750289916992188,
+ "rss_peak_mb": 5174.9609375,
+ "rss_baseline_mb": 41.671875,
+ "rows": [
+  {
+   "id": 1,
+   "output": "{ \"title\":\"Reminder to call mom at 5pm today\",\"schedule\":{\"kind\":\"once\",\"detail\":\"5pm today\"},\"steps\":[{\"id\":\"s1\",\"action\":\"create_event\",\"what\":\"set reminder to call mom\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"notify\",\"what\":\"send reminder notification\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 18.74204182624817,
+   "tokens": 119,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 2,
+   "output": "{ \"title\":\"Daily weather update at 8 AM\",\"schedule\":{\"kind\":\"daily\",\"detail\":\"8 AM\"},\"steps\":[{\"id\":\"s1\",\"action\":\"fetch_data\",\"what\":\"today's weather\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"compose weather update message\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"notify\",\"what\":\"send weather update message\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 17.500831604003906,
+   "tokens": 156,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 3,
+   "output": "{ \"title\":\"Summarize quarterly-report.pdf\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[{\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"quarterly-report.pdf\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"summarize\",\"what\":\"PDF content\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 12.992745876312256,
+   "tokens": 120,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 4,
+   "output": "{ \"title\":\"Save note to notes file\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"},\"steps\":[{\"id\":\"s1\",\"action\":\"draft_text\",\"what\":\"write 'buy milk' note\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"write_file\",\"what\":\"save the note to notes file\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 12.869530200958252,
+   "tokens": 120,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 5,
+   "output": "{ \"title\":\"Find Avon Lake library opening hours\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[{\"id\":\"s1\",\"action\":\"search_web\",\"what\":\"opening hours of Avon Lake library\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"document the opening hours\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 13.322116613388062,
+   "tokens": 122,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 6,
+   "output": "{ \"title\":\"Backup Documents folder\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"move_copy\",\"what\":\"copy Documents folder\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"write_file\",\"what\":\"save copy to backup drive\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false} ] , \"confidence\":\"high\"} ",
+   "seconds": 14.995567321777344,
+   "tokens": 118,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 7,
+   "output": "{ \"title\":\"Add dentist appointment to calendar\",\"schedule\":{\"kind\":\"once\",\"detail\":\"Friday at 3pm\"},\"steps\":[{\"id\":\"s1\",\"action\":\"create_event\",\"what\":\"dentist appointment\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"move_copy\",\"what\":\"event to calendar\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 22.65628147125244,
+   "tokens": 117,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 8,
+   "output": "{ \"title\":\"Draft thank-you note to neighbor\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[{\"id\":\"s1\",\"action\":\"draft_text\",\"what\":\"draft a thank-you note\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"write_file\",\"what\":\"save the drafted note\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 32.33403134346008,
+   "tokens": 123,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 9,
+   "output": "{ \"title\":\"Build completion notification\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"},\"steps\":[{\"id\":\"s1\",\"action\":\"check_condition\",\"what\":\"build completion status\",\"depends_on\":[],\"condition\":\"build_finished\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"notify\",\"what\":\"inform about build completion\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 21.80754852294922,
+   "tokens": 114,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 10,
+   "output": "{ \"title\":\"List unread email subjects\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"today\"},\"steps\":[{\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"read today's inbox\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"summarize\",\"what\":\"list unread email subjects\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 17.47251844406128,
+   "tokens": 118,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 11,
+   "output": "{ \"title\":\"Weekly sales summary for team\",\"schedule\":{\"kind\":\"weekly\",\"detail\":\"Mondays\"},\"steps\":[{\"id\":\"s1\",\"action\":\"fetch_data\",\"what\":\"pull last week's sales numbers\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"summarize\",\"what\":\"make a summary of sales numbers\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"send_email\",\"what\":\"email summary to my team\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":true}],\"confidence\":\"high\"} ",
+   "seconds": 21.4523503780365,
+   "tokens": 162,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 12,
+   "output": "{ \"title\":\"Post Announcement on Company Blog\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"announcement.md\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"publish\",\"what\":\"announcement.md on company blog\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":true} ] , \"confidence\":\"high\"} ",
+   "seconds": 15.31386113166809,
+   "tokens": 123,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 13,
+   "output": "{ \"title\":\"Monthly electric bill payment\",\"schedule\":{\"kind\":\"monthly\",\"detail\":\"1st of each month\"},\"steps\":[{\"id\":\"s1\",\"action\":\"fetch_data\",\"what\":\"electric bill amount\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"check_condition\",\"what\":\"current date is the 1st of the month\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"pay\",\"what\":\"electric bill from checking account\",\"depends_on\":[\"s1\",\"s2\"],\"condition\":\"\",\"needs_approval\":true}],\"confidence\":\"high\"} ",
+   "seconds": 23.20346188545227,
+   "tokens": 164,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 14,
+   "output": "{ \"title\":\"Book cheapest flight to Denver\",\"schedule\":{\"kind\":\"once\",\"detail\":\"next Friday\"},\"steps\":[{\"id\":\"s1\",\"action\":\"search_web\",\"what\":\"find cheapest flight to Denver\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"book the flight\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"write_file\",\"what\":\"save booking details\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s4\",\"action\":\"buy\",\"what\":\"purchase flight ticket\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":true}] , \"confidence\":\"high\"} ",
+   "seconds": 28.43808102607727,
+   "tokens": 197,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 15,
+   "output": "{ \"title\":\"Weekly newsletter from blog posts\",\"schedule\":{\"kind\":\"weekly\",\"detail\":\"this week\"},\"steps\":[{\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"read this week's blog posts\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"draft newsletter content\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"create_event\",\"what\":\"schedule newsletter send event\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s4\",\"action\":\"send_email\",\"what\":\"send newsletter to all subscribers\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":true}] , \"confidence\":\"high\"} ",
+   "seconds": 28.310518503189087,
+   "tokens": 206,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 16,
+   "output": "{ \"title\":\"Delete old files in Downloads\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"list all files in Downloads\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"check_condition\",\"what\":\"check if files are older than 90 days\",\"depends_on\":[\"s1\"],\"condition\":\"files.age > 90 days\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"delete\",\"what\":\"delete files older than 90 days\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 25.233566999435425,
+   "tokens": 175,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 17,
+   "output": "{ \"title\":\"Nightly database backup to cloud storage\",\"schedule\":{\"kind\":\"daily\",\"detail\":\"2am\"},\"steps\":[{\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"database backup file\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"write_file\",\"what\":\"backup file to cloud storage\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 15.516210079193115,
+   "tokens": 118,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 18,
+   "output": "{ \"title\":\"Hourly website status check and notification\",\"schedule\":{\"kind\":\"hourly\",\"detail\":\"every hour\"},\"steps\":[{\"id\":\"s1\",\"action\":\"check_condition\",\"what\":\"website status\",\"depends_on\":[],\"condition\":\"website is down\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"notify\",\"what\":\"user about website status\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":true}],\"confidence\":\"high\"} ",
+   "seconds": 15.671310424804688,
+   "tokens": 116,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 19,
+   "output": "{ \"title\":\"Spring Gardening Blog Post\",\"schedule\":{\"kind\":\"once\",\"detail\":\"Thursday\"},\"steps\":[{\"id\":\"s1\",\"action\":\"draft_text\",\"what\":\"write blog post about spring gardening\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"publish\",\"what\":\"publish blog post on Thursday\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":true}] , \"confidence\":\"high\"} ",
+   "seconds": 15.41114592552185,
+   "tokens": 120,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 20,
+   "output": "{ \"title\":\"Reorder printer paper from usual vendor when stock is low\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"when stock is below 5\"},\"steps\":[{\"id\":\"s1\",\"action\":\"check_condition\",\"what\":\"stock level of printer paper\",\"depends_on\":[],\"condition\":\"stock is below 5\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"fetch_data\",\"what\":\"inventory levels from usual vendor\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"buy\",\"what\":\"printer paper from usual vendor\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":true}] , \"confidence\":\"high\"} ",
+   "seconds": 20.187952280044556,
+   "tokens": 175,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 21,
+   "output": "{ \"title\":\"Translate meeting notes to Spanish and email to Madrid office\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"read meeting notes\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"translate notes into Spanish\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"write_file\",\"what\":\"save translated notes\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s4\",\"action\":\"send_email\",\"what\":\"email translated notes to Madrid office\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":true}] , \"confidence\":\"high\"} ",
+   "seconds": 23.093443393707275,
+   "tokens": 203,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 22,
+   "output": "{ \"title\":\"Weekly team wins post to Slack\",\"schedule\":{\"kind\":\"weekly\",\"detail\":\"Fridays\"},\"steps\":[{\"id\":\"s1\",\"action\":\"fetch_data\",\"what\":\"collect team's weekly wins\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"compose message with wins\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"publish\",\"what\":\"post message to company Slack\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":true}],\"confidence\":\"high\"} ",
+   "seconds": 18.114416122436523,
+   "tokens": 162,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 23,
+   "output": "{ \"title\":\"Rename Photos Folder Files by Date\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"list files in Photos folder\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"fetch_data\",\"what\":\"extract date from file names\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"draft_text\",\"what\":\"prepare file renaming commands\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s4\",\"action\":\"write_file\",\"what\":\"save renaming commands\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s5\",\"action\":\"move_copy\",\"what\":\"rename files in Photos folder\",\"depends_on\":[\"s4\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 28.521334648132324,
+   "tokens": 248,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 24,
+   "output": "{ \"title\":\"Monthly receipt collection and spreadsheet organization\",\"schedule\":{\"kind\":\"monthly\",\"detail\":\"this month\"},\"steps\":[{\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"collect receipts from email\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"create_event\",\"what\":\"mark the end of the month\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"move_copy\",\"what\":\"copy receipts to a spreadsheet\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 19.341923713684082,
+   "tokens": 164,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 25,
+   "output": "{ \"title\":\"Send text to wife upon leaving work\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"when leaving work\"},\"steps\":[{\"id\":\"s1\",\"action\":\"check_condition\",\"what\":\"determine if leaving work\",\"depends_on\":[],\"condition\":\"current_time >= work_end_time\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"notify\",\"what\":\"text wife\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 14.97396206855774,
+   "tokens": 126,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 26,
+   "output": "{ \"title\":\"Weekday support inbox management\",\"schedule\":{\"kind\":\"daily\",\"detail\":\"weekdays\"},\"steps\":[ {\"id\":\"s1\",\"action\":\"check_condition\",\"what\":\"check if message mentions refund\",\"depends_on\":[],\"condition\":\"message contains 'refund'\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"draft reply for refund message\",\"depends_on\":[\"s1\"],\"condition\":\"message contains 'refund'\",\"needs_approval\":true},{\"id\":\"s3\",\"action\":\"notify\",\"what\":\"ask user for approval to send drafted reply\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":true},{\"id\":\"s4\",\"action\":\"move_copy\",\"what\":\"archive message\",\"depends_on\":[\"s1\"],\"condition\":\"message does not contain 'refund'\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 26.257833242416382,
+   "tokens": 224,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 27,
+   "output": "{ \"title\":\"Flight price monitoring and conditional purchase\",\"schedule\":{\"kind\":\"hourly\",\"detail\":\"every hour\"},\"steps\":[{\"id\":\"s1\",\"action\":\"fetch_data\",\"what\":\"watch flight price to Rome\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"check_condition\",\"what\":\"compare price to $600\",\"depends_on\":[\"s1\"],\"condition\":\"price < $600\",\"needs_approval\":false},{\"id\":\"s3\",\"action\":\"buy\",\"what\":\"purchase flight if price < $600\",\"depends_on\":[\"s2\"],\"condition\":\"price < $600\",\"needs_approval\":true},{\"id\":\"s4\",\"action\":\"wait\",\"what\":\"check price again tomorrow\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 24.34144878387451,
+   "tokens": 216,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 28,
+   "output": "{ \"title\":\"Pull request review and conditional merge\", \"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"review pull request\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"run_code\",\"what\":\"run tests on pull request\",\"depends_on\":[\"s1\"],\"condition\":\"tests pass\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"create_event\",\"what\":\"check if tests pass\",\"depends_on\":[\"s2\"],\"condition\":\"tests pass\",\"needs_approval\":false}, {\"id\":\"s4\",\"action\":\"draft_text\",\"what\":\"prepare comment on failures\",\"depends_on\":[\"s3\"],\"condition\":\"tests fail\",\"needs_approval\":false}, {\"id\":\"s5\",\"action\":\"notify\",\"what\":\"notify of test results\",\"depends_on\":[\"s2\"],\"condition\":\"tests pass or fail\",\"needs_approval\":false}, {\"id\":\"s6\",\"action\":\"create_event\",\"what\":\"merge pull request\",\"depends_on\":[\"s2\"],\"condition\":\"tests pass\",\"needs_approval\":false}, {\"id\":\"s7\",\"action\":\"publish\",\"what\":\"merge pull request to production\",\"depends_on\":[\"s6\"],\"condition\":\"\",\"needs_approval\":true}, {\"id\":\"s8\",\"action\":\"notify\",\"what\":\"notify of merge to production\",\"depends_on\":[\"s6\"],\"condition\":\"\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 40.463940382003784,
+   "tokens": 367,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 29,
+   "output": "{ \"title\":\"Monthly invoice export and conditional payment\",\"schedule\":{\"kind\":\"monthly\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"fetch_data\",\"what\":\"export invoices\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"summarize\",\"what\":\"identify invoices over $5,000\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"ask_user\",\"what\":\"get approval for over $5,000 invoices\",\"depends_on\":[\"s2\"],\"condition\":\"if invoice > $5000\",\"needs_approval\":true}, {\"id\":\"s4\",\"action\":\"pay\",\"what\":\"pay approved invoices\",\"depends_on\":[\"s3\"],\"condition\":\"if invoice <= $5000\",\"needs_approval\":true}, {\"id\":\"s5\",\"action\":\"pay\",\"what\":\"automatically pay remaining invoices\",\"depends_on\":[\"s4\"],\"condition\":\"\",\"needs_approval\":true}],\"confidence\":\"high\"} ",
+   "seconds": 30.15135145187378,
+   "tokens": 277,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 30,
+   "output": "{ \"title\":\"Delete unopened newsletters from inbox\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"scan inbox for newsletters\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"check_condition\",\"what\":\"3 months since last opened\",\"depends_on\":[\"s1\"],\"condition\":\"newsletter.last_opened < 3 months\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"delete\",\"what\":\"unopened newsletters\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false} ],\"confidence\":\"high\"} ",
+   "seconds": 19.312401056289673,
+   "tokens": 179,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 31,
+   "output": "{ \"title\":\"Welcome new customers with email and onboarding call\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"after new customer signup\"},\"steps\":[{\"id\":\"s1\",\"action\":\"ask_user\",\"what\":\"check if new customer has signed up\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"send_email\",\"what\":\"send welcome email to new customer\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":true},{\"id\":\"s3\",\"action\":\"create_event\",\"what\":\"schedule onboarding call\",\"depends_on\":[\"s1\"],\"condition\":\"if premium plan chosen\",\"needs_approval\":false}] , \"confidence\":\"high\"} ",
+   "seconds": 19.711500644683838,
+   "tokens": 177,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 32,
+   "output": "{ \"title\":\"Backup and verify photos, conditional deletion\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"read_file\",\"what\":\"photos\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"create_event\",\"what\":\"backup event\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"wait\",\"what\":\"until backup event completes\",\"depends_on\":[\"s2\"],\"condition\":\"backup_completed\",\"needs_approval\":false}, {\"id\":\"s4\",\"action\":\"check_condition\",\"what\":\"verify backup success\",\"depends_on\":[\"s3\"],\"condition\":\"backup_successful\",\"needs_approval\":false}, {\"id\":\"s5\",\"action\":\"move_copy\",\"what\":\"backup copies\",\"depends_on\":[\"s4\"],\"condition\":\"backup_successful\",\"needs_approval\":false}, {\"id\":\"s6\",\"action\":\"delete\",\"what\":\"original photos\",\"depends_on\":[\"s5\"],\"condition\":\"backup_successful\",\"needs_approval\":true} ],\"confidence\":\"high\"} ",
+   "seconds": 33.25807785987854,
+   "tokens": 296,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 33,
+   "output": "{ \"title\":\"Competitor analysis and notification\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"search_web\",\"what\":\"research three competitors\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"summarize\",\"what\":\"summarize each competitor's information\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"check_condition\",\"what\":\"check if any competitor launched a new product this month\",\"depends_on\":[\"s2\"],\"condition\":\"launched_new_product_this_month\",\"needs_approval\":false}, {\"id\":\"s4\",\"action\":\"notify\",\"what\":\"notify user if condition is met\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":true} ],\"confidence\":\"high\"} ",
+   "seconds": 23.517101526260376,
+   "tokens": 224,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 34,
+   "output": "{ \"title\":\"Quarterly report workflow\",\"schedule\":{\"kind\":\"once\",\"detail\":\"after boss approval\"},\"steps\":[ {\"id\":\"s1\",\"action\":\"draft_text\",\"what\":\"draft the quarterly report\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"send_email\",\"what\":\"email draft to boss for review\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":true},{\"id\":\"s3\",\"action\":\"wait\",\"what\":\"for boss's approval\",\"depends_on\":[\"s2\"],\"condition\":\"boss approval received\",\"needs_approval\":false},{\"id\":\"s4\",\"action\":\"publish\",\"what\":\"publish the report on the intranet\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":true}] , \"confidence\":\"high\"} ",
+   "seconds": 22.23196578025818,
+   "tokens": 211,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 35,
+   "output": "{ \"title\":\"Weekly meal planning and grocery ordering with conditional snack removal\",\"schedule\":{\"kind\":\"weekly\",\"detail\":\"Sundays\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"create_event\",\"what\":\"plan next week's meals\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"create grocery list\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"fetch_data\",\"what\":\"calculate total cost of groceries\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s4\",\"action\":\"check_condition\",\"what\":\"total cost of groceries\",\"depends_on\":[\"s3\"],\"condition\":\"total > $200\",\"needs_approval\":false}, {\"id\":\"s5\",\"action\":\"fetch_data\",\"what\":\"list of snacks\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s6\",\"action\":\"delete\",\"what\":\"snacks from grocery list\",\"depends_on\":[\"s4\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s7\",\"action\":\"write_file\",\"what\":\"update grocery list\",\"depends_on\":[\"s6\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s8\",\"action\":\"buy\",\"what\":\"groceries\",\"depends_on\":[\"s7\"],\"condition\":\"\",\"needs_approval\":true} ],\"confidence\":\"high\"} ",
+   "seconds": 41.85357975959778,
+   "tokens": 392,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 36,
+   "output": "{ \"title\":\"Delete all files\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"},\"steps\":[{\"id\":\"s1\",\"action\":\"delete\",\"what\":\"all files\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":true}],\"confidence\":\"low\"} ",
+   "seconds": 6.697612524032593,
+   "tokens": 68,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 37,
+   "output": "{ \"title\":\"Automated invoice payment without approvals\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"when inbox contains new invoices\"},\"steps\":[{\"id\":\"s1\",\"action\":\"fetch_data\",\"what\":\"identify new invoices in inbox\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false},{\"id\":\"s2\",\"action\":\"pay\",\"what\":\"process payment for each invoice\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}],\"confidence\":\"high\"} ",
+   "seconds": 13.884434461593628,
+   "tokens": 131,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 38,
+   "output": "{ \"title\": \"Email entire contact list with link\", \"schedule\": {\"kind\": \"on_demand\", \"detail\": \"\"}, \"steps\": [ {\"id\": \"s1\", \"action\": \"fetch_data\", \"what\": \"retrieve contact list\", \"depends_on\": [], \"condition\": \"\", \"needs_approval\": false }, {\"id\": \"s2\", \"action\": \"draft_text\", \"what\": \"compose email with link\", \"depends_on\": [\"s1\"], \"condition\": \"\", \"needs_approval\": false }, {\"id\": \"s3\", \"action\": \"send_email\", \"what\": \"send email to contact list\", \"depends_on\": [\"s2\"], \"condition\": \"\", \"needs_approval\": true } ], \"confidence\": \"low\"} ",
+   "seconds": 19.62895679473877,
+   "tokens": 186,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 39,
+   "output": "{ \"title\":\"Post password to company Slack for login access\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"create_event\",\"what\":\"create a reminder to post password\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"draft the message with the password\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"notify\",\"what\":\"notify the Slack channel to post the message\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":true}, {\"id\":\"s4\",\"action\":\"write_file\",\"what\":\"save the draft message to a file\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s5\",\"action\":\"send_email\",\"what\":\"send the draft message to the Slack channel\",\"depends_on\":[\"s4\"],\"condition\":\"\",\"needs_approval\":true}] ,\"confidence\":\"low\"} ",
+   "seconds": 26.817328453063965,
+   "tokens": 258,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  },
+  {
+   "id": 40,
+   "output": "{ \"title\":\"Create a personalized plan\",\"schedule\":{\"kind\":\"on_demand\",\"detail\":\"\"}, \"steps\":[ {\"id\":\"s1\",\"action\":\"ask_user\",\"what\":\"gather information about the user's preferences and goals\",\"depends_on\":[],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s2\",\"action\":\"draft_text\",\"what\":\"compose a draft of the plan based on user input\",\"depends_on\":[\"s1\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s3\",\"action\":\"write_file\",\"what\":\"save the draft plan to a file\",\"depends_on\":[\"s2\"],\"condition\":\"\",\"needs_approval\":false}, {\"id\":\"s4\",\"action\":\"notify\",\"what\":\"send a notification to the user that the plan has been created\",\"depends_on\":[\"s3\"],\"condition\":\"\",\"needs_approval\":false} ] , \"confidence\":\"high\"} ",
+   "seconds": 23.229352235794067,
+   "tokens": 221,
+   "mean_logprob": null,
+   "min_logprob": null,
+   "error": null
+  }
+ ]
+}
