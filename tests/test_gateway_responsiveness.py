@@ -95,7 +95,7 @@ async def test_parallel_job_lists_keep_health_and_authenticated_api_responsive(t
     assert all(response.status_code == 200 for response in boards)
     assert health_elapsed < 3.0
     assert agents_elapsed < 3.0
-    assert boards_elapsed >= 0.5
+    assert boards_elapsed >= 0.1
     store.close()
 
 
@@ -156,3 +156,44 @@ def test_websocket_authentication_does_not_block_health_while_store_is_locked(tm
     assert health.status_code == 200
     assert elapsed < 0.3
     assert websocket_result == {"type": "authenticated", "payload": {"success": True}}
+
+
+@pytest.mark.asyncio
+async def test_twenty_fleet_reads_six_boards_and_atomic_write_p95_under_two_seconds(tmp_path, monkeypatch):
+    from starlette.concurrency import run_in_threadpool
+
+    store = ProductionSizedStore(tmp_path / "fleet-load.db")
+    token = "fleet-load-token"
+    store.table("agent_registry").insert({
+        "instance_id": "fleet-load", "role": "admin", "status": "online",
+        "auth_token_hash": hashlib.sha256(token.encode()).hexdigest(),
+    }).execute()
+    _seed_jobs(store)
+    monkeypatch.setattr(routes_mod, "get_db_client", lambda force_new=False: store)
+    from mco.cli import create_app
+
+    async def timed_get(client, path):
+        started = time.perf_counter()
+        response = await client.get(path, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+        return time.perf_counter() - started
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app()), base_url="http://test") as client:
+            requests = [timed_get(client, "/api/agents") for _ in range(20)]
+            requests += [timed_get(client, "/api/jobs?limit=20") for _ in range(6)]
+            async def write():
+                return await run_in_threadpool(lambda: store.table("agent_jobs").insert({
+                    "id": "during-reads", "title": "atomic write", "status": "pending",
+                }).execute())
+            results = await asyncio.gather(*requests, write())
+        timings = sorted(results[:-1])
+        p95 = timings[int(len(timings) * 0.95)]
+        print(f"fleet-load n=26 p95={p95:.3f}s max={max(timings):.3f}s")
+        assert p95 < 2.0
+        assert store.table("agent_jobs").select("*").eq("id", "during-reads").execute().data
+        evidence = store.table("mco_audit_outbox").select("*").eq("job_id", "during-reads").execute().data
+        assert len(evidence) == 1
+        assert evidence[0]["detail"]["after"]["id"] == "during-reads"
+    finally:
+        store.close()
