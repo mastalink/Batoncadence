@@ -1691,18 +1691,23 @@ def get_agents(agent: dict = Depends(require_scopes("agents:read"))):
     if not db_client:
         return []
     try:
-        from mco.orchestrator.presence import describe_fleet
+        from mco.orchestrator.presence import describe_fleet, connected_instances
+        from mco.orchestrator.fleet_cache import cached_fleet
 
-        res = db_client.table("agent_registry").select("*").order("instance_id").execute()
+        threshold = get_offline_after_seconds()
+        connected = connected_instances() or set()
+
+        def load():
+            res = db_client.table("agent_registry").select("*").order("instance_id").execute()
+            safe_rows = [{k: v for k, v in r.items() if k != "auth_token_hash"} for r in (res.data or [])]
+            # Refresh current evidence rather than stacking two five-second TTLs.
+            return describe_fleet(db_client, safe_rows, threshold=threshold, connected=connected,
+                                  now=datetime.now(timezone.utc))
+
+        described = cached_fleet(db_client, "api_agents", (threshold, frozenset(connected)), load)
         org = agent_org(agent)
-        rows = []
-        for r in (res.data or []):
-            # Tenant isolation (app-side so pre-migration schemas keep working).
-            if org != "default" and (r.get("org_id") or "default") != org:
-                continue
-            # Never expose auth_token_hash over the API.
-            rows.append({k: v for k, v in r.items() if k != "auth_token_hash"})
-        return describe_fleet(db_client, rows, threshold=get_offline_after_seconds())
+        # Filter after copying the shared snapshot; never cache caller visibility.
+        return [r for r in described if org == "default" or (r.get("org_id") or "default") == org]
     except Exception as e:
         logger.error(f"Error fetching registered agents: {e}")
         return []

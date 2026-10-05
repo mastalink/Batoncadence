@@ -102,7 +102,7 @@ def test_agent_job_select_uses_rowid_to_break_order_ties(store):
         }).execute()
 
     statements = []
-    store._conn.set_trace_callback(statements.append)
+    store._read_connection().set_trace_callback(statements.append)
     try:
         ascending = store.table("agent_jobs").select("id").order("created_at").execute().data
         descending = (
@@ -114,7 +114,7 @@ def test_agent_job_select_uses_rowid_to_break_order_ties(store):
             .data
         )
     finally:
-        store._conn.set_trace_callback(None)
+        store._read_connection().set_trace_callback(None)
 
     assert ascending == [{"id": "z"}, {"id": "a"}, {"id": "m"}, {"id": "b"}]
     assert descending == [{"id": "a"}, {"id": "m"}]

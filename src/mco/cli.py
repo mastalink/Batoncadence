@@ -225,6 +225,9 @@ def create_app() -> FastAPI:
     if _rl_store is not None:
         app_server.add_middleware(RateLimitMiddleware, store=_rl_store)
 
+    from mco.request_timing import SlowRequestMiddleware
+    app_server.add_middleware(SlowRequestMiddleware)
+
     # Mount REST routing
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
