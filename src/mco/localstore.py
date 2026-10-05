@@ -263,6 +263,94 @@ class LocalStore:
         cur = self._conn.execute(f'SELECT data FROM "{table}"')
         return [json.loads(r[0]) for r in cur.fetchall()]
 
+    @staticmethod
+    def _json_path(column: str) -> Optional[str]:
+        """Return a bindable JSON1 path for a builder column, or None."""
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column):
+            return None
+        return f'$."{column}"'
+
+    def _select_rows(self, q: _Query) -> List[dict]:
+        """Select agent jobs in SQLite before decoding their JSON documents.
+
+        LocalStore keeps rows as JSON for PostgREST compatibility. The job
+        board is the one hot, potentially large table, so execute its builder
+        predicates and window in SQLite instead of holding the shared
+        connection lock while every document is decoded and filtered in
+        Python. Other tables and unsupported value shapes retain the generic
+        compatibility path.
+        """
+        scalar = (str, int, float, bool, type(None))
+        if q._table != "agent_jobs":
+            return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+
+        clauses: List[str] = []
+        params: List[Any] = []
+        for kind, column, value in q._filters:
+            path = self._json_path(column)
+            if path is None:
+                return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+            if kind == "eq":
+                if not isinstance(value, scalar):
+                    return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+                if value is None:
+                    clauses.append("json_extract(data, ?) IS NULL")
+                    params.append(path)
+                else:
+                    clauses.append("json_extract(data, ?) = ?")
+                    params.extend((path, value))
+            elif kind == "in":
+                values = list(value)
+                if not all(isinstance(item, scalar) for item in values):
+                    return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+                non_null = [item for item in values if item is not None]
+                parts: List[str] = []
+                if non_null:
+                    placeholders = ", ".join("?" for _ in non_null)
+                    parts.append(f"json_extract(data, ?) IN ({placeholders})")
+                    params.extend((path, *non_null))
+                if any(item is None for item in values):
+                    parts.append("json_extract(data, ?) IS NULL")
+                    params.append(path)
+                clauses.append(f"({' OR '.join(parts)})" if parts else "0")
+            elif kind == "gt":
+                if not isinstance(value, scalar) or value is None:
+                    return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+                clauses.append("json_extract(data, ?) > ?")
+                params.extend((path, value))
+            else:
+                return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+
+        self._ensure_table(q._table)
+        sql = f'SELECT data FROM "{q._table}"'
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        if q._order:
+            column, desc = q._order
+            path = self._json_path(column)
+            if path is None:
+                return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+            # _run_once historically sorted by str(value or ""). This cast
+            # preserves that ordering for the job fields used by the API.
+            sql += " ORDER BY CAST(COALESCE(json_extract(data, ?), '') AS TEXT)"
+            sql += " DESC" if desc else " ASC"
+            # Python's former stable sort preserved the table scan's rowid
+            # order for equal values. Make that tie order explicit so LIMIT
+            # and OFFSET page boundaries cannot drift across query plans.
+            sql += ", rowid"
+            params.append(path)
+        if q._limit is not None:
+            sql += " LIMIT ?"
+            params.append(q._limit)
+        elif q._offset:
+            sql += " LIMIT -1"
+        if q._offset:
+            sql += " OFFSET ?"
+            params.append(q._offset)
+
+        cur = self._conn.execute(sql, params)
+        return [json.loads(row[0]) for row in cur.fetchall()]
+
     def _write_row(self, table: str, row: dict) -> None:
         pk = str(row[self._pk_field(table)])
         before = None
@@ -383,13 +471,13 @@ class LocalStore:
             if q._table in APPEND_ONLY_TABLES and q._op == "upsert":
                 raise PermissionError(f"{q._table} is append-only: UPSERT is not allowed")
             if q._op == "select":
-                rows = [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
-                if q._order:
+                rows = self._select_rows(q)
+                if q._order and q._table != "agent_jobs":
                     col, desc = q._order
                     rows.sort(key=lambda r: str(r.get(col) or ""), reverse=desc)
-                if q._offset:
+                if q._offset and q._table != "agent_jobs":
                     rows = rows[q._offset:]
-                if q._limit is not None:
+                if q._limit is not None and q._table != "agent_jobs":
                     rows = rows[: q._limit]
                 return APIResult([self._project(r, q._columns) for r in rows])
 

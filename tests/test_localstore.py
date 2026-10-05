@@ -50,6 +50,83 @@ def test_select_eq_in_order_limit_projection(store):
     assert newest.data[0]["id"] == "j2"
 
 
+def test_agent_job_select_pushes_filters_order_and_window_into_sql(store, monkeypatch):
+    rows = [
+        {"id": "j0", "title": "zero", "status": "completed", "target_agent_id": "worker"},
+        {"id": "j1", "title": "one", "status": "pending", "target_agent_id": None},
+        {"id": "j2", "title": "two", "status": "pending"},
+        {"id": "j3", "title": "three", "status": "pending", "target_agent_id": "worker"},
+    ]
+    for row in rows:
+        store.table("agent_jobs").insert(row).execute()
+
+    original_load_rows = store._load_rows
+
+    def reject_whole_job_table(table):
+        if table == "agent_jobs":
+            raise AssertionError("agent_jobs select decoded the whole table")
+        return original_load_rows(table)
+
+    monkeypatch.setattr(store, "_load_rows", reject_whole_job_table)
+
+    selected = (
+        store.table("agent_jobs")
+        .select("id,status")
+        .eq("org_id", "default")
+        .in_("status", ["pending"])
+        .order("id", desc=True)
+        .range(1, 2)
+        .execute()
+        .data
+    )
+    null_targets = (
+        store.table("agent_jobs")
+        .select("id")
+        .eq("target_agent_id", None)
+        .order("id")
+        .execute()
+        .data
+    )
+
+    assert selected == [{"id": "j2", "status": "pending"}, {"id": "j1", "status": "pending"}]
+    assert null_targets == [{"id": "j1"}, {"id": "j2"}]
+
+
+def test_agent_job_select_uses_rowid_to_break_order_ties(store):
+    for job_id in ("z", "a", "m", "b"):
+        store.table("agent_jobs").insert({
+            "id": job_id,
+            "title": job_id,
+            "status": "pending",
+            "created_at": "2026-10-04T12:00:00+00:00",
+        }).execute()
+
+    statements = []
+    store._conn.set_trace_callback(statements.append)
+    try:
+        ascending = store.table("agent_jobs").select("id").order("created_at").execute().data
+        descending = (
+            store.table("agent_jobs")
+            .select("id")
+            .order("created_at", desc=True)
+            .range(1, 2)
+            .execute()
+            .data
+        )
+    finally:
+        store._conn.set_trace_callback(None)
+
+    assert ascending == [{"id": "z"}, {"id": "a"}, {"id": "m"}, {"id": "b"}]
+    assert descending == [{"id": "a"}, {"id": "m"}]
+    ordered_selects = [
+        statement.lower()
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT DATA FROM") and "order by" in statement.lower()
+    ]
+    assert len(ordered_selects) == 2
+    assert all(", rowid" in statement for statement in ordered_selects)
+
+
 def test_select_can_read_while_another_connection_holds_write_lock(tmp_path):
     path = tmp_path / "concurrent.db"
     writer = LocalStore(path)

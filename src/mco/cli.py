@@ -30,6 +30,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from starlette.concurrency import run_in_threadpool
 
 from mco.config import get_config
 from mco.security import get_secret_store
@@ -337,7 +338,7 @@ def create_app() -> FastAPI:
         authenticated_role = None
         
         from mco.orchestrator.routes import get_db_client
-        db_client = get_db_client()
+        db_client = await run_in_threadpool(get_db_client)
         
         if not db_client:
             # Local-Only mode (no DB). Mirror the HTTP auth path (auth.py):
@@ -410,7 +411,7 @@ def create_app() -> FastAPI:
                             .eq("auth_token_hash", token_hash)
                         if instance_id:
                             q = q.eq("instance_id", instance_id)
-                        res = q.execute()
+                        res = await run_in_threadpool(q.execute)
 
                         if res.data:
                             row = res.data[0]
@@ -425,10 +426,11 @@ def create_app() -> FastAPI:
 
                             # Update status to online in database
                             from datetime import datetime, timezone
-                            db_client.table("agent_registry").update({
+                            presence_update = db_client.table("agent_registry").update({
                                 "status": "online",
                                 "last_seen_at": datetime.now(timezone.utc).isoformat()
-                            }).eq("instance_id", instance_id).execute()
+                            }).eq("instance_id", instance_id)
+                            await run_in_threadpool(presence_update.execute)
 
                             # Register in ws_manager for broadcast receiving
                             ws_manager.register(
@@ -498,14 +500,19 @@ def create_app() -> FastAPI:
                         if not authenticated_instance_id or not db_client:
                             await websocket.send_json({"type": "error", "payload": {"error": "Registered identity required"}})
                             continue
-                        rows = db_client.table("agent_registry").select("*").eq("instance_id", authenticated_instance_id).execute().data
+                        actor_query = (
+                            db_client.table("agent_registry")
+                            .select("*")
+                            .eq("instance_id", authenticated_instance_id)
+                        )
+                        rows = (await run_in_threadpool(actor_query.execute)).data
                         actor = rows[0] if rows else None
                         if not actor or actor.get("status") == "disabled":
                             await websocket.close(code=1008)
                             return
                         from mco.orchestrator.auth import require_scopes
                         try:
-                            await require_scopes("jobs:write")(actor)
+                            require_scopes("jobs:write")(actor)
                             if msg_type == "job_update":
                                 result = await routes.update_job_status(payload.get("task_id", ""), payload, actor)
                             elif msg_type == "job_lease":
@@ -523,9 +530,10 @@ def create_app() -> FastAPI:
             # Set agent to offline on disconnect + ntfy notification
             if authenticated_instance_id and db_client:
                 try:
-                    db_client.table("agent_registry").update({
+                    offline_update = db_client.table("agent_registry").update({
                         "status": "offline"
-                    }).eq("instance_id", authenticated_instance_id).execute()
+                    }).eq("instance_id", authenticated_instance_id)
+                    await run_in_threadpool(offline_update.execute)
                     logger.info(f"Agent '{authenticated_instance_id}' disconnected, set to offline.")
                     
                     # NTFY addon: notify agent offline
