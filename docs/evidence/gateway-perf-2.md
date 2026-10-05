@@ -21,7 +21,7 @@ Five-second caches coalesce concurrent refreshes, return copies, filter tenant v
 
 The focused LocalStore/gateway/presence/delivery/auth/tenancy/creation/acceptance run passed **116 tests**, with **11 PostgreSQL tests skipped locally** (the disposable acceptance services are provided by CI). See the PR's PostgreSQL acceptance check for real database validation.
 
-The full Windows run reached all tests but encountered two unrelated failures: `test_websocket_bypass_auth` races handshake acceptance against connection registration (passed on rerun), and `test_pipe_no_prompt_survives` times out starting the shell probe (reproduced independently). No installer or WebSocket behavior was changed. Linux CI is the full-suite release signal.
+The initial full Windows run reached all tests but encountered two unrelated failures: `test_websocket_bypass_auth` raced handshake acceptance against connection registration, and `test_pipe_no_prompt_survives` timed out starting the shell probe (reproduced independently). The same registration race appeared in Python 3.11 CI while 3.12/3.14 and PostgreSQL acceptance passed. The WebSocket test now waits on a registration event; no installer or WebSocket production behavior was changed. Linux CI is the full-suite release signal.
 
 ## Live observations and deployment-dependent work
 
