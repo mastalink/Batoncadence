@@ -120,7 +120,7 @@ def test_every_menu_item_maps_to_a_verb(monkeypatch):
     for name in ("do_status", "do_ask", "do_approve", "do_fix", "do_helpers",
                  "do_schedules", "do_connect", "do_pause", "do_resume", "do_settings"):
         monkeypatch.setattr(plain, name, lambda *a, _n=name, **k: hit.append(_n))
-    monkeypatch.setattr(cli, "start", lambda: hit.append("start"))
+    monkeypatch.setattr(cli, "start_gateway", lambda: hit.append("start"))
     monkeypatch.setattr(plain, "say", lambda text="": hit.append(("say", text)))
     verbs = menu._verbs(gw, lambda: "HELP TEXT")
     expected_keys = {i.key for i in menu.build_items(plain.take_snapshot(gw))} - {"quit"}
@@ -492,7 +492,7 @@ def test_advanced_runs_an_original_command(monkeypatch):
 
 def test_schedule_alone_lists_and_old_subcommands_stay(monkeypatch):
     listed = []
-    monkeypatch.setattr(cli, "schedule_list", lambda: listed.append(1))
+    monkeypatch.setattr(cli, "list_schedules", lambda: listed.append(1))
     assert runner.invoke(cli.app, ["schedule"]).exit_code == 0 and listed
     import typer
     sub = typer.main.get_command(cli.app).commands["schedule"].commands

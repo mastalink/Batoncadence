@@ -49,7 +49,7 @@ def _verbs(client, help_text: Callable[[], str]) -> dict:
     from mco import cli
 
     return {
-        "start": lambda: cli.start(),
+        "start": lambda: cli.start_gateway(),
         "status": lambda: plain.do_status(client),
         "ask": lambda: plain.do_ask(client, ""),
         "approve": lambda: plain.do_approve(client),

@@ -385,7 +385,7 @@ def do_fix(client, *, yes: bool = False) -> int:
         if confirm("Start BitCadence now?", yes=yes):
             from mco import cli
 
-            cli.start()
+            cli.start_gateway()
         return 0
     problems = find_problems(snap, client)
     if not problems:
@@ -434,7 +434,7 @@ def do_schedules(*, as_json: bool = False) -> int:
             return 1
         say(json.dumps({n: s.describe_trigger() for n, s in sorted(schedules.items())}, indent=2))
         return 0
-    cli.schedule_list()
+    cli.list_schedules()
     return 0
 
 
@@ -497,7 +497,7 @@ def do_resume(client) -> int:
 def do_settings(client) -> int:
     from mco import cli
 
-    cli.settings_cmd(None, None, False)
+    cli.manage_settings()
     return 0
 
 

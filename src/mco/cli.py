@@ -722,6 +722,11 @@ def start(
     detaches: your terminal stays free, output goes to ~/.mco/logs/gateway.log,
     and 'mco stop' shuts it down.
     """
+    return start_gateway(host=host, port=port)
+
+
+def start_gateway(host: str = "127.0.0.1", port: int = 18789):
+    """Start the gateway with concrete defaults for CLI and Python callers."""
     import subprocess
     import time
 
@@ -797,8 +802,8 @@ def restart(
     running = any(c.laddr.port == port and c.status == "LISTEN" and c.pid
                   for c in psutil.net_connections(kind="tcp"))
     if running:
-        stop(port=port, force=False)
-    start(host=host, port=port)
+        stop_gateway(port=port, force=False)
+    start_gateway(host=host, port=port)
 
 
 service_app = typer.Typer(help="Run BitCadence processes as boot-persistent OS services.")
@@ -839,8 +844,8 @@ def _load_schedules_or_exit(path=None):
         _print_schedules_missing(exc)
         raise typer.Exit(code=0)
     except scheduler.ScheduleConfigError as exc:
-        console.print(f"[red][X] Invalid schedules config:[/red] {exc}")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(exc)
 
 
 @schedule_app.command("init")
@@ -862,6 +867,11 @@ def schedule_init(
 @schedule_app.command("list")
 def schedule_list():
     """Show every schedule and loop with its next fire time."""
+    return list_schedules()
+
+
+def list_schedules():
+    """List schedules for CLI and menu callers."""
     from mco import launcher as launcher_mod
     from mco import scheduler
     launchers, schedules = _load_schedules_or_exit()
@@ -1767,6 +1777,11 @@ def stop(
     force: bool = typer.Option(False, "--force", "-f", help="Send SIGKILL immediately instead of graceful SIGTERM."),
 ):
     """Stop a running BitCadence gateway (by port)."""
+    return stop_gateway(port=port, force=force)
+
+
+def stop_gateway(port: int = 18789, force: bool = False):
+    """Stop the gateway with concrete defaults for Python callers."""
     import signal
     import time
 
@@ -2155,6 +2170,24 @@ def register_agent(
     ),
 ):
     """Register a new client agent, generating a secure access token."""
+    token = register_agent_identity(name, role, org, scope)
+    from mco.orchestrator.auth import normalize_scopes
+    scopes = normalize_scopes(scope or [])
+    scope_line = f"Scopes: [cyan]{', '.join(scopes)}[/cyan]\n" if scopes else \
+        "Scopes: [dim]role-derived defaults[/dim]\n"
+    console.print(Panel.fit(
+        f"[bold green][OK] Agent '{name}' registered successfully![/bold green]\n\n"
+        f"Role: [cyan]{role}[/cyan]\n"
+        f"{scope_line}"
+        f"Status: [yellow]offline[/yellow]\n\n"
+        f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
+        f"[bold white]{token}[/bold white]",
+        border_style="green"
+    ))
+
+
+def register_agent_identity(name: str, role: str, org: str = "default", scope: Optional[list[str]] = None) -> str:
+    """Register an identity and return its credential without displaying it."""
     console.print(f"[bold cyan]Registering new MCO agent...[/bold cyan]")
 
     from mco.orchestrator.admin_routes import allowed_orgs
@@ -2210,21 +2243,11 @@ def register_agent(
             else:
                 raise first_err
         if res.data:
-            scope_line = f"Scopes: [cyan]{', '.join(scopes)}[/cyan]\n" if scopes else \
-                "Scopes: [dim]role-derived defaults[/dim]\n"
-            console.print(Panel.fit(
-                f"[bold green][OK] Agent '{name}' registered successfully![/bold green]\n\n"
-                f"Role: [cyan]{role}[/cyan]\n"
-                f"{scope_line}"
-                f"Status: [yellow]offline[/yellow]\n\n"
-                f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
-                f"[bold white]{token}[/bold white]",
-                border_style="green"
-            ))
+            return token
         else:
-            console.print("[red][ERROR] Database failed to return data on upsert.[/red]")
+            raise RuntimeError("Database failed to return data on upsert.")
     except Exception as e:
-        console.print(f"[red][ERROR] Failed to register agent in database: {e}[/red]")
+        raise RuntimeError("Failed to register agent in database") from e
 
 
 @app.command("edition")
@@ -2397,6 +2420,11 @@ def run_workflow(
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate and print the plan without submitting."),
 ):
     """Submit a declarative YAML workflow (DAG of jobs) to the Job Board."""
+    return submit_workflow_file(file, dry_run=dry_run)
+
+
+def submit_workflow_file(file: str, dry_run: bool = False):
+    """Load, preview and submit a workflow without Typer parameter defaults."""
     from mco.orchestrator.workflows import load_workflow, topo_order, submit_workflow, WorkflowError
 
     try:
@@ -2820,6 +2848,11 @@ def settings_cmd(
     unset: bool = typer.Option(False, "--unset", help="Clear the key back to its default."),
 ):
     """View or change gateway settings (the Control Panel, from the terminal)."""
+    return manage_settings(key, value, unset)
+
+
+def manage_settings(key: Optional[str] = None, value: Optional[str] = None, unset: bool = False):
+    """Read or write settings with concrete defaults for Python callers."""
     try:
         client = _gateway_client()
         if key is None:
@@ -3274,7 +3307,7 @@ def ask(
     """Say what you want done. You see the plan and OK it before anything runs."""
     from mco import plain
     if file:
-        return run_workflow(file)
+        return submit_workflow_file(file, dry_run=False)
     _run_plain(lambda: plain.do_ask(_gateway_client(), request, yes=yes))
 
 
@@ -3307,7 +3340,20 @@ def helpers_add(
 ):
     """Add a helper (same as `mco register`, asking for what it needs)."""
     try:
-        register_agent(name=name, role=role, org="default", scope=None)
+        from mco.waker import agent_token_path
+        path = agent_token_path(name)  # validate before changing the registry
+        token = register_agent_identity(name=name, role=role)
+        config = get_config()
+        config.set(f"MCO_SECRET_AGENT_TOKEN_{name.upper()}", token, encrypt=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Set restrictive permissions on creation, before writing the credential.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as token_file:
+            os.chmod(path, 0o600)
+            token_file.write(token)
+        from mco import plain
+        plain.say(f"Helper '{name}' added ({role}). Credential: mco_tok_...{token[-4:]}")
+        plain.say(f"Saved to {path} and the encrypted secret store.")
     except typer.Exit:
         raise
     except Exception as e:
