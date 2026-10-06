@@ -9,6 +9,7 @@ Every guide in this wiki is written from real, hands-on execution. Whether you p
 ## Table of Contents
 
 ### Getting Started
+0. [**Everyday commands (start here)**](everyday-commands.md): the `bitcadence` menu and the plain words `start`, `status`, `ask`, `approve`, `fix`, `connect`, `pause`, `helpers` and `schedule`.
 1. [**Install & First Run**](install-first-run.md) — One-click Windows setup, Python environment configuration, and Linux/macOS equivalents.
 2. [**Desktop Manager & System Tray**](desktop-app-and-tray.md) — Running the local stack with the Windows native control window and notification area tray icon.
 3. [**Connecting the Console & Demo Mode**](connecting-console.md) — Setting up the browser Control Panel, token authorization, and exploring with simulated data.

@@ -1,4 +1,4 @@
-"""Check every `mco ...` example in docs/wiki against the real CLI.
+"""Check every `mco ...` and `bitcadence ...` example in docs/wiki against the real CLI.
 
 Dry parse only: each example is resolved through the Typer/Click command tree
 and its arguments are parsed with ``make_context``. Nothing is invoked, so
@@ -28,8 +28,8 @@ from mco.cli import app  # noqa: E402
 
 ROOT = typer.main.get_command(app)
 FENCE = re.compile(r"^\s*```(\w*)\s*$")
-PROMPT = re.compile(r"^\s*(?:PS>\s*|\$\s+)?(mco\s.*|mco)$")
-INLINE = re.compile(r"`(mco(?:\s[^`]*)?)`")
+PROMPT = re.compile(r"^\s*(?:PS>\s*|\$\s+)?((?:mco|bitcadence)\s.*|mco|bitcadence)$")
+INLINE = re.compile(r"`((?:mco|bitcadence)(?:\s[^`]*)?)`")  # both names run the same command tree
 SHELL_LANGS = {"", "bash", "sh", "shell", "powershell", "ps1", "pwsh"}
 
 
@@ -87,9 +87,19 @@ def check(argv: list[str], bare_ok: bool = False) -> str | None:
     ctx = click.Context(ROOT, info_name="mco")
     rest = argv[1:]
     path = ["mco"]
-    while isinstance(cmd, click.Group):
-        if not rest or rest[0].startswith("-"):
-            return None if not rest else f"{' '.join(path)}: option before subcommand"
+    # Duck-typed on purpose: Typer now ships its own click copy, so isinstance(cmd, click.Group)
+    # is always False and silently skipped every subcommand check (found 2026-10-05).
+    while hasattr(cmd, "get_command") and hasattr(cmd, "list_commands"):
+        # Options that belong to the group itself (e.g. `bitcadence --no-menu`, `helpers --json`).
+        group_opts = {o: p for p in getattr(cmd, "params", []) for o in (*p.opts, *p.secondary_opts)}
+        while rest and rest[0].startswith("-") and rest[0].split("=")[0] in group_opts:
+            param = group_opts[rest[0].split("=")[0]]
+            takes_value = not getattr(param, "is_flag", False) and "=" not in rest[0] and getattr(param, "nargs", 1) != 0
+            rest = rest[2:] if takes_value else rest[1:]
+        if not rest:
+            return None
+        if rest[0].startswith("-"):
+            return f"{' '.join(path)}: unknown option {rest[0]}"
         name = rest[0]
         sub = cmd.get_command(ctx, name)
         if sub is None:
@@ -102,7 +112,9 @@ def check(argv: list[str], bare_ok: bool = False) -> str | None:
         return None
     try:
         cmd.make_context(path[-1], list(rest), parent=ctx.parent, resilient_parsing=False)
-    except click.UsageError as exc:
+    except Exception as exc:  # click's or Typer's own UsageError
+        if not any(k.__name__ == "UsageError" for k in type(exc).__mro__):
+            raise
         return f"`{' '.join(path)}`: {exc.format_message()}"
     return None
 
