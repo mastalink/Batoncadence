@@ -134,10 +134,9 @@ def translate(exc: BaseException, *, app_hint: str = "") -> FriendlyError:
                 "Run: bitcadence fix",
                 "port_in_use",
             )
-        if (
-            name == "ScheduleConfigError" and ("cron" in text or "expected 5 fields" in text)
-            or "invalid cron" in text or "cron expression" in text
-        ):
+        if getattr(e, "friendly_kind", "") == "start_failed":
+            return FriendlyError("BitCadence couldn't start.", "Run: bitcadence fix", "start_failed")
+        if getattr(e, "friendly_kind", "") == "bad_schedule":
             return FriendlyError(
                 "I didn't understand that schedule.",
                 'Try "every weekday at 2 AM".',

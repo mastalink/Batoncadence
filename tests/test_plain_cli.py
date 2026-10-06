@@ -13,7 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 import mco.cli as cli
-from mco import friendly, menu, plain
+from mco import friendly, menu, plain, quiet
 
 runner = CliRunner()
 
@@ -120,7 +120,7 @@ def test_every_menu_item_maps_to_a_verb(monkeypatch):
     for name in ("do_status", "do_ask", "do_approve", "do_fix", "do_helpers",
                  "do_schedules", "do_connect", "do_pause", "do_resume", "do_settings"):
         monkeypatch.setattr(plain, name, lambda *a, _n=name, **k: hit.append(_n))
-    monkeypatch.setattr(cli, "start_gateway", lambda: hit.append("start"))
+    monkeypatch.setattr(quiet, "run_start", lambda *a, **k: hit.append("start"))
     monkeypatch.setattr(plain, "say", lambda text="": hit.append(("say", text)))
     verbs = menu._verbs(gw, lambda: "HELP TEXT")
     expected_keys = {i.key for i in menu.build_items(plain.take_snapshot(gw))} - {"quit"}
@@ -248,7 +248,12 @@ def test_error_locked_log():
 def test_error_bad_schedule():
     assert friendly.bad_schedule("every second tuesday").render() == (
         'I didn\'t understand "every second tuesday". Try "every weekday at 2 AM".')
-    assert friendly.translate(ValueError("invalid cron expression")).kind == "bad_schedule"
+    from mco import scheduler
+    assert friendly.translate(scheduler.CronExpressionError("minute: nope")).kind == "bad_schedule"
+    # Other schedule-file problems keep their own message (the cause is the useful part).
+    assert friendly.translate(scheduler.ScheduleConfigError("loop needs max_iterations")).kind == "unknown"
+    # The old guess from the words "invalid cron" is gone: only the error type counts.
+    assert friendly.translate(ValueError("invalid cron expression")).kind == "unknown"
 
 
 def test_error_port_in_use():
