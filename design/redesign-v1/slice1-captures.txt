@@ -1,0 +1,74 @@
+# Text captures from the slice-1 CLI against a fake gateway (no real board).
+
+$ bitcadence status
+Good evening.
+  Needs you (3)
+    1. Publish release notes?
+    2. Send the weekly note?
+    - "Nightly check" didn't finish.
+  Running (1)
+    Tidy the docs
+Run `bitcadence approve` or `bitcadence fix`.
+
+$ bitcadence fix --yes
+Found 1 problem.
+  "Nightly check" didn't finish.
+  Done. It's back in line (pending).
+
+$ bitcadence approve        # no terminal: lists, never blocks
+2 waiting:
+  1. Publish release notes
+  2. Send the weekly note
+Run `bitcadence approve` in a terminal to go through them, or pass a name or number.
+
+$ bitcadence ask "tidy the install docs" --yes
+Here's the plan:
+  Do: tidy the install docs
+  Who: your claude helper
+  It waits for your OK before it runs.
+Started. It's waiting for your OK. Run `bitcadence approve` when you're ready.
+
+$ bitcadence helpers
+Helpers (2)
+  codex-1                  codex        ready
+  claude-1                 claude       busy
+
+$ bitcadence status         # gateway stopped
+BitCadence isn't running. Start it with: bitcadence start
+
+# Menu (numbered fallback; with arrow keys the same list is drawn with the selection in reverse video)
+$ bitcadence
+BitCadence - what would you like to do?
+  1. Status
+  2. Ask for something
+  3. Approvals (2 waiting)
+  4. Fix problems (1)
+  5. Helpers
+  6. Schedules
+  7. Connect an AI
+  8. Pause everything
+  9. Settings
+  10. Help
+  11. Quit
+Type a number (q to go back): (typed)
+Good evening.
+  Needs you (3)
+    1. Publish release notes?
+    2. Send the weekly note?
+    - "Nightly check" didn't finish.
+  Running (1)
+    Tidy the docs
+Run `bitcadence approve` or `bitcadence fix`.
+BitCadence - what would you like to do?
+  1. Status
+  2. Ask for something
+  3. Approvals (2 waiting)
+  4. Fix problems (1)
+  5. Helpers
+  6. Schedules
+  7. Connect an AI
+  8. Pause everything
+  9. Settings
+  10. Help
+  11. Quit
+Type a number (q to go back): (typed)

@@ -34,7 +34,7 @@ import threading
 import time
 import uuid
 import re
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -204,8 +204,15 @@ class LocalStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._depth = 0
+        self._thread = threading.local()
+        self._readers_lock = threading.Lock()
+        self._readers = []
+        self._closed = False
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        mode = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if mode.lower() != "wal":
+            self._conn.close()
+            raise RuntimeError(f"LocalStore requires WAL mode, got {mode}")
 
     # ── public API (mirrors the Supabase client) ─────────────────────────
     def table(self, name: str) -> _Query:
@@ -216,11 +223,17 @@ class LocalStore:
     @contextmanager
     def transaction(self, *, immediate: bool = True):
         """Serialize writes while allowing snapshot reads during a writer transaction."""
-        with self._lock:
+        from mco.request_timing import add_lock_wait
+
+        started = time.perf_counter()
+        self._lock.acquire()
+        add_lock_wait((time.perf_counter() - started) * 1000)
+        try:
             outer = self._depth == 0
             if outer:
                 self._conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             self._depth += 1
+            self._thread.depth = getattr(self._thread, "depth", 0) + 1
             try:
                 yield self
                 if outer:
@@ -231,6 +244,9 @@ class LocalStore:
                 raise
             finally:
                 self._depth -= 1
+                self._thread.depth -= 1
+        finally:
+            self._lock.release()
 
     def _commit(self):
         if not self._depth:
@@ -240,8 +256,40 @@ class LocalStore:
         return _RpcCall(self, name, params)
 
     def close(self) -> None:
+        """Close all connections after callers have stopped using the store."""
         with self._lock:
-            self._conn.close()
+            with self._readers_lock:
+                if self._closed:
+                    return
+                self._closed = True
+                for conn in self._readers:
+                    conn.close()
+                self._readers.clear()
+                self._conn.close()
+
+    def _read_connection(self) -> sqlite3.Connection:
+        # Transactional reads must see this thread's uncommitted writes.
+        # Another thread's active transaction must never redirect a reader.
+        if getattr(self._thread, "depth", 0):
+            return self._conn
+        if self._closed:
+            raise sqlite3.ProgrammingError("Cannot operate on a closed database.")
+        conn = getattr(self._thread, "reader", None)
+        if conn is None:
+            with self._readers_lock:
+                if self._closed:
+                    raise sqlite3.ProgrammingError("Cannot operate on a closed database.")
+                uri = self._path.resolve().as_uri() + "?mode=ro"
+                conn = sqlite3.connect(uri, uri=True, check_same_thread=False, timeout=30)
+                conn.execute("PRAGMA query_only=ON")
+                self._readers.append(conn)
+                self._thread.reader = conn
+        return conn
+
+    def _table_exists(self, conn: sqlite3.Connection, table: str) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone() is not None
 
     # ── storage plumbing ─────────────────────────────────────────────────
     def _ensure_table(self, table: str) -> None:
@@ -259,9 +307,100 @@ class LocalStore:
         return PRIMARY_KEYS.get(table, "id")
 
     def _load_rows(self, table: str) -> List[dict]:
-        self._ensure_table(table)
-        cur = self._conn.execute(f'SELECT data FROM "{table}"')
+        conn = self._read_connection()
+        if not self._table_exists(conn, table):
+            return []
+        cur = conn.execute(f'SELECT data FROM "{table}"')
         return [json.loads(r[0]) for r in cur.fetchall()]
+
+    @staticmethod
+    def _json_path(column: str) -> Optional[str]:
+        """Return a bindable JSON1 path for a builder column, or None."""
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column):
+            return None
+        return f'$."{column}"'
+
+    def _select_rows(self, q: _Query) -> List[dict]:
+        """Select agent jobs in SQLite before decoding their JSON documents.
+
+        LocalStore keeps rows as JSON for PostgREST compatibility. The job
+        board is the one hot, potentially large table, so execute its builder
+        predicates and window in SQLite instead of decoding and filtering
+        every document in Python. Other tables and unsupported value shapes retain the generic
+        compatibility path.
+        """
+        scalar = (str, int, float, bool, type(None))
+        if q._table != "agent_jobs":
+            return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+
+        clauses: List[str] = []
+        params: List[Any] = []
+        for kind, column, value in q._filters:
+            path = self._json_path(column)
+            if path is None:
+                return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+            if kind == "eq":
+                if not isinstance(value, scalar):
+                    return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+                if value is None:
+                    clauses.append("json_extract(data, ?) IS NULL")
+                    params.append(path)
+                else:
+                    clauses.append("json_extract(data, ?) = ?")
+                    params.extend((path, value))
+            elif kind == "in":
+                values = list(value)
+                if not all(isinstance(item, scalar) for item in values):
+                    return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+                non_null = [item for item in values if item is not None]
+                parts: List[str] = []
+                if non_null:
+                    placeholders = ", ".join("?" for _ in non_null)
+                    parts.append(f"json_extract(data, ?) IN ({placeholders})")
+                    params.extend((path, *non_null))
+                if any(item is None for item in values):
+                    parts.append("json_extract(data, ?) IS NULL")
+                    params.append(path)
+                clauses.append(f"({' OR '.join(parts)})" if parts else "0")
+            elif kind == "gt":
+                if not isinstance(value, scalar) or value is None:
+                    return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+                clauses.append("json_extract(data, ?) > ?")
+                params.extend((path, value))
+            else:
+                return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+
+        conn = self._read_connection()
+        if not self._table_exists(conn, q._table):
+            return []
+        sql = f'SELECT data FROM "{q._table}"'
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        if q._order:
+            column, desc = q._order
+            path = self._json_path(column)
+            if path is None:
+                return [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
+            # _run_once historically sorted by str(value or ""). This cast
+            # preserves that ordering for the job fields used by the API.
+            sql += " ORDER BY CAST(COALESCE(json_extract(data, ?), '') AS TEXT)"
+            sql += " DESC" if desc else " ASC"
+            # Python's former stable sort preserved the table scan's rowid
+            # order for equal values. Make that tie order explicit so LIMIT
+            # and OFFSET page boundaries cannot drift across query plans.
+            sql += ", rowid"
+            params.append(path)
+        if q._limit is not None:
+            sql += " LIMIT ?"
+            params.append(q._limit)
+        elif q._offset:
+            sql += " LIMIT -1"
+        if q._offset:
+            sql += " OFFSET ?"
+            params.append(q._offset)
+
+        cur = conn.execute(sql, params)
+        return [json.loads(row[0]) for row in cur.fetchall()]
 
     def _write_row(self, table: str, row: dict) -> None:
         pk = str(row[self._pk_field(table)])
@@ -376,20 +515,19 @@ class LocalStore:
                 delay = min(delay * 2, 2.0)
 
     def _run_once(self, q: _Query) -> APIResult:
-        # A grant/status lookup must not contend for the write lock held by a
-        # worker heartbeat or completion. WAL readers can safely use a deferred
-        # snapshot while writes remain serialized with BEGIN IMMEDIATE.
-        with self.transaction(immediate=q._op != "select"):
+        # Ordinary readers never acquire the writer lock or perform DDL.
+        # Writes (including state + audit outbox) retain one atomic transaction.
+        with (nullcontext() if q._op == "select" else self.transaction()):
             if q._table in APPEND_ONLY_TABLES and q._op == "upsert":
                 raise PermissionError(f"{q._table} is append-only: UPSERT is not allowed")
             if q._op == "select":
-                rows = [r for r in self._load_rows(q._table) if self._matches(r, q._filters)]
-                if q._order:
+                rows = self._select_rows(q)
+                if q._order and q._table != "agent_jobs":
                     col, desc = q._order
                     rows.sort(key=lambda r: str(r.get(col) or ""), reverse=desc)
-                if q._offset:
+                if q._offset and q._table != "agent_jobs":
                     rows = rows[q._offset:]
-                if q._limit is not None:
+                if q._limit is not None and q._table != "agent_jobs":
                     rows = rows[: q._limit]
                 return APIResult([self._project(r, q._columns) for r in rows])
 

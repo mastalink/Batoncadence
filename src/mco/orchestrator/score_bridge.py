@@ -570,7 +570,17 @@ class ScoreBridge:
                 continue
             payload = json.loads(row["payload"])
             expected = payload["target_agent_id"]
-            if job.get("leased_by_instance_id") != expected or not any(e.get("job_id") == row["job_id"] and e.get("event") == "status:completed" and e.get("actor_id") == expected and e.get("actor_role") == payload["target_agent_role"] for e in board.events(row["job_id"])):
+            if job.get("leased_by_instance_id") != expected:
+                raise ScoreError("Missing authenticated lease/completion identity")
+            completions = [e for e in board.events(row["job_id"])
+                           if e.get("job_id") == row["job_id"] and e.get("event") == "status:completed"]
+            if not completions and _recently_completed(job):
+                # The job row can read as completed a moment before its completion
+                # event is visible (separate writes, concurrent readers since #136;
+                # seen live 2026-10-06). Within a short grace window that is "not
+                # yet authenticated", not a forgery: check again on the next poll.
+                continue
+            if not any(e.get("actor_id") == expected and e.get("actor_role") == payload["target_agent_role"] for e in completions):
                 raise ScoreError("Missing authenticated lease/completion identity")
             try:
                 output = json.loads(job["output_payload"]["result"])
@@ -796,3 +806,21 @@ class ScoreBridge:
                 dispatches=dispatches,
                 events=[dict(r) for r in db.execute("SELECT * FROM events WHERE run=? ORDER BY seq", (run_id,))]
             )
+
+
+COMPLETION_EVENT_GRACE_SECONDS = 120
+
+
+def _recently_completed(job) -> bool:
+    """True when the job's completed_at is within the event-visibility grace window."""
+    from datetime import datetime, timezone
+    raw = job.get("completed_at")
+    if not raw:
+        return False
+    try:
+        at = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return 0 <= (datetime.now(timezone.utc) - at).total_seconds() <= COMPLETION_EVENT_GRACE_SECONDS

@@ -20,7 +20,7 @@ def _db():
 
 
 @context_router.get("")
-async def recall_context(
+def recall_context(
     query: str = "",
     role: str = "",
     tags: str = "",
@@ -35,7 +35,7 @@ async def recall_context(
 
 
 @context_router.post("")
-async def remember_context(payload: dict, agent: dict = Depends(require_scopes("context:write"))):
+def remember_context(payload: dict, agent: dict = Depends(require_scopes("context:write"))):
     """Append an entry to the shared context (any authenticated agent)."""
     title = (payload or {}).get("title")
     content = (payload or {}).get("content")

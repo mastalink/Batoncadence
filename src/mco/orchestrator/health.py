@@ -42,6 +42,12 @@ async def lifespan(app):
                 logger.exception("Gateway maintenance failed")
             await asyncio.sleep(5)
     tasks = [asyncio.create_task(maintain()), asyncio.create_task(delivery_loop())]
+    # Off-loop thread that notices if this loop freezes (2026-10-04: twice).
+    from mco.orchestrator import loop_watchdog
+    stall_watch = loop_watchdog.from_env()
+    if stall_watch is not None:
+        stall_watch.start()
+        tasks.append(asyncio.create_task(loop_watchdog.heartbeat(stall_watch)))
     # The conductor sweep is the only optional task here: with
     # MCO_SCORE_SWEEP_SECONDS unset no task is created and no score database is
     # opened, so upgrading a gateway cannot start it driving score runs.
@@ -79,6 +85,8 @@ async def lifespan(app):
                 logger.warning("Conductor sweep did not drain within %ss; cancelling it",
                                SCORE_SWEEP_DRAIN_SECONDS)
                 tasks.append(sweep_task)
+        if stall_watch is not None:
+            stall_watch.stop()
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -98,7 +106,7 @@ SCORE_SWEEP_DRAIN_SECONDS = 30
 async def delivery_once():
     """One delivery-watchdog sweep: store work in a thread, sends on the loop."""
     from mco.orchestrator import delivery, routes
-    db = routes.get_db_client()
+    db = await asyncio.to_thread(routes.get_db_client)
     if db is None:
         return None
     result = await asyncio.to_thread(delivery.sweep, db)
@@ -202,7 +210,7 @@ async def _sleep_until(interval, stop) -> bool:
         return False
 
 
-async def readyz(request: Request):
+def readyz(request: Request):
     from mco.orchestrator.routes import get_db_client, get_offline_after_seconds
     from mco.orchestrator import score_sweep
     from mco.config import get_config

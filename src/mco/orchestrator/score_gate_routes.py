@@ -32,7 +32,7 @@ def _grant_service() -> GrantService:
 
 
 @score_grants_router.get("/console", response_class=HTMLResponse)
-async def score_grants_console(caller: dict = Depends(require_scopes("jobs:approve"))) -> str:
+def score_grants_console(caller: dict = Depends(require_scopes("jobs:approve"))) -> str:
     """Serve minimal operator console for issuing Score grants."""
     try:
         authenticated_human(caller)
@@ -42,7 +42,7 @@ async def score_grants_console(caller: dict = Depends(require_scopes("jobs:appro
 
 
 @score_grants_router.post("")
-async def issue_score_grant(payload: dict,
+def issue_score_grant(payload: dict,
                             caller: dict = Depends(require_scopes("jobs:approve"))):
     """Issue signed authority only from a human-authenticated server path."""
     try:
@@ -68,12 +68,12 @@ async def issue_score_grant(payload: dict,
 
 
 @score_gates_router.get("")
-async def list_score_gates(caller: dict = Depends(require_scopes("jobs:read"))):
+def list_score_gates(caller: dict = Depends(require_scopes("jobs:read"))):
     return {"gates": _service().list(org_id=caller.get("org_id") or "default")}
 
 
 @score_gates_router.post("/{gate_id}/decision")
-async def decide_score_gate(gate_id: str, payload: dict,
+def decide_score_gate(gate_id: str, payload: dict,
                             caller: dict = Depends(require_scopes("jobs:approve"))):
     try:
         decision = _service().decide(
@@ -238,7 +238,7 @@ score_autonomy_router = APIRouter(prefix="/api/score/autonomy")
 
 
 @score_autonomy_router.get("")
-async def get_autonomy_status(caller: dict = Depends(require_scopes("jobs:read"))):
+def get_autonomy_status(caller: dict = Depends(require_scopes("jobs:read"))):
     """Current state of autonomous execution, conductor loops, and active runs."""
     from mco.config import get_config
     from mco.orchestrator import score_sweep
@@ -293,7 +293,7 @@ async def get_autonomy_status(caller: dict = Depends(require_scopes("jobs:read")
 
 
 @score_autonomy_router.post("/pause")
-async def pause_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))):
+def pause_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))):
     """Pause autonomous conductor sweeps without halting general gateway work."""
     from mco.orchestrator import score_sweep
     from mco.orchestrator.audit import record_event
@@ -308,7 +308,7 @@ async def pause_autonomy(caller: dict = Depends(require_scopes("jobs:approve")))
 
 
 @score_autonomy_router.post("/resume")
-async def resume_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))):
+def resume_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))):
     """Resume autonomous conductor sweeps."""
     from mco.orchestrator import score_sweep
     from mco.orchestrator.audit import record_event
@@ -325,7 +325,7 @@ async def resume_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))
 
 
 @score_autonomy_router.post("/tick")
-async def tick_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))):
+def tick_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))):
     """Manually trigger a single conductor sweep pass ('Tick Now')."""
     from mco.orchestrator import score_sweep
     from mco.orchestrator.audit import record_event
@@ -351,7 +351,7 @@ async def tick_autonomy(caller: dict = Depends(require_scopes("jobs:approve"))):
 
 
 @score_autonomy_router.post("/abort")
-async def abort_run(payload: dict, caller: dict = Depends(require_scopes("jobs:approve"))):
+def abort_run(payload: dict, caller: dict = Depends(require_scopes("jobs:approve"))):
     """Abort an active Score run, blocking future automatic ticks."""
     from mco.orchestrator import score_sweep
     from mco.orchestrator.audit import record_event

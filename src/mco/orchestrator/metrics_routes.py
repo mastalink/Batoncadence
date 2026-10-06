@@ -127,7 +127,7 @@ def render_metrics() -> str:
 
 
 @metrics_router.get("/metrics", include_in_schema=False)
-async def metrics(authorization: str = Header(default="")):
+def metrics(authorization: str = Header(default="")):
     """Prometheus scrape endpoint (text exposition format)."""
     token = (get_config().get("MCO_METRICS_TOKEN") or "").strip()
     if token:

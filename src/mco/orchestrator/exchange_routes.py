@@ -9,6 +9,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from starlette.concurrency import run_in_threadpool
 
 from mco.orchestrator import agent_exchange as ax
 from mco.orchestrator.auth import require_scopes
@@ -44,7 +45,9 @@ async def create_exchange(
 ):
     """Append one exchange. Author, org and time come from the credential."""
     try:
-        row, created = ax.append_exchange(_db(), agent, payload)
+        row, created = await run_in_threadpool(
+            lambda: ax.append_exchange(_db(), agent, payload)
+        )
     except ax.ExchangeError as exc:
         raise _fail(exc)
     response.status_code = 201 if created else 200
@@ -52,7 +55,7 @@ async def create_exchange(
         publisher = ax.get_publisher()
         if publisher:
             try:
-                result = publisher(ax.event_for(row))
+                result = await run_in_threadpool(publisher, ax.event_for(row))
                 if inspect.isawaitable(result):
                     await result
             except Exception:
@@ -62,7 +65,7 @@ async def create_exchange(
 
 
 @exchange_router.get("")
-async def list_exchanges(
+def list_exchanges(
     job_id: Optional[str] = None,
     workflow_name: Optional[str] = None,
     workflow_run: Optional[str] = None,
@@ -85,7 +88,7 @@ async def list_exchanges(
 
 
 @exchange_router.get("/{exchange_id}")
-async def get_exchange(exchange_id: str, agent: dict = Depends(require_scopes("context:read"))):
+def get_exchange(exchange_id: str, agent: dict = Depends(require_scopes("context:read"))):
     try:
         return ax.get_exchange(_db(), agent, exchange_id)
     except ax.ExchangeError as exc:
@@ -93,7 +96,7 @@ async def get_exchange(exchange_id: str, agent: dict = Depends(require_scopes("c
 
 
 @exchange_router.post("/{exchange_id}/promotions")
-async def promote_exchange(
+def promote_exchange(
     exchange_id: str,
     payload: dict,
     response: Response,
