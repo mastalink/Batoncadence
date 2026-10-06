@@ -31,7 +31,7 @@ def test_status_hides_unrelated_environment_by_default(monkeypatch):
     monkeypatch.setattr(cli, "get_config", lambda: _FakeConfig())
     monkeypatch.setattr(cli, "get_secret_store", lambda: _FakeStore())
 
-    result = CliRunner().invoke(cli.app, ["status"])
+    result = CliRunner().invoke(cli.app, ["status", "--details"])
 
     assert result.exit_code == 0
     assert "MCO_LOCAL_TOKEN" in result.output
