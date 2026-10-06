@@ -15,6 +15,7 @@ Every guide in this wiki is written from real, hands-on execution. Whether you p
 3. [**Connecting the Console & Demo Mode**](connecting-console.md) — Setting up the browser Control Panel, token authorization, and exploring with simulated data.
 
 ### Day-to-Day Operations
+3a. [**Console Home (what needs you, what is running)**](Console-home.md) and [**Live Score**](Score-live.md): the first page of the console and the read-only live drawing of a Score run.
 4. [**Overview Dashboard**](overview-dashboard.md) — Mission-control metrics, active pipelines, recent events, and interface tone options.
 5. [**Projects Dashboard**](projects-dashboard.md) — Grouping jobs into initiative streams, health monitoring, and coverage analysis.
 6. [**Job Board & Creating Work**](job-board-and-tasks.md) — Submitting tasks, filtering queues, inspecting job drawers, and managing job lifecycles (retries, cancellations, reassignments).

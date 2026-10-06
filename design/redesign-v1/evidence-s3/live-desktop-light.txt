@@ -1,0 +1,37 @@
+Back to Home
+Weekly release
+
+Drawn automatically from the plan. This view is read-only. Tap a card to see more.
+
+Waiting · Working · Needs you · Stuck · Done · Stopped
+
+1 · Research
+Waiting
+
+Waiting for the earlier steps.
+
+2 · Review
+
+↻ Repeats with Fix if changes are needed
+
+Reviewer
+Working
+
+Reading the changes to the install page.
+
+Review, round 2
+
+See more
+3 · Fix
+Fixer
+Stuck
+
+No sign of life for 10 minutes. Check on the helper.
+
+Work, round 1
+
+See more
+4 · Publish
+Waiting
+
+Waiting for the earlier steps.

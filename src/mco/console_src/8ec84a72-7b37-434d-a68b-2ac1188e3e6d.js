@@ -2,7 +2,7 @@
 const { useState: useStateA, useEffect: useEffectA } = React;
 
 const NAV = [
-  { id: "overview", label: "Overview", icon: "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" },
+  { id: "overview", label: "Home", icon: "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" },
   { id: "projects", label: "Projects", icon: "M3 7h7l2 2h9v10H3zM3 7V5h7l2 2" },
   { id: "jobs", label: "Job Board", icon: "M4 6h16M4 12h16M4 18h10" },
   { id: "approvals", label: "Approvals", icon: "M9 12l2 2 4-5M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18z" },
@@ -67,8 +67,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const PAGE_TITLES = {
-  expert: { overview: "Overview", projects: "Projects", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", workflows: "Workflows", agents: "Agent Fleet", memory: "Drumline", activity: "Audit Trail", settings: "Settings" },
-  plain: { overview: "Overview", projects: "Projects", jobs: "All work", approvals: "Needs your OK", governance: "Governance", workflows: "Flows", agents: "Your agents", memory: "Drumline", activity: "What happened", settings: "Settings" },
+  expert: { overview: "Home", projects: "Projects", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", workflows: "Workflows", agents: "Agent Fleet", memory: "Drumline", activity: "Audit Trail", settings: "Settings", scoreLive: "Live view" },
+  plain: { overview: "Home", projects: "Projects", jobs: "All work", approvals: "Needs your OK", governance: "Governance", workflows: "Flows", agents: "Your agents", memory: "Drumline", activity: "What happened", settings: "Settings", scoreLive: "Live view" },
 };
 
 function App() {
@@ -76,11 +76,12 @@ function App() {
   const [page, setPage] = useStateA(localStorage.getItem("bitcadence_page") || localStorage.getItem("baton_page") || "overview");
   const [advanced, setAdvanced] = useStateA((localStorage.getItem("bitcadence_adv") ?? localStorage.getItem("baton_adv")) === "1");
   const [openJob, setOpenJob] = useStateA(null);
+  const [watchRun, setWatchRun] = useStateA(null);
   const [composing, setComposing] = useStateA(false);
   const [, force] = useStateA(0);
 
   useEffectA(() => window.BitCadenceStore.subscribe(() => force((x) => x + 1)), []);
-  useEffectA(() => { localStorage.setItem("bitcadence_page", page); }, [page]);
+  useEffectA(() => { localStorage.setItem("bitcadence_page", page === "scoreLive" ? "overview" : page); }, [page]);
   useEffectA(() => { localStorage.setItem("bitcadence_adv", advanced ? "1" : "0"); }, [advanced]);
   useEffectA(() => {
     if (t.simulate) window.BitCadenceStore.startSim(); else window.BitCadenceStore.stopSim();
@@ -114,7 +115,8 @@ function App() {
   }, [page, storeMode]);
 
   const screen = {
-    overview: <Overview jobs={jobs} agents={agents} tone={tone} advanced={advanced} onNav={setPage} onOpen={setOpenJob} />,
+    overview: <Home jobs={jobs} agents={agents} onNav={setPage} onOpen={setOpenJob} onWatch={(id) => {setWatchRun(id);setPage("scoreLive");}} />,
+    scoreLive: <ScoreLive runId={watchRun} jobs={jobs} agents={agents} onBack={() => setPage("overview")} />,
     projects: <ProjectDashboard jobs={projectJobs} coverage={projectCoverage} tone={tone} onOpen={setOpenJob} onShowJobs={() => setPage("jobs")} />,
     jobs: <JobBoard jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} onCompose={() => setComposing(true)} />,
     approvals: <Approvals jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
@@ -144,8 +146,8 @@ function App() {
           {NAV.map((n) => {
             const active = page === n.id;
             return (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{
-                display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8,
+              <button key={n.id} aria-label={n.label} onClick={() => setPage(n.id)} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", minHeight: 48, borderRadius: 8,
                 border: "none", cursor: "pointer", fontSize: 13.5, fontWeight: active ? 600 : 500, textAlign: "left",
                 background: active ? "var(--accent-soft)" : "transparent",
                 color: active ? "var(--accent-text)" : "var(--text-2)",
@@ -170,7 +172,7 @@ function App() {
               <React.Fragment>
                 <span style={{ width: 7, height: 7, borderRadius: 99, flex: "none", background: mode === "live" ? "var(--st-done-dot)" : "var(--st-approval-dot)", animation: "cadence-pulse 2.2s infinite" }}></span>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {mode === "live" ? "Live \u00B7 " + host : mode === "connecting" ? "Connecting\u2026" : mode === "offline" ? "Offline \u00B7 connection failed" : "Demo \u00B7 simulated data"}
+                  {mode === "live" ? "Live" : mode === "connecting" ? "Connecting\u2026" : mode === "offline" ? "Offline \u00B7 connection failed" : "Demo \u00B7 simulated data"}
                 </span>
               </React.Fragment>
             );

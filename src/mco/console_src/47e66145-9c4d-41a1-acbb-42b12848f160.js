@@ -79,7 +79,7 @@
 
   async function poll() {
     try {
-      const [j, a] = await Promise.all([api("/api/jobs"), api("/api/agents")]);
+      const [j, a] = await Promise.all([api("/api/jobs?limit=200"), api("/api/agents")]);
       const normalized = (j || []).map(withWorkflow);
       const seenBefore = Object.keys(prevStatus).length > 0;
       normalized.forEach((job) => {
@@ -199,7 +199,7 @@
         await poll();
         startPolling();
         startWs();
-        toast("ok", "Live", "Connected to " + cfg.url);
+        toast("ok", "Live", "Connected. Your helpers are ready.");
         emit();
         return true;
       } catch (e) {
@@ -229,6 +229,10 @@
       : projectFetchedAt ? { ...projectCoverage } : { count: jobs.length, truncated: false, ceiling: 5000 },
     refreshProjectView,
     getAgents: () => connState === "demo" ? demo.getAgents() : agents.slice(),
+    async getScoreRun(runId) {
+      if (connState === "demo") return null;
+      return api("/api/score/autonomy/runs/" + encodeURIComponent(runId));
+    },
     getEvents(jobId) {
       if (connState === "demo") return demo.getEvents(jobId);
       if (!eventsCache[jobId]) {

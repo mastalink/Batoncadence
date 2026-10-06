@@ -470,7 +470,7 @@ function toast(msg) {
 
 async function load() {
   try {
-    const data = await api("/api/jobs");
+    const data = await api("/api/jobs?limit=200");
     jobs = Array.isArray(data) ? data : (data.jobs || []);
     $("status").textContent = `${jobs.length} jobs · ${new Date().toLocaleTimeString()}`;
     $("pulse").classList.remove("stale");

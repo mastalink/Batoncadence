@@ -67,6 +67,8 @@ def test_flow_html_reads_the_real_dependency_graph():
     # not a decorative diagram drawn beside the data.
     assert "depends_on" in html
     assert "/api/jobs" in html
+    assert 'api("/api/jobs?limit=200")' in html
+    assert 'api("/api/jobs")' not in html
 
 
 def test_flow_html_exposes_governance_actions():
