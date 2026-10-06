@@ -383,9 +383,9 @@ def do_fix(client, *, yes: bool = False) -> int:
     if not snap.reachable:
         say((snap.error or friendly.translate(RuntimeError("unreachable"))).render())
         if confirm("Start BitCadence now?", yes=yes):
-            from mco import cli
+            from mco import quiet
 
-            cli.start_gateway()
+            return quiet.run_start(open_app=False, autostart=False)
         return 0
     problems = find_problems(snap, client)
     if not problems:
