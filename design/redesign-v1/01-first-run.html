@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>First run - BitCadence mockup</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><nav class="nav" aria-label="Main"><a href="03-home.html">Home</a><a href="05-ask.html">Ask</a><a href="06-helpers.html">Helpers</a><a href="07-schedules.html">Schedules</a><a href="08-approvals.html">Approvals</a><a href="09-settings.html">Settings</a></nav><span class="sp"></span><a class="btn small" href="index.html">All mockups</a><button class="btn small" onclick="bcTheme()" aria-label="Switch light or dark">🌓</button></div>
+<main class="wrap narrow">
+<div class="mock-note">Design mockup. Nothing here is connected to a real backend.</div>
+
+<div id="s1" class="card" style="text-align:center">
+ <div class="steps"><i class="on"></i><i></i></div>
+ <div class="big-ok">📦</div>
+ <h1>Install BitCadence</h1>
+ <p class="sub">One button. Takes about a minute. You will see one permission box from your computer. Say yes.</p>
+ <button class="btn primary big" data-hide="s1" data-show="s2">Install</button>
+ <p class="hint">On a phone or tablet? Open this page and tap Install. Nothing to type either way.</p>
+</div>
+<div id="s2" class="card hide" style="text-align:center">
+ <div class="steps"><i class="on"></i><i class="on"></i></div>
+ <div class="big-ok" style="animation:pulse 1.4s infinite;border-radius:50%">⏳</div>
+ <h1>Setting things up…</h1>
+ <p class="sub">Getting the quiet helper ready. No black windows will open.</p>
+ <button class="btn primary big" data-hide="s2" data-show="s3">Skip ahead (mockup)</button>
+</div>
+<div id="s3" class="card hide" style="text-align:center">
+ <div class="big-ok">✅</div>
+ <h1>You're all set</h1>
+ <p class="sub">BitCadence now runs quietly in the background. Look for the small blue icon near your clock. It starts by itself when you sign in.</p>
+ <div class="card" style="text-align:left;margin:14px 0"><div class="row"><span class="dot ok"></span><b>Running quietly</b><span class="hint">No window to keep open</span></div></div>
+ <a class="btn primary big" href="02-connect-ai.html">Next: connect your AI</a>
+ <p><a href="03-home.html">Skip for now, take me home</a></p>
+</div>
+<h2>What changed from today</h2>
+<div class="card"><table class="plain">
+<tr><th>Today</th><th>Now</th></tr>
+<tr><td>Copy a long secret code, confirm a web address</td><td>Nothing to copy. The app signs itself in.</td></tr>
+<tr><td>A black window you must never close</td><td>A quiet tray icon. Closing a window changes nothing.</td></tr>
+<tr><td>"Run as administrator" for helpers</td><td>At most one yes/no permission box, once.</td></tr>
+<tr><td>Error page if the start-up fails</td><td>"Couldn't start. Tap Fix it."</td></tr></table></div>
+<h2>If something goes wrong</h2>
+<div class="card"><div class="row"><span class="dot bad"></span><b>BitCadence couldn't start.</b></div>
+<p class="hint">Another program is using what we need. Nothing is broken.</p>
+<button class="btn primary" data-toast="Fixed. Starting again…">Fix it</button></div>
+
+</main></body></html>

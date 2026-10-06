@@ -30,6 +30,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from starlette.concurrency import run_in_threadpool
 
 from mco.config import get_config
 from mco.security import get_secret_store
@@ -69,13 +70,35 @@ def _version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def _main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False, "--version", "-V", callback=_version_callback, is_eager=True,
         help="Show the version and exit."),
+    no_menu: bool = typer.Option(
+        False, "--no-menu", help="Print help instead of opening the interactive menu."),
+    debug: bool = typer.Option(
+        False, "--debug", help="Show full error details instead of plain-English messages."),
 ):
-    """BitCadence: Multi-Client Agent Orchestrator."""
+    """BitCadence: Multi-Client Agent Orchestrator.
+
+    Run with no arguments in a terminal for a menu. Everyday words:
+    start, status, ask, approve, fix.
+    """
+    if debug:
+        os.environ["MCO_DEBUG"] = "1"
+    if ctx.invoked_subcommand is not None:
+        return
+    from mco import menu
+
+    if not no_menu and menu.should_show_menu([]):
+        raise typer.Exit(code=menu.run_menu(_gateway_client(), ctx.get_help))
+    typer.echo(ctx.get_help())
+    # Bare invocation without a terminal keeps its old exit code (usage = 2);
+    # asking for --no-menu is a deliberate request for help, so that is 0.
+    raise typer.Exit(code=0 if no_menu else 2)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Onboarding Setup Wizard
@@ -224,6 +247,9 @@ def create_app() -> FastAPI:
     if _rl_store is not None:
         app_server.add_middleware(RateLimitMiddleware, store=_rl_store)
 
+    from mco.request_timing import SlowRequestMiddleware
+    app_server.add_middleware(SlowRequestMiddleware)
+
     # Mount REST routing
     app_server.include_router(jobs_router)
     app_server.include_router(agents_router)
@@ -275,6 +301,10 @@ def create_app() -> FastAPI:
     from mco.orchestrator.identity_routes import auth_router, identity_admin_router
     app_server.include_router(identity_admin_router)
     app_server.include_router(auth_router)
+
+    # One-time local sign-in handoff + the first-run "You're all set" page.
+    from mco.local_login import local_login_router
+    app_server.include_router(local_login_router)
 
     # Prometheus metrics (/metrics)
     from mco.orchestrator.metrics_routes import metrics_router
@@ -337,7 +367,7 @@ def create_app() -> FastAPI:
         authenticated_role = None
         
         from mco.orchestrator.routes import get_db_client
-        db_client = get_db_client()
+        db_client = await run_in_threadpool(get_db_client)
         
         if not db_client:
             # Local-Only mode (no DB). Mirror the HTTP auth path (auth.py):
@@ -410,7 +440,7 @@ def create_app() -> FastAPI:
                             .eq("auth_token_hash", token_hash)
                         if instance_id:
                             q = q.eq("instance_id", instance_id)
-                        res = q.execute()
+                        res = await run_in_threadpool(q.execute)
 
                         if res.data:
                             row = res.data[0]
@@ -425,10 +455,11 @@ def create_app() -> FastAPI:
 
                             # Update status to online in database
                             from datetime import datetime, timezone
-                            db_client.table("agent_registry").update({
+                            presence_update = db_client.table("agent_registry").update({
                                 "status": "online",
                                 "last_seen_at": datetime.now(timezone.utc).isoformat()
-                            }).eq("instance_id", instance_id).execute()
+                            }).eq("instance_id", instance_id)
+                            await run_in_threadpool(presence_update.execute)
 
                             # Register in ws_manager for broadcast receiving
                             ws_manager.register(
@@ -498,14 +529,19 @@ def create_app() -> FastAPI:
                         if not authenticated_instance_id or not db_client:
                             await websocket.send_json({"type": "error", "payload": {"error": "Registered identity required"}})
                             continue
-                        rows = db_client.table("agent_registry").select("*").eq("instance_id", authenticated_instance_id).execute().data
+                        actor_query = (
+                            db_client.table("agent_registry")
+                            .select("*")
+                            .eq("instance_id", authenticated_instance_id)
+                        )
+                        rows = (await run_in_threadpool(actor_query.execute)).data
                         actor = rows[0] if rows else None
                         if not actor or actor.get("status") == "disabled":
                             await websocket.close(code=1008)
                             return
                         from mco.orchestrator.auth import require_scopes
                         try:
-                            await require_scopes("jobs:write")(actor)
+                            require_scopes("jobs:write")(actor)
                             if msg_type == "job_update":
                                 result = await routes.update_job_status(payload.get("task_id", ""), payload, actor)
                             elif msg_type == "job_lease":
@@ -523,9 +559,10 @@ def create_app() -> FastAPI:
             # Set agent to offline on disconnect + ntfy notification
             if authenticated_instance_id and db_client:
                 try:
-                    db_client.table("agent_registry").update({
+                    offline_update = db_client.table("agent_registry").update({
                         "status": "offline"
-                    }).eq("instance_id", authenticated_instance_id).execute()
+                    }).eq("instance_id", authenticated_instance_id)
+                    await run_in_threadpool(offline_update.execute)
                     logger.info(f"Agent '{authenticated_instance_id}' disconnected, set to offline.")
                     
                     # NTFY addon: notify agent offline
@@ -682,76 +719,58 @@ def serve(
 def start(
     host: str = typer.Option("127.0.0.1", help="The host to bind to."),
     port: int = typer.Option(18789, help="The port to bind to."),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't open the app in the browser."),
+    no_autostart: bool = typer.Option(False, "--no-autostart", help="Don't set BitCadence to start when you sign in."),
 ):
-    """Start the gateway in the background (the pair of 'mco stop').
+    """Start BitCadence quietly in the background (the pair of 'mco stop').
 
-    Unlike 'mco serve' (foreground, for terminals/systemd/Docker), this
-    detaches: your terminal stays free, output goes to ~/.mco/logs/gateway.log,
-    and 'mco stop' shuts it down.
+    No window stays open: the gateway runs hidden, a small status icon appears
+    near the clock, and the app opens already signed in. Unlike 'mco serve'
+    (foreground, for terminals/systemd/Docker), your terminal stays free. Output
+    goes to ~/.mco/logs/gateway.log and 'mco stop' shuts it down.
+    """
+    from mco import quiet
+    _run_plain(lambda: quiet.run_start(
+        host=host, port=port, open_app=not no_open, autostart=not no_autostart))
+
+
+def start_gateway(host: str = "127.0.0.1", port: int = 18789):
+    """Start the gateway hidden in the background and wait until it answers.
+
+    The single place the gateway process is spawned. Raises friendly-translatable
+    errors instead of printing, so every caller (``bitcadence start``, the menu,
+    ``bitcadence fix``) reports failure the same plain way.
     """
     import subprocess
     import time
 
-    import psutil
     import requests
 
-    # Refuse unsafe network exposure before backgrounding (visible feedback;
-    # serve enforces it too).
-    _assert_safe_bind(host, get_config())
+    from mco import quiet
 
-    # Refuse to double-start: is something already listening on the port?
-    for conn in psutil.net_connections(kind="tcp"):
-        if conn.laddr.port == port and conn.status == "LISTEN" and conn.pid:
-            console.print(f"[yellow][!] A gateway is already running on port {port} "
-                          f"(PID {conn.pid}).[/yellow]")
-            console.print(f"    Console: [cyan]http://{host}:{port}/console[/cyan]   "
-                          f"Stop it with: [cyan]mco stop --port {port}[/cyan]")
-            raise typer.Exit(code=1)
+    # Refuse unsafe network exposure before backgrounding (serve enforces it too).
+    _assert_safe_bind(host, get_config())
 
     from mco.service import gateway_log_path
     log_path = gateway_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_path, "a", encoding="utf-8", errors="replace")
-
-    cmd = [sys.executable, "-m", "mco.cli", "serve", "--host", host, "--port", str(port)]
-    kwargs: dict = {"stdout": log_file, "stderr": subprocess.STDOUT,
-                    "stdin": subprocess.DEVNULL}
-    if os.name == "nt":
-        # Detach fully so closing this terminal doesn't kill the gateway.
-        kwargs["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
-                                   | getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
-    else:
-        kwargs["start_new_session"] = True
-
-    proc = subprocess.Popen(cmd, **kwargs)
-    console.print(f"->  Starting gateway in the background (PID {proc.pid})...")
+    cmd = [quiet.hidden_python(), "-m", "mco.cli", "serve", "--host", host, "--port", str(port)]
+    with open(log_path, "a", encoding="utf-8", errors="replace") as log_file:
+        proc = subprocess.Popen(
+            cmd, stdout=log_file, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            **quiet.detached_kwargs())
 
     # Wait for /healthz so "started" means "answering", not "spawned".
     deadline = time.monotonic() + 20
-    healthy = False
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             break  # process died during startup
         try:
             if requests.get(f"http://{host}:{port}/healthz", timeout=1).ok:
-                healthy = True
-                break
+                return proc.pid
         except Exception:
             time.sleep(0.5)
-
-    if not healthy:
-        console.print(f"[red][X] Gateway did not become healthy. "
-                      f"See the log: {log_path}[/red]")
-        raise typer.Exit(code=1)
-
-    console.print(Panel.fit(
-        f"[bold green]BitCadence is running[/bold green]\n"
-        f"Console:   http://{host}:{port}/console\n"
-        f"Dashboard: http://{host}:{port}/dashboard\n"
-        f"Log:       {log_path}\n\n"
-        f"Stop it any time with: [bold]mco stop[/bold]",
-        border_style="green"
-    ))
+    raise quiet.StartFailed(f"The gateway did not answer. Its log is {log_path}")
 
 
 @app.command("restart")
@@ -764,8 +783,9 @@ def restart(
     running = any(c.laddr.port == port and c.status == "LISTEN" and c.pid
                   for c in psutil.net_connections(kind="tcp"))
     if running:
-        stop(port=port, force=False)
-    start(host=host, port=port)
+        stop_gateway(port=port, force=False)
+    from mco import quiet
+    _run_plain(lambda: quiet.run_start(host=host, port=port, open_app=False, autostart=False))
 
 
 service_app = typer.Typer(help="Run BitCadence processes as boot-persistent OS services.")
@@ -776,6 +796,14 @@ app.add_typer(fleet_app, name="fleet")
 
 schedule_app = typer.Typer(help="Schedules and loops: what work gets created, and when.")
 app.add_typer(schedule_app, name="schedule")
+
+
+@schedule_app.callback(invoke_without_command=True)
+def _schedule_home(ctx: typer.Context):
+    """Schedules and loops: what work gets created, and when."""
+    if ctx.invoked_subcommand is None:
+        from mco import plain
+        raise typer.Exit(code=plain.do_schedules())
 
 from mco.jobs.cli import jobs_app
 app.add_typer(jobs_app, name="jobs")
@@ -798,8 +826,8 @@ def _load_schedules_or_exit(path=None):
         _print_schedules_missing(exc)
         raise typer.Exit(code=0)
     except scheduler.ScheduleConfigError as exc:
-        console.print(f"[red][X] Invalid schedules config:[/red] {exc}")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(exc)
 
 
 @schedule_app.command("init")
@@ -821,6 +849,11 @@ def schedule_init(
 @schedule_app.command("list")
 def schedule_list():
     """Show every schedule and loop with its next fire time."""
+    return list_schedules()
+
+
+def list_schedules():
+    """List schedules for CLI and menu callers."""
     from mco import launcher as launcher_mod
     from mco import scheduler
     launchers, schedules = _load_schedules_or_exit()
@@ -1068,9 +1101,19 @@ def open_gui(
 
 
 @app.command("tray")
-def tray():
+def tray(
+    daemon: bool = typer.Option(False, "--daemon", help="The advanced tray that drives the worker daemon."),
+):
     """Status light and a door into the console (Windows tray / macOS menu bar / Linux AppIndicator)."""
-    from mco.tray.app import main as tray_main
+    if daemon:
+        from mco.tray.app import main as tray_main
+    else:
+        from mco.tray.app import preflight
+        message = preflight()
+        if message:
+            print(message, file=sys.stderr)
+            raise typer.Exit(code=1)
+        from mco.tray.simple import main as tray_main
     tray_main()
 
 
@@ -1726,6 +1769,11 @@ def stop(
     force: bool = typer.Option(False, "--force", "-f", help="Send SIGKILL immediately instead of graceful SIGTERM."),
 ):
     """Stop a running BitCadence gateway (by port)."""
+    return stop_gateway(port=port, force=force)
+
+
+def stop_gateway(port: int = 18789, force: bool = False):
+    """Stop the gateway with concrete defaults for Python callers."""
     import signal
     import time
 
@@ -1845,13 +1893,29 @@ def listen(
 # ─────────────────────────────────────────────────────────────────────────────
 @app.command("status")
 def status(
+    details: bool = typer.Option(
+        False, "--details", help="Show the technical diagnostics (database path, profile, settings)."),
     show_all: bool = typer.Option(
         False,
         "--all",
         help="Show all resolved configuration keys, including unrelated process environment.",
     ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable summary."),
 ):
-    """Print BitCadence health check and diagnostics."""
+    """Plain summary: what needs you, what's running, any problems."""
+    if not (details or show_all):
+        from mco import plain
+        try:
+            raise typer.Exit(code=plain.do_status(_gateway_client(), as_json=as_json))
+        except typer.Exit:
+            raise
+        except Exception as exc:
+            plain.fail(exc)
+    _status_details(show_all)
+
+
+def _status_details(show_all: bool = False) -> None:
+    """The original diagnostics output (mco status --details)."""
     config = get_config()
     store = get_secret_store()
 
@@ -2098,6 +2162,31 @@ def register_agent(
     ),
 ):
     """Register a new client agent, generating a secure access token."""
+    try:
+        token = register_agent_identity(name, role, org, scope)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        # No raw traceback: plain sentence, with the underlying cause kept.
+        from mco import plain
+        plain.fail(e)
+    from mco.orchestrator.auth import normalize_scopes
+    scopes = normalize_scopes(scope or [])
+    scope_line = f"Scopes: [cyan]{', '.join(scopes)}[/cyan]\n" if scopes else \
+        "Scopes: [dim]role-derived defaults[/dim]\n"
+    console.print(Panel.fit(
+        f"[bold green][OK] Agent '{name}' registered successfully![/bold green]\n\n"
+        f"Role: [cyan]{role}[/cyan]\n"
+        f"{scope_line}"
+        f"Status: [yellow]offline[/yellow]\n\n"
+        f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
+        f"[bold white]{token}[/bold white]",
+        border_style="green"
+    ))
+
+
+def register_agent_identity(name: str, role: str, org: str = "default", scope: Optional[list[str]] = None) -> str:
+    """Register an identity and return its credential without displaying it."""
     console.print(f"[bold cyan]Registering new MCO agent...[/bold cyan]")
 
     from mco.orchestrator.admin_routes import allowed_orgs
@@ -2153,21 +2242,33 @@ def register_agent(
             else:
                 raise first_err
         if res.data:
-            scope_line = f"Scopes: [cyan]{', '.join(scopes)}[/cyan]\n" if scopes else \
-                "Scopes: [dim]role-derived defaults[/dim]\n"
-            console.print(Panel.fit(
-                f"[bold green][OK] Agent '{name}' registered successfully![/bold green]\n\n"
-                f"Role: [cyan]{role}[/cyan]\n"
-                f"{scope_line}"
-                f"Status: [yellow]offline[/yellow]\n\n"
-                f"[bold yellow]Save this Access Token securely. It will not be shown again:[/bold yellow]\n"
-                f"[bold white]{token}[/bold white]",
-                border_style="green"
-            ))
+            return token
         else:
-            console.print("[red][ERROR] Database failed to return data on upsert.[/red]")
+            raise RuntimeError("Database failed to return data on upsert.")
     except Exception as e:
-        console.print(f"[red][ERROR] Failed to register agent in database: {e}[/red]")
+        raise RuntimeError(f"Failed to register agent in database: {e}") from e
+
+
+def _registry_row(name: str) -> Optional[dict]:
+    """The agent's current registry row, or None. Used to undo a registration."""
+    from mco.orchestrator.routes import get_db_client
+    db_client = get_db_client()
+    if not db_client:
+        return None
+    rows = db_client.table("agent_registry").select("*").eq("instance_id", name).execute().data or []
+    return dict(rows[0]) if rows else None
+
+
+def _undo_registration(name: str, prior: Optional[dict]) -> None:
+    """Put the registry back as it was: delete a new agent, restore a re-registered one."""
+    from mco.orchestrator.routes import get_db_client
+    db_client = get_db_client()
+    if not db_client:
+        return
+    if prior is None:
+        db_client.table("agent_registry").delete().eq("instance_id", name).execute()
+    else:
+        db_client.table("agent_registry").upsert(prior).execute()
 
 
 @app.command("edition")
@@ -2330,9 +2431,8 @@ def send_job(
     except typer.Exit:
         raise
     except Exception as e:
-        console.print(f"[red][ERROR] {e}[/red]")
-        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(e)
 
 
 @app.command("workflow")
@@ -2341,6 +2441,11 @@ def run_workflow(
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate and print the plan without submitting."),
 ):
     """Submit a declarative YAML workflow (DAG of jobs) to the Job Board."""
+    return submit_workflow_file(file, dry_run=dry_run)
+
+
+def submit_workflow_file(file: str, dry_run: bool = False):
+    """Load, preview and submit a workflow without Typer parameter defaults."""
     from mco.orchestrator.workflows import load_workflow, topo_order, submit_workflow, WorkflowError
 
     try:
@@ -2500,14 +2605,19 @@ Settings, then retry selected jobs explicitly.
 
 
 @app.command("approve")
-def approve(job_id: str = typer.Argument(..., help="Job ID awaiting approval.")):
-    """Approve a job paused at the human-in-the-loop gate."""
+def approve(
+    job_id: str = typer.Argument(
+        "", help="Job to approve: its name, number in the waiting list, or ID. Leave out to go through what's waiting."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Approve without asking."),
+):
+    """Approve what's waiting for you, one at a time."""
+    from mco import plain
     try:
-        res = _gateway_client().approve(job_id)
-        console.print(f"[bold green][OK] Job {job_id} approved -> {res['job']['status']}[/bold green]")
+        raise typer.Exit(code=plain.do_approve(_gateway_client(), job_id, yes=yes))
+    except typer.Exit:
+        raise
     except Exception as e:
-        console.print(f"[red][ERROR] Approval failed: {e}[/red]")
-        raise typer.Exit(code=1)
+        plain.fail(e)
 
 
 @app.command("reject")
@@ -2520,8 +2630,8 @@ def reject(
         res = _gateway_client().reject(job_id, reason)
         console.print(f"[bold yellow][OK] Job {job_id} rejected -> {res['job']['status']}[/bold yellow]")
     except Exception as e:
-        console.print(f"[red][ERROR] Rejection failed: {e}[/red]")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(e)
 
 
 @app.command("retry")
@@ -2659,21 +2769,23 @@ def recall_context(
 
 @app.command("remember")
 def remember_context(
-    title: str = typer.Argument(..., help="Short title for this memory entry."),
-    content: str = typer.Argument(..., help="The content to remember."),
+    title: str = typer.Argument(..., help="What to remember (or a short title when you also give the content)."),
+    content: str = typer.Argument("", help="The content to remember (optional: the title alone is enough)."),
     kind: str = typer.Option("fact", "--kind", help="Entry kind: fact, decision, lesson, handoff, or artifact."),
     tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
 ):
     """Append an entry to the Drumline shared context."""
     try:
+        if not content:  # `remember "..."`: the sentence is both title and content
+            content = title
+            title = title if len(title) <= 60 else title[:57] + "..."
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         res = _gateway_client().remember(title=title, content=content, kind=kind, tags=tag_list or None)
         entry = (res or {}).get("entry") or {}
         console.print(f"[green][OK][/green] Remembered -> {entry.get('id', '?')}")
     except Exception as e:
-        console.print(f"[red][ERROR] Remember failed: {e}[/red]")
-        console.print("[dim]Is the gateway running? Check with: mco doctor[/dim]")
-        raise typer.Exit(code=1)
+        from mco import plain
+        plain.fail(e)
 
 
 exchange_app = typer.Typer(help="Drumline Agent Exchange: non-authoritative agent discussion.")
@@ -2757,6 +2869,11 @@ def settings_cmd(
     unset: bool = typer.Option(False, "--unset", help="Clear the key back to its default."),
 ):
     """View or change gateway settings (the Control Panel, from the terminal)."""
+    return manage_settings(key, value, unset)
+
+
+def manage_settings(key: Optional[str] = None, value: Optional[str] = None, unset: bool = False):
+    """Read or write settings with concrete defaults for Python callers."""
     try:
         client = _gateway_client()
         if key is None:
@@ -3188,7 +3305,162 @@ def platform_action(
         raise typer.Exit(code=1)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Plain verbs (design/redesign-v1/CLI.md). Old `mco` commands stay as aliases.
+# ─────────────────────────────────────────────────────────────────────────────
+def _run_plain(fn, *args, app_hint: str = "", **kwargs):
+    from mco import plain
+    try:
+        code = fn(*args, **kwargs)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        plain.fail(e, app_hint=app_hint)
+    raise typer.Exit(code=code or 0)
+
+
+@app.command("ask")
+def ask(
+    request: str = typer.Argument("", help="What you'd like done, in plain words."),
+    file: Optional[str] = typer.Option(None, "--file", help="Load a workflow YAML file instead."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Start without asking."),
+):
+    """Say what you want done. You see the plan and OK it before anything runs."""
+    from mco import plain
+    if file:
+        return submit_workflow_file(file, dry_run=False)
+    _run_plain(lambda: plain.do_ask(_gateway_client(), request, yes=yes))
+
+
+@app.command("fix")
+def fix(yes: bool = typer.Option(False, "--yes", "-y", help="Repair everything without asking.")):
+    """Find what's wrong and offer to repair it."""
+    from mco import plain
+    _run_plain(lambda: plain.do_fix(_gateway_client(), yes=yes))
+
+
+helpers_app = typer.Typer(help="Your helpers: who is ready, busy or stuck.", invoke_without_command=True)
+app.add_typer(helpers_app, name="helpers")
+
+
+@helpers_app.callback()
+def helpers(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable list."),
+):
+    """Your helpers: who is ready, busy or stuck."""
+    if ctx.invoked_subcommand is None:
+        from mco import plain
+        _run_plain(lambda: plain.do_helpers(_gateway_client(), as_json=as_json))
+
+
+@helpers_app.command("add")
+def helpers_add(
+    name: str = typer.Option(..., "--name", prompt="What should this helper be called?"),
+    role: str = typer.Option(..., "--role", prompt="What is it good at (its role, e.g. codex)?"),
+):
+    """Add a helper (same as `mco register`, asking for what it needs)."""
+    from mco import plain
+    registered = False
+    prior = None
+    try:
+        from mco.waker import agent_token_path
+        path = agent_token_path(name)  # validate before changing the registry
+        prior = _registry_row(name)
+        token = register_agent_identity(name=name, role=role)
+        registered = True
+
+        # Two places can hold the credential. The helper is usable if either
+        # does; only when neither does is the registration undone, so nobody is
+        # left with a registered agent whose token nobody holds.
+        in_store, store_error = False, None
+        try:
+            get_config().set(f"MCO_SECRET_AGENT_TOKEN_{name.upper()}", token, encrypt=True)
+            in_store = True
+        except Exception as e:  # noqa: BLE001
+            store_error = e
+        in_file, file_error = False, None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Set restrictive permissions on creation, before writing the credential.
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as token_file:
+                os.chmod(path, 0o600)
+                token_file.write(token)
+            in_file = True
+        except Exception as e:  # noqa: BLE001
+            file_error = e
+        if not (in_store or in_file):
+            raise RuntimeError(f"Couldn't save the helper's credential: {store_error or file_error}") from (
+                store_error or file_error)
+
+        plain.say(f"Helper '{name}' added ({role}). Credential: mco_tok_...{token[-4:]}")
+        if in_store and in_file:
+            plain.say(f"Saved to {path} and the encrypted secret store.")
+        elif in_store:
+            plain.say(f"Saved to the encrypted secret store. (Couldn't write {path}: {file_error})")
+        else:
+            plain.say(f"Saved to {path}. (Couldn't use the encrypted secret store: {store_error})")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        if registered:
+            try:
+                _undo_registration(name, prior)
+            except Exception:  # noqa: BLE001
+                plain.say(f"I couldn't undo the registration of '{name}'. Run: bitcadence fix")
+        plain.fail(e)
+
+
+@app.command("connect")
+def connect(
+    target: str = typer.Argument("", help="Which AI: claude, gemini or cursor. Leave out for a pick list."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before changing its settings."),
+):
+    """Connect an AI app to BitCadence."""
+    from mco import plain
+    _run_plain(lambda: plain.do_connect(target, yes=yes), app_hint=target)
+
+
+@app.command("pause")
+def pause(yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask first.")):
+    """Pause everything: stop work in progress and hold new work."""
+    from mco import plain
+    _run_plain(lambda: plain.do_pause(_gateway_client(), yes=yes))
+
+
+@app.command("resume")
+def resume():
+    """Resume after a pause."""
+    from mco import plain
+    _run_plain(lambda: plain.do_resume(_gateway_client()))
+
+
+@app.command(
+    "advanced",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "help_option_names": []},
+)
+def advanced(ctx: typer.Context):
+    """Run any original command, e.g. `bitcadence advanced audit <job-id>`."""
+    import click
+    if not ctx.args:
+        typer.echo("Give it an original command, e.g.: bitcadence advanced audit <job-id>")
+        raise typer.Exit(code=1)
+    command = typer.main.get_command(app)
+    try:
+        command.main(args=list(ctx.args), prog_name="mco", standalone_mode=False)
+    except click.exceptions.Exit as e:
+        raise typer.Exit(code=e.exit_code)
+    except click.ClickException as e:
+        e.show()
+        raise typer.Exit(code=e.exit_code)
+
+
 def main():
+    # pythonw (the login entry, the tray) has no console: give print() a sink.
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
     app()
 
 

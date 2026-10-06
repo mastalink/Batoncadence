@@ -1,10 +1,17 @@
 """Unit tests for gateway bearer-token auth and the dropbox authorization model."""
 
+import inspect
 import pytest
 from fastapi import HTTPException
 
 import mco.orchestrator.routes as routes_mod
-from mco.orchestrator.auth import hash_token, verify_token, extract_bearer, require_agent
+from mco.orchestrator.auth import (
+    extract_bearer,
+    hash_token,
+    require_agent,
+    require_scopes,
+    verify_token,
+)
 
 
 class FakeAgentDB:
@@ -66,21 +73,51 @@ def test_verify_token_matches_and_rejects():
     assert verify_token(db, "") is None
 
 
-@pytest.mark.asyncio
-async def test_require_agent_auth_paths(monkeypatch):
+def test_db_backed_dependencies_and_no_await_handlers_use_worker_threads():
+    from mco.orchestrator import (
+        admin_routes,
+        context_routes,
+        exchange_routes,
+        integration_routes,
+        metrics_routes,
+        score_gate_routes,
+    )
+
+    handlers = [
+        require_agent,
+        require_scopes("jobs:read"),
+        exchange_routes.list_exchanges,
+        exchange_routes.get_exchange,
+        context_routes.recall_context,
+        integration_routes.get_integrations,
+        score_gate_routes.list_score_gates,
+        score_gate_routes.get_autonomy_status,
+        admin_routes.list_orgs,
+        admin_routes.get_settings,
+        admin_routes.get_jev_metrics_endpoint,
+        metrics_routes.metrics,
+        routes_mod.assign_job_project,
+        routes_mod.renew_job,
+        routes_mod.verify_job_evidence,
+    ]
+
+    assert [handler.__name__ for handler in handlers if inspect.iscoroutinefunction(handler)] == []
+
+
+def test_require_agent_auth_paths(monkeypatch):
     tok = "mco_tok_secret"
     db = FakeAgentDB([{"instance_id": "w1", "role": "codex", "auth_token_hash": hash_token(tok)}])
     monkeypatch.setattr(routes_mod, "get_db_client", lambda: db)
 
-    agent = await require_agent(authorization=f"Bearer {tok}")
+    agent = require_agent(authorization=f"Bearer {tok}")
     assert agent["role"] == "codex"
 
     with pytest.raises(HTTPException) as missing:
-        await require_agent(authorization="")
+        require_agent(authorization="")
     assert missing.value.status_code == 401
 
     with pytest.raises(HTTPException) as bad:
-        await require_agent(authorization="Bearer not-a-real-token")
+        require_agent(authorization="Bearer not-a-real-token")
     assert bad.value.status_code == 401
 
     # Local-Only mode: no DB, no MCO_LOCAL_TOKEN configured -> any bearer accepted.
@@ -92,7 +129,7 @@ async def test_require_agent_auth_paths(monkeypatch):
 
     monkeypatch.setattr(routes_mod, "get_db_client", lambda: None)
     monkeypatch.setattr(auth_mod, "get_config", lambda: _NullCfg())
-    agent_local = await require_agent(authorization=f"Bearer {tok}")
+    agent_local = require_agent(authorization=f"Bearer {tok}")
     assert agent_local["instance_id"] == "local"
     assert agent_local["role"] == "admin"
 
@@ -103,9 +140,9 @@ async def test_require_agent_auth_paths(monkeypatch):
 
     monkeypatch.setattr(auth_mod, "get_config", lambda: _TokenCfg())
     with pytest.raises(HTTPException) as bad_local:
-        await require_agent(authorization="Bearer wrong-local-token")
+        require_agent(authorization="Bearer wrong-local-token")
     assert bad_local.value.status_code == 401
 
     # Correct local token accepted.
-    agent_local2 = await require_agent(authorization="Bearer correct-local-token")
+    agent_local2 = require_agent(authorization="Bearer correct-local-token")
     assert agent_local2["instance_id"] == "local"

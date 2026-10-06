@@ -89,24 +89,33 @@ def describe_fleet(
     from mco.orchestrator.delivery import REROUTED, get_stall_seconds
     from mco.orchestrator.routes import decorate_presence
 
+    use_cache = now is None
     now = now or datetime.now(timezone.utc)
     stall = get_stall_seconds() if stall_seconds is None else stall_seconds
     connected = connected if connected is not None else (connected_instances() or set())
 
-    try:
-        active = db.table("agent_jobs").select("*").in_("status", _ACTIVE_JOB_STATUSES).execute().data or []
-    except Exception:
-        active = []
-    try:
-        pending = db.table("agent_jobs").select("*").eq("status", "pending").execute().data or []
-    except Exception:
-        pending = []
-    try:
-        since = (now - timedelta(seconds=BROKEN_WINDOW_SECONDS)).isoformat()
-        reroutes = (db.table("agent_job_events").select("*").eq("event", REROUTED)
-                    .gt("created_at", since).execute().data or [])
-    except Exception:
-        reroutes = []
+    def load_evidence():
+        try:
+            active = db.table("agent_jobs").select("*").in_("status", _ACTIVE_JOB_STATUSES).execute().data or []
+        except Exception:
+            active = []
+        try:
+            pending = db.table("agent_jobs").select("*").eq("status", "pending").execute().data or []
+        except Exception:
+            pending = []
+        try:
+            since = (now - timedelta(seconds=BROKEN_WINDOW_SECONDS)).isoformat()
+            reroutes = (db.table("agent_job_events").select("*").eq("event", REROUTED)
+                        .gt("created_at", since).execute().data or [])
+        except Exception:
+            reroutes = []
+        return active, pending, reroutes
+
+    if use_cache:
+        from mco.orchestrator.fleet_cache import cached_fleet
+        active, pending, reroutes = cached_fleet(db, "evidence", None, load_evidence)
+    else:
+        active, pending, reroutes = load_evidence()
 
     working = {job.get("leased_by_instance_id") for job in active if job.get("leased_by_instance_id")}
     rerouted_from: dict[str, int] = {}

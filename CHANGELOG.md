@@ -4,6 +4,14 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
 
 ## [Unreleased]
 
+- `bitcadence start` now runs quietly: no console window, a tray status light
+  (green/amber/red plus a word), a one-time loopback sign-in link instead of a
+  pasted token, and a per-user start-at-sign-in entry (no administrator).
+  First run ends on a "You're all set" screen.
+- `mco register` failures are plain sentences; `helpers add` undoes its
+  registration if no credential could be saved; cron errors are recognised by
+  type, not by message text.
+
 ## [0.5.0rc1] - 2026-09-22
 
 Public preview of the new Jev-enabled BitCadence. This is a release candidate,

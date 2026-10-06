@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Helpers - BitCadence mockup</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><nav class="nav" aria-label="Main"><a href="03-home.html">Home</a><a href="05-ask.html">Ask</a><a href="06-helpers.html" class=on>Helpers</a><a href="07-schedules.html">Schedules</a><a href="08-approvals.html">Approvals</a><a href="09-settings.html">Settings</a></nav><span class="sp"></span><a class="btn small" href="index.html">All mockups</a><button class="btn small" onclick="bcTheme()" aria-label="Switch light or dark">🌓</button></div>
+<main class="wrap">
+<div class="mock-note">Design mockup. Nothing here is connected to a real backend.</div>
+
+<h1>Your helpers</h1><p class="sub">Helpers do the work. Each has a light: green is working, red needs a fix.</p>
+<div class="row" style="margin-bottom:14px"><button class="btn primary" data-show="add">+ Add a helper</button></div>
+<div id="add" class="card hide" style="margin-bottom:14px"><h2 style="margin-top:0">Add a helper</h2>
+<label>What should it be good at?</label>
+<div class="chips"><button class="chip on" data-group="k">Writing</button><button class="chip" data-group="k">Coding</button><button class="chip" data-group="k">Research</button><button class="chip" data-group="k">Checking work</button></div>
+<label>Which AI should power it?</label>
+<select><option>Claude</option><option>ChatGPT / Codex</option><option>Gemini</option></select>
+<label>Name</label><input value="Penny" aria-label="Name">
+<p class="hint">It starts quietly in the background. No window. No permission box.</p>
+<button class="btn good" data-hide="add" data-toast="Penny is starting in the background…">Add helper</button></div>
+<div class="grid">
+<div class="card"><div class="row"><div class="avatar">🔎</div><div style="flex:1"><b>Scout</b><div class="hint">Researching open pull requests</div></div>
+<span class="pill ok"><span class="dot ok"></span>Working</span></div><p class="hint">Last heard from: just now</p></div>
+<div class="card"><div class="row"><div class="avatar">👀</div><div style="flex:1"><b>Reviewer</b><div class="hint">Reviewing the install page</div></div>
+<span class="pill ok"><span class="dot ok"></span>Working</span></div><p class="hint">Last heard from: 12 seconds ago</p></div>
+<div class="card"><div class="row"><div class="avatar">🛠️</div><div style="flex:1"><b>Fixer</b><div class="hint">Can't save changes</div></div>
+<span class="pill bad"><span class="dot bad"></span>Stuck</span></div><p class="hint">Another copy of this helper is already running and holding its notes file. Nothing is lost.</p><button class="btn primary" style="width:100%" data-toast="Stopped the extra copy. Fixer is working again.">Stuck, Fix it</button></div>
+<div class="card"><div class="row"><div class="avatar">🧪</div><div style="flex:1"><b>Tester</b><div class="hint">Waiting for a job</div></div>
+<span class="pill idle"><span class="dot idle"></span>Resting</span></div><p class="hint">Last job finished 3 hours ago</p></div>
+</div>
+<h2>What we watch for you</h2>
+<div class="card"><table class="plain">
+<tr><td>🔒 <b>Locked notes file</b></td><td>The light turns red even when the helper looks "online". One button fixes it.</td></tr>
+<tr><td>👯 <b>Two copies running</b></td><td>We keep one and stop the extra. You get a short note.</td></tr>
+<tr><td>💤 <b>Went quiet</b></td><td>No sign of life for 10 minutes becomes "Stuck".</td></tr></table></div>
+
+</main><nav class="tabbar" aria-label="Main"><a href="03-home.html"><b>🏠</b>Home</a><a href="05-ask.html"><b>✨</b>Ask</a><a href="06-helpers.html" class=on><b>🤖</b>Helpers</a><a href="07-schedules.html"><b>⏰</b>Schedules</a><a href="08-approvals.html"><b>✋</b>Approvals</a><a href="09-settings.html"><b>⚙️</b>Settings</a></nav></body></html>

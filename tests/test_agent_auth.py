@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import threading
 from unittest import mock
 import pytest
 from fastapi.testclient import TestClient
@@ -51,18 +52,29 @@ class MockDBClient:
         raise ValueError(f"Unsupported table mock: {table_name}")
 
 
-def test_websocket_bypass_auth():
+def test_websocket_bypass_auth(monkeypatch):
     """No database AND no MCO_LOCAL_TOKEN configured: the zero-config loopback
     bypass admits the socket. (With a token configured, auth is required -
     covered in test_security_hardening.py.)"""
     app = create_app()
     client = TestClient(app)
+    registered = threading.Event()
+    original_register = ws_manager.register
+
+    def register(websocket, identity):
+        original_register(websocket, identity)
+        registered.set()
+
+    monkeypatch.setattr(ws_manager, "register", register)
 
     with mock.patch("mco.orchestrator.routes.get_db_client", return_value=None), \
          mock.patch("mco.cli.get_config", return_value={}):
         with client.websocket_connect("/ws/broadcast") as websocket:
             # Should connect successfully
             websocket.send_text("ping")
+            # accept() completes the client handshake before register() runs.
+            # Wait for server registration rather than racing that scheduling boundary.
+            assert registered.wait(timeout=3)
             # If the bypass works, we should be added to ws_manager's active connections
             assert len(ws_manager.active_connections) > 0
 
