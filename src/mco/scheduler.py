@@ -100,6 +100,13 @@ class ScheduleConfigError(ValueError):
     """Raised when a schedules.yaml is present but invalid."""
 
 
+class CronExpressionError(ScheduleConfigError):
+    """A cron expression that cannot be parsed or never fires."""
+
+    # Read by mco.friendly: an explicit code, not a guess from the message text.
+    friendly_kind = "bad_schedule"
+
+
 # ── duration + cron parsing ───────────────────────────────────────────────────
 
 def parse_duration(value: Any, where: str = "every") -> float:
@@ -138,12 +145,12 @@ def _parse_cron_field(spec: str, low: int, high: int, where: str) -> set[int]:
     for part in str(spec).split(","):
         part = part.strip()
         if not part:
-            raise ScheduleConfigError(f"{where}: empty value in '{spec}'")
+            raise CronExpressionError(f"{where}: empty value in '{spec}'")
         step = 1
         if "/" in part:
             part, _, step_text = part.partition("/")
             if not step_text.isdigit() or int(step_text) < 1:
-                raise ScheduleConfigError(f"{where}: step must be a positive integer in '{spec}'")
+                raise CronExpressionError(f"{where}: step must be a positive integer in '{spec}'")
             step = int(step_text)
             part = part or "*"
         if part == "*":
@@ -154,19 +161,19 @@ def _parse_cron_field(spec: str, low: int, high: int, where: str) -> set[int]:
         else:
             start = end = _cron_int(part, where, spec)
         if start < low or end > high or start > end:
-            raise ScheduleConfigError(
+            raise CronExpressionError(
                 f"{where}: '{part}' is out of range {low}-{high} in '{spec}'"
             )
         allowed.update(range(start, end + 1, step))
     if not allowed:
-        raise ScheduleConfigError(f"{where}: '{spec}' matches nothing")
+        raise CronExpressionError(f"{where}: '{spec}' matches nothing")
     return allowed
 
 
 def _cron_int(text: str, where: str, spec: str) -> int:
     text = text.strip()
     if not text.isdigit():
-        raise ScheduleConfigError(f"{where}: '{text}' is not a number in '{spec}'")
+        raise CronExpressionError(f"{where}: '{text}' is not a number in '{spec}'")
     return int(text)
 
 
@@ -201,19 +208,19 @@ def parse_cron(expression: str, where: str = "cron") -> CronExpr:
     """Parse a 5-field cron expression or an @shortcut (@daily, @hourly, ...)."""
     text = str(expression).strip()
     if not text:
-        raise ScheduleConfigError(f"{where}: cron expression is empty")
+        raise CronExpressionError(f"{where}: cron expression is empty")
     lowered = text.lower()
     if lowered in _CRON_SHORTCUTS:
         text = _CRON_SHORTCUTS[lowered]
     elif lowered.startswith("@"):
-        raise ScheduleConfigError(
+        raise CronExpressionError(
             f"{where}: unknown shortcut '{text}' - "
             f"use one of {', '.join(sorted(_CRON_SHORTCUTS))} or a 5-field expression"
         )
 
     fields = text.split()
     if len(fields) != 5:
-        raise ScheduleConfigError(
+        raise CronExpressionError(
             f"{where}: expected 5 fields (minute hour day month weekday), got {len(fields)}: '{text}'"
         )
     minute, hour, dom, month, dow = fields
@@ -248,7 +255,7 @@ def next_cron_time(expr: CronExpr, after: datetime, tz: Optional[str] = None) ->
         if expr.matches(moment):
             return moment
         moment += timedelta(minutes=1)
-    raise ScheduleConfigError(
+    raise CronExpressionError(
         f"cron '{expr.raw}' has no matching time within a year - is the date valid?"
     )
 

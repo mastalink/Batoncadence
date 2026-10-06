@@ -302,6 +302,10 @@ def create_app() -> FastAPI:
     app_server.include_router(identity_admin_router)
     app_server.include_router(auth_router)
 
+    # One-time local sign-in handoff + the first-run "You're all set" page.
+    from mco.local_login import local_login_router
+    app_server.include_router(local_login_router)
+
     # Prometheus metrics (/metrics)
     from mco.orchestrator.metrics_routes import metrics_router
     app_server.include_router(metrics_router)
@@ -715,81 +719,58 @@ def serve(
 def start(
     host: str = typer.Option("127.0.0.1", help="The host to bind to."),
     port: int = typer.Option(18789, help="The port to bind to."),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't open the app in the browser."),
+    no_autostart: bool = typer.Option(False, "--no-autostart", help="Don't set BitCadence to start when you sign in."),
 ):
-    """Start the gateway in the background (the pair of 'mco stop').
+    """Start BitCadence quietly in the background (the pair of 'mco stop').
 
-    Unlike 'mco serve' (foreground, for terminals/systemd/Docker), this
-    detaches: your terminal stays free, output goes to ~/.mco/logs/gateway.log,
-    and 'mco stop' shuts it down.
+    No window stays open: the gateway runs hidden, a small status icon appears
+    near the clock, and the app opens already signed in. Unlike 'mco serve'
+    (foreground, for terminals/systemd/Docker), your terminal stays free. Output
+    goes to ~/.mco/logs/gateway.log and 'mco stop' shuts it down.
     """
-    return start_gateway(host=host, port=port)
+    from mco import quiet
+    _run_plain(lambda: quiet.run_start(
+        host=host, port=port, open_app=not no_open, autostart=not no_autostart))
 
 
 def start_gateway(host: str = "127.0.0.1", port: int = 18789):
-    """Start the gateway with concrete defaults for CLI and Python callers."""
+    """Start the gateway hidden in the background and wait until it answers.
+
+    The single place the gateway process is spawned. Raises friendly-translatable
+    errors instead of printing, so every caller (``bitcadence start``, the menu,
+    ``bitcadence fix``) reports failure the same plain way.
+    """
     import subprocess
     import time
 
-    import psutil
     import requests
 
-    # Refuse unsafe network exposure before backgrounding (visible feedback;
-    # serve enforces it too).
-    _assert_safe_bind(host, get_config())
+    from mco import quiet
 
-    # Refuse to double-start: is something already listening on the port?
-    for conn in psutil.net_connections(kind="tcp"):
-        if conn.laddr.port == port and conn.status == "LISTEN" and conn.pid:
-            console.print(f"[yellow][!] A gateway is already running on port {port} "
-                          f"(PID {conn.pid}).[/yellow]")
-            console.print(f"    Console: [cyan]http://{host}:{port}/console[/cyan]   "
-                          f"Stop it with: [cyan]mco stop --port {port}[/cyan]")
-            raise typer.Exit(code=1)
+    # Refuse unsafe network exposure before backgrounding (serve enforces it too).
+    _assert_safe_bind(host, get_config())
 
     from mco.service import gateway_log_path
     log_path = gateway_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_path, "a", encoding="utf-8", errors="replace")
-
-    cmd = [sys.executable, "-m", "mco.cli", "serve", "--host", host, "--port", str(port)]
-    kwargs: dict = {"stdout": log_file, "stderr": subprocess.STDOUT,
-                    "stdin": subprocess.DEVNULL}
-    if os.name == "nt":
-        # Detach fully so closing this terminal doesn't kill the gateway.
-        kwargs["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
-                                   | getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
-    else:
-        kwargs["start_new_session"] = True
-
-    proc = subprocess.Popen(cmd, **kwargs)
-    console.print(f"->  Starting gateway in the background (PID {proc.pid})...")
+    cmd = [quiet.hidden_python(), "-m", "mco.cli", "serve", "--host", host, "--port", str(port)]
+    with open(log_path, "a", encoding="utf-8", errors="replace") as log_file:
+        proc = subprocess.Popen(
+            cmd, stdout=log_file, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            **quiet.detached_kwargs())
 
     # Wait for /healthz so "started" means "answering", not "spawned".
     deadline = time.monotonic() + 20
-    healthy = False
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             break  # process died during startup
         try:
             if requests.get(f"http://{host}:{port}/healthz", timeout=1).ok:
-                healthy = True
-                break
+                return proc.pid
         except Exception:
             time.sleep(0.5)
-
-    if not healthy:
-        console.print(f"[red][X] Gateway did not become healthy. "
-                      f"See the log: {log_path}[/red]")
-        raise typer.Exit(code=1)
-
-    console.print(Panel.fit(
-        f"[bold green]BitCadence is running[/bold green]\n"
-        f"Console:   http://{host}:{port}/console\n"
-        f"Dashboard: http://{host}:{port}/dashboard\n"
-        f"Log:       {log_path}\n\n"
-        f"Stop it any time with: [bold]mco stop[/bold]",
-        border_style="green"
-    ))
+    raise quiet.StartFailed(f"The gateway did not answer. Its log is {log_path}")
 
 
 @app.command("restart")
@@ -803,7 +784,8 @@ def restart(
                   for c in psutil.net_connections(kind="tcp"))
     if running:
         stop_gateway(port=port, force=False)
-    start_gateway(host=host, port=port)
+    from mco import quiet
+    _run_plain(lambda: quiet.run_start(host=host, port=port, open_app=False, autostart=False))
 
 
 service_app = typer.Typer(help="Run BitCadence processes as boot-persistent OS services.")
@@ -1119,9 +1101,19 @@ def open_gui(
 
 
 @app.command("tray")
-def tray():
+def tray(
+    daemon: bool = typer.Option(False, "--daemon", help="The advanced tray that drives the worker daemon."),
+):
     """Status light and a door into the console (Windows tray / macOS menu bar / Linux AppIndicator)."""
-    from mco.tray.app import main as tray_main
+    if daemon:
+        from mco.tray.app import main as tray_main
+    else:
+        from mco.tray.app import preflight
+        message = preflight()
+        if message:
+            print(message, file=sys.stderr)
+            raise typer.Exit(code=1)
+        from mco.tray.simple import main as tray_main
     tray_main()
 
 
@@ -2170,7 +2162,14 @@ def register_agent(
     ),
 ):
     """Register a new client agent, generating a secure access token."""
-    token = register_agent_identity(name, role, org, scope)
+    try:
+        token = register_agent_identity(name, role, org, scope)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        # No raw traceback: plain sentence, with the underlying cause kept.
+        from mco import plain
+        plain.fail(e)
     from mco.orchestrator.auth import normalize_scopes
     scopes = normalize_scopes(scope or [])
     scope_line = f"Scopes: [cyan]{', '.join(scopes)}[/cyan]\n" if scopes else \
@@ -2247,7 +2246,29 @@ def register_agent_identity(name: str, role: str, org: str = "default", scope: O
         else:
             raise RuntimeError("Database failed to return data on upsert.")
     except Exception as e:
-        raise RuntimeError("Failed to register agent in database") from e
+        raise RuntimeError(f"Failed to register agent in database: {e}") from e
+
+
+def _registry_row(name: str) -> Optional[dict]:
+    """The agent's current registry row, or None. Used to undo a registration."""
+    from mco.orchestrator.routes import get_db_client
+    db_client = get_db_client()
+    if not db_client:
+        return None
+    rows = db_client.table("agent_registry").select("*").eq("instance_id", name).execute().data or []
+    return dict(rows[0]) if rows else None
+
+
+def _undo_registration(name: str, prior: Optional[dict]) -> None:
+    """Put the registry back as it was: delete a new agent, restore a re-registered one."""
+    from mco.orchestrator.routes import get_db_client
+    db_client = get_db_client()
+    if not db_client:
+        return
+    if prior is None:
+        db_client.table("agent_registry").delete().eq("instance_id", name).execute()
+    else:
+        db_client.table("agent_registry").upsert(prior).execute()
 
 
 @app.command("edition")
@@ -3339,25 +3360,55 @@ def helpers_add(
     role: str = typer.Option(..., "--role", prompt="What is it good at (its role, e.g. codex)?"),
 ):
     """Add a helper (same as `mco register`, asking for what it needs)."""
+    from mco import plain
+    registered = False
+    prior = None
     try:
         from mco.waker import agent_token_path
         path = agent_token_path(name)  # validate before changing the registry
+        prior = _registry_row(name)
         token = register_agent_identity(name=name, role=role)
-        config = get_config()
-        config.set(f"MCO_SECRET_AGENT_TOKEN_{name.upper()}", token, encrypt=True)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Set restrictive permissions on creation, before writing the credential.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as token_file:
-            os.chmod(path, 0o600)
-            token_file.write(token)
-        from mco import plain
+        registered = True
+
+        # Two places can hold the credential. The helper is usable if either
+        # does; only when neither does is the registration undone, so nobody is
+        # left with a registered agent whose token nobody holds.
+        in_store, store_error = False, None
+        try:
+            get_config().set(f"MCO_SECRET_AGENT_TOKEN_{name.upper()}", token, encrypt=True)
+            in_store = True
+        except Exception as e:  # noqa: BLE001
+            store_error = e
+        in_file, file_error = False, None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Set restrictive permissions on creation, before writing the credential.
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as token_file:
+                os.chmod(path, 0o600)
+                token_file.write(token)
+            in_file = True
+        except Exception as e:  # noqa: BLE001
+            file_error = e
+        if not (in_store or in_file):
+            raise RuntimeError(f"Couldn't save the helper's credential: {store_error or file_error}") from (
+                store_error or file_error)
+
         plain.say(f"Helper '{name}' added ({role}). Credential: mco_tok_...{token[-4:]}")
-        plain.say(f"Saved to {path} and the encrypted secret store.")
+        if in_store and in_file:
+            plain.say(f"Saved to {path} and the encrypted secret store.")
+        elif in_store:
+            plain.say(f"Saved to the encrypted secret store. (Couldn't write {path}: {file_error})")
+        else:
+            plain.say(f"Saved to {path}. (Couldn't use the encrypted secret store: {store_error})")
     except typer.Exit:
         raise
     except Exception as e:
-        from mco import plain
+        if registered:
+            try:
+                _undo_registration(name, prior)
+            except Exception:  # noqa: BLE001
+                plain.say(f"I couldn't undo the registration of '{name}'. Run: bitcadence fix")
         plain.fail(e)
 
 
@@ -3406,6 +3457,10 @@ def advanced(ctx: typer.Context):
 
 
 def main():
+    # pythonw (the login entry, the tray) has no console: give print() a sink.
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
     app()
 
 

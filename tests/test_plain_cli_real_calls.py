@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
-from mco import cli, menu, plain, scheduler, service, waker
+from mco import autostart, cli, menu, plain, quiet, scheduler, service, waker
 from mco.config import ConfigManager
 from mco.localstore import LocalStore
 from mco.security import SecretStore
@@ -20,14 +20,24 @@ def gateway_start(monkeypatch, tmp_path):
     import subprocess
 
     launched = []
+    up = {"now": False}
     monkeypatch.setattr(cli, "get_config", lambda: {})
     monkeypatch.setattr(psutil, "net_connections", lambda **kw: [])
     monkeypatch.setattr(service, "gateway_log_path", lambda: tmp_path / "gateway.log")
     def launch(cmd, **kw):
         launched.append(cmd)
+        up["now"] = True
         return SimpleNamespace(pid=123, poll=lambda: None)
     monkeypatch.setattr(subprocess, "Popen", launch)
-    monkeypatch.setattr(requests, "get", lambda *a, **kw: SimpleNamespace(ok=True))
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: SimpleNamespace(ok=up["now"]))
+    # Nothing here may touch the real home folder, login entry, tray or browser.
+    monkeypatch.setattr(quiet, "state_dir", lambda: tmp_path)
+    (tmp_path / "first-run-done").write_text("1")
+    monkeypatch.setattr(quiet, "gateway_state", lambda *a, **k: "running" if up["now"] else "stopped")
+    monkeypatch.setattr(quiet, "ensure_tray", lambda: None)
+    monkeypatch.setattr(quiet, "login_url", lambda *a, **k: "http://127.0.0.1/x")
+    monkeypatch.setattr(quiet.webbrowser, "open", lambda url: True)
+    monkeypatch.setattr(autostart, "install", lambda **k: "nowhere")
     return launched
 
 

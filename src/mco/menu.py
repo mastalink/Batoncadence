@@ -46,10 +46,10 @@ def build_items(snap: plain.Snapshot) -> List[MenuItem]:
 
 def _verbs(client, help_text: Callable[[], str]) -> dict:
     """key -> zero-arg callable, each the same code the CLI verb runs."""
-    from mco import cli
+    from mco import quiet
 
     return {
-        "start": lambda: cli.start_gateway(),
+        "start": lambda: quiet.run_start(),
         "status": lambda: plain.do_status(client),
         "ask": lambda: plain.do_ask(client, ""),
         "approve": lambda: plain.do_approve(client),
