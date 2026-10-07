@@ -1,5 +1,6 @@
 """Offline safety tests for the signed, fixed-document VIA release lane."""
 import base64
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import io
 from pathlib import Path
@@ -29,7 +30,7 @@ def approval(**changes):
         "release_directory": "/opt/via/releases/via-20260914-candidate",
         "image_digest": IMAGE,
         "evidence": [{"kind": "build", "sha256": "1" * 64}, {"kind": "test", "sha256": "2" * 64}, {"kind": "review", "sha256": "3" * 64}],
-        "expires_at": "2027-01-01T00:00:00Z",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z"),
         "signature": base64.b64encode(b"signature").decode(),
     }
     value.update(changes)

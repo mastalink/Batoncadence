@@ -52,7 +52,7 @@ async def test_pending_orders_by_priority_then_oldest(db, monkeypatch):
         db.table("agent_jobs").insert(row).execute()
 
     agent = {"instance_id": "claude-beast", "role": "claude", "org_id": "default"}
-    got = [j["id"] for j in await get_pending_jobs("claude", "claude-beast", agent)]
+    got = [j["id"] for j in get_pending_jobs("claude", "claude-beast", agent)]
 
     # Highest priority first; oldest first *within* a band so raising priority
     # cannot starve equally-urgent older work; negative priority sinks below
@@ -174,6 +174,6 @@ async def test_lease_next_and_pending_agree_on_what_is_next(db, monkeypatch):
         ("b", "2026-09-01T00:00:00Z", 10, None),
         ("c", "2026-08-01T00:00:00Z", 10, None),
     ])
-    inbox = await routes.get_pending_jobs("claude", "claude-beast", AGENT)
+    inbox = routes.get_pending_jobs("claude", "claude-beast", AGENT)
     leased = await routes.lease_next_job({}, AGENT)
     assert leased["job"]["id"] == inbox[0]["id"] == "c"
