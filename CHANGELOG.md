@@ -12,6 +12,17 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
   registration if no credential could be saved; cron errors are recognised by
   type, not by message text.
 
+### Changed
+- **Ask for something** replaces the drag-and-drop workflow builders. The console
+  page and `bitcadence ask` share one planner: a plain-language request, a drawn
+  plan, one Approve, and light tweaks (remove a step, always ask me, make it
+  repeat). New `/api/ask/plan` and `/api/ask/start`.
+
+### Removed
+- The Flow Control page (`/flow`) and the console's visual workflow builder.
+  Workflow YAML still runs through `bitcadence ask --file` and `mco workflow`;
+  `mco gui --flow` now opens the console.
+
 ## [0.5.0rc1] - 2026-09-22
 
 Public preview of the new Jev-enabled BitCadence. This is a release candidate,

@@ -281,6 +281,10 @@ def create_app() -> FastAPI:
     app_server.include_router(score_grants_router)
     app_server.include_router(score_autonomy_router)
 
+    # "Ask for something": the console's plain-language planner (same code as `bitcadence ask`).
+    from mco.orchestrator.ask_routes import ask_router
+    app_server.include_router(ask_router)
+
     # Admin API: agent management, settings, workflow submission (Control Panel)
     from mco.orchestrator.admin_routes import (
         agents_admin_router,
@@ -332,14 +336,6 @@ def create_app() -> FastAPI:
     @app_server.get("/console", response_class=HTMLResponse, include_in_schema=False)
     async def console_ui() -> str:
         return get_console_html()
-
-    # Flow Control - the live DAG of the board: design intent, run state,
-    # approval gates, and the audit trail on one canvas.
-    from mco.console import get_flow_html
-
-    @app_server.get("/flow", response_class=HTMLResponse, include_in_schema=False)
-    async def flow_ui() -> str:
-        return get_flow_html()
 
     from mco.orchestrator.score_gate_routes import SCORE_GATE_HTML
 
@@ -1066,7 +1062,7 @@ def _port_is_open(base_url: str, timeout: float = 2.0) -> bool:
 
 @app.command("gui")
 def open_gui(
-    flow: bool = typer.Option(False, "--flow", help="Open Flow Control (the live job-dependency canvas)."),
+    flow: bool = typer.Option(False, "--flow", hidden=True, help="Old option, kept so scripts keep working: opens the console."),
     dashboard: bool = typer.Option(False, "--dashboard", help="Open the minimal dashboard instead of the full console."),
     print_only: bool = typer.Option(False, "--print", help="Print the URL instead of opening a browser."),
 ):
@@ -1078,7 +1074,7 @@ def open_gui(
     import webbrowser
     config = get_config()
     base = (config.get("MCO_GATEWAY_URL") or "http://127.0.0.1:18789").rstrip("/")
-    page = "flow" if flow else ("dashboard" if dashboard else "console")
+    page = "dashboard" if dashboard and not flow else "console"
     url = f"{base}/{page}"
 
     # Say plainly when nothing is listening, rather than opening a dead tab.
@@ -3324,12 +3320,16 @@ def ask(
     request: str = typer.Argument("", help="What you'd like done, in plain words."),
     file: Optional[str] = typer.Option(None, "--file", help="Load a workflow YAML file instead."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Start without asking."),
+    remove: List[int] = typer.Option([], "--remove", help="Leave out step N of the plan (repeat for more)."),
+    ask_me: bool = typer.Option(False, "--ask-me", help="Always ask me at the end."),
+    repeat: str = typer.Option("", "--repeat", help='Make it repeat, e.g. "every Friday at 9 AM".'),
 ):
     """Say what you want done. You see the plan and OK it before anything runs."""
     from mco import plain
     if file:
         return submit_workflow_file(file, dry_run=False)
-    _run_plain(lambda: plain.do_ask(_gateway_client(), request, yes=yes))
+    _run_plain(lambda: plain.do_ask(_gateway_client(), request, yes=yes, remove=list(remove),
+                                    ask_end=ask_me, repeat=repeat))
 
 
 @app.command("fix")

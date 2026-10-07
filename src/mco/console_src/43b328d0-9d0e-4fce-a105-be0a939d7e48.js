@@ -522,7 +522,7 @@ function Overview({ jobs, agents, tone, advanced, onNav, onOpen }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.7fr) minmax(0, 1fr)", gap: 22, alignItems: "start" }}>
         <div>
-          <SectionTitle action={<Btn small kind="ghost" onClick={() => onNav("workflows")}>Open builder →</Btn>}>{tone === "plain" ? "Running flows" : "Workflows in flight"}</SectionTitle>
+          <SectionTitle action={<Btn small kind="ghost" onClick={() => onNav("ask")}>Ask for something →</Btn>}>{tone === "plain" ? "Running flows" : "Workflows in flight"}</SectionTitle>
           <WorkflowStrip jobs={jobs} tone={tone} onOpen={onOpen} />
           {gates > 0 ? (
             <div style={{ marginTop: 8 }}>

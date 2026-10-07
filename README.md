@@ -84,11 +84,10 @@ BitCadence sits between your agents and the work they do. It gives you:
 | **Approval gates** | Flag any job — or an entire role — to pause at `needs_approval` until a human decides. |
 | **Immutable audit** | Every mutation appends to `agent_job_events`. UPDATE and DELETE are rejected at the storage layer. |
 | **Scheduling & loops** | Cron/interval schedules and *bounded* loops — a loop must declare how it stops (count, deadline, or "until the queue is clear") or it's refused. Every scheduled job is stamped with what created it. |
-| **Flow Control** | Live DAG canvas at `/flow` — the board as a diagram whose edges are real `depends_on` gates, not decoration. Click a node for its audit trail; approve/reject/retry/cancel inline; drag to author a workflow and export YAML. |
 | **Encrypted secrets** | Credentials encrypt by default (AES-256-GCM) — never silently written to `.env` in the clear. Auto-provisioned on Windows; explicit master password elsewhere. |
 | **Embedded store** | No Supabase? An embedded SQLite store (`~/.mco/local.db`) takes over — the free edition is the full product. |
 | **Enterprise connectors** | Ingest ServiceNow incidents and Dynatrace problems as jobs; act back with auditable, gated platform actions. |
-| **Console GUI** | Zero-build web UI at `/console` — job board, approval queue, audit drawer, visual workflow builder. |
+| **Console GUI** | Zero-build web UI at `/console` — job board, approval queue, audit drawer, and "Ask for something": say what you want, check the drawn plan, approve once. |
 
 ---
 
@@ -110,7 +109,7 @@ mco send codex -t "Summarize repo" -m "..."   # drop a job into a dropbox
 mco listen --role codex --instance worker-1   # start a worker
 mco audit <job_id>    # inspect a job's full history
 mco approve <job_id>  # approve a gate
-mco gui               # open the console in your browser (--flow for Flow Control)
+mco gui               # open the console in your browser
 mco schedule init     # start declarative schedules & bounded loops
 mco launch <name>     # fire a named launcher (job, workflow, app, or URL) now
 ```
@@ -149,7 +148,7 @@ Full spec: [docs/DRUMLINE.md](docs/DRUMLINE.md)
 |---|---|---|---|
 | Drumline shared memory | ✓ | ✓ | ✓ |
 | Job board, approvals, audit | ✓ | ✓ | ✓ |
-| Console GUI & workflow builder | ✓ | ✓ | ✓ |
+| Console GUI & Ask for something | ✓ | ✓ | ✓ |
 | Embedded SQLite (zero cloud) | ✓ | ✓ | ✓ |
 | Multi-machine / Supabase | — | ✓ | ✓ |
 | Multi-org isolation + scoped-token RBAC | — | ✓ | ✓ |
@@ -171,7 +170,6 @@ vocabulary, and SSO setup: [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 - [docs/DRUMLINE.md](docs/DRUMLINE.md) — shared memory: how it works, how to use it
 - [docs/GOVERNANCE.md](docs/GOVERNANCE.md) — approval gates, audit trail, workflow DSL
 - [docs/SCHEDULING.md](docs/SCHEDULING.md) — launchers, cron/interval schedules, bounded loops
-- [docs/FLOW-CONTROL.md](docs/FLOW-CONTROL.md) — the live DAG canvas + visual workflow authoring
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — ServiceNow, Dynatrace, webhooks
 - [docs/ENTERPRISE.md](docs/ENTERPRISE.md) — editions, scoped-token RBAC, SSO delegation
 - [docs/SDK.md](docs/SDK.md) — write a custom agent/worker in fifteen lines

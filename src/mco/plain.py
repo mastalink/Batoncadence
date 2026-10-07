@@ -285,7 +285,9 @@ def _pick_role(snap: Snapshot) -> str:
     return roles[0] if roles else "claude"
 
 
-def do_ask(client, text: str, *, yes: bool = False) -> int:
+def do_ask(client, text: str, *, yes: bool = False, remove: Optional[List[int]] = None,
+           ask_end: bool = False, repeat: str = "") -> int:
+    from mco import ask_plan
     text = (text or "").strip()
     if not text:
         text = ask_text("What would you like done?")
@@ -296,24 +298,36 @@ def do_ask(client, text: str, *, yes: bool = False) -> int:
     if not snap.reachable:
         say((snap.error or friendly.translate(RuntimeError("unreachable"))).render())
         return 1
-    role = _pick_role(snap)
-    title = text if len(text) <= 70 else text[:67] + "..."
+    try:
+        plan = ask_plan.draft_plan(text, _pick_role(snap))
+        numbers = sorted(set(remove or []), reverse=True)  # highest first so numbers stay valid
+        ids = [plan["steps"][n - 1]["id"] for n in numbers if 1 <= n <= len(plan["steps"])]
+        if len(ids) != len(numbers):
+            raise ask_plan.PlanError(f"There is no step {max(numbers)}. The plan has {len(plan['steps'])}.")
+        plan = ask_plan.apply_tweaks(plan, remove=ids, ask_end=ask_end, repeat=repeat)
+    except ask_plan.PlanError as e:
+        say(str(e))
+        return 1
     say("Here's the plan:")
-    say(f"  Do: {title}")
-    say(f"  Who: your {role} helper")
+    for line in ask_plan.plan_lines(plan):
+        say(line)
+    say(f"  Who: your {plan['steps'][0]['role']} helper")
     say("  It waits for your OK before it runs.")
     if not confirm("Start this?", yes=yes):
         say("Okay, I didn't start anything.")
         return 0
-    res = client.send(
-        to_role=role, title=title, instructions=text,
-        requires_approval=True, max_retries=1,
-    )
-    job = (res or {}).get("job") or {}
-    if not (res or {}).get("success") or not job.get("id"):
+    try:
+        ask_plan.submit_plan(client.send, plan, first_step_waits=True)
+    except ask_plan.PlanError:
         say("That didn't go through.")
         say("Run: bitcadence fix")
         return 1
+    if plan.get("repeat"):
+        try:
+            ask_plan.save_repeat(plan)
+            say(f"Scheduled: {plan['repeat']['words']}. See it with: bitcadence schedule")
+        except ask_plan.PlanError as e:
+            say(f"Started, but I couldn't set the repeat. {e}")
     say("Started. It's waiting for your OK. Run `bitcadence approve` when you're ready.")
     return 0
 

@@ -315,39 +315,18 @@
         return res.job;
       } catch (e) { toast("err", "Create failed", e.message); }
     },
-    async submitWorkflow(name, steps) {
-      if (connState === "demo") return demo.submitWorkflow(name, steps);
-      // topo order: place steps whose deps are all already submitted
-      const remaining = steps.slice();
-      const idMap = {};
-      const run = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-      try {
-        let guard = 0;
-        while (remaining.length && guard++ < steps.length + 2) {
-          for (let i = remaining.length - 1; i >= 0; i--) {
-            const s = remaining[i];
-            const deps = (s.depends_on || []);
-            if (deps.every((d) => idMap[d])) {
-              const res = await api("/api/jobs", {
-                method: "POST",
-                body: JSON.stringify({
-                  title: s.title, description: s.instructions || "", target_agent_role: s.role,
-                  depends_on: deps.map((d) => idMap[d]),
-                  requires_approval: !!s.requires_approval,
-                  max_retries: s.max_retries || 0,
-                  escalate_to_role: s.escalate_to_role || null,
-                  input_payload: { workflow: { name, run, step: s.tmpId } },
-                }),
-              });
-              idMap[s.tmpId] = res.job.id;
-              remaining.splice(i, 1);
-            }
-          }
-        }
-        await poll();
-        toast("ok", "Workflow submitted", name + " — " + steps.length + " steps queued.");
-        return idMap;
-      } catch (e) { toast("err", "Workflow failed", e.message); return idMap; }
+    // "Ask for something": the gateway draws the plan (same planner as `bitcadence ask`).
+    async draftAsk(body) {
+      if (connState === "demo") throw new Error("Connect to your BitCadence in Settings first, then you can ask for something.");
+      const res = await api("/api/ask/plan", { method: "POST", body: JSON.stringify(body) });
+      return res.plan;
+    },
+    async startAsk(body) {
+      if (connState === "demo") throw new Error("Connect to your BitCadence in Settings first, then you can ask for something.");
+      const res = await api("/api/ask/start", { method: "POST", body: JSON.stringify(body) });
+      await poll();
+      toast("ok", "Approved", "Starting now.");
+      return res;
     },
     async seedDemoPipeline() {
       if (connState === "demo") return demo.seedDemoPipeline();
