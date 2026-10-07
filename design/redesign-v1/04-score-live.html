@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Live view - BitCadence mockup</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><nav class="nav" aria-label="Main"><a href="03-home.html">Home</a><a href="05-ask.html">Ask</a><a href="06-helpers.html">Helpers</a><a href="07-schedules.html">Schedules</a><a href="08-approvals.html">Approvals</a><a href="09-settings.html">Settings</a></nav><span class="sp"></span><a class="btn small" href="index.html">All mockups</a><button class="btn small" onclick="bcTheme()" aria-label="Switch light or dark">🌓</button></div>
+<main class="wrap">
+<div class="mock-note">Design mockup. Nothing here is connected to a real backend.</div>
+
+<h1>Weekly release</h1><p class="sub">Drawn automatically from the plan. You can't edit this view. Tap a card to see more.</p>
+<div class="row" style="margin-bottom:14px"><span class="pill idle">Waiting</span><span class="pill run">Working</span><span class="pill warn">Needs you</span><span class="pill bad">Stuck</span><span class="pill ok">Done</span></div>
+<div class="stages">
+ <div class="stage"><h3>1 · Research</h3>
+  <div class="acard done"><div class="who"><div class="avatar" style="width:38px;height:38px;font-size:20px">🔎</div>Scout<span style="flex:1"></span><span class="pill ok">Done</span></div>
+<p class="line">Found 7 open pull requests.</p><div class="tech">job 7f3a… · finished 6:58</div></div>
+ </div>
+ <div class="stage"><h3>2 · Test</h3>
+  <div class="acard done"><div class="who"><div class="avatar" style="width:38px;height:38px;font-size:20px">🧪</div>Tester<span style="flex:1"></span><span class="pill ok">Done</span></div>
+<p class="line">All 212 checks passed.</p><div class="tech">job 91bc… · 212/212</div></div>
+ </div>
+ <div class="stage"><h3>3 · Review</h3>
+  <div class="acard run"><div class="who"><div class="avatar" style="width:38px;height:38px;font-size:20px">👀</div>Reviewer<span style="flex:1"></span><span class="pill run"><span class="dot run"></span>Working</span></div>
+<p class="line">Reading the changes to the install page.</p><div class="loop"><span class="spin">🔁</span> Review, round 2</div><div class="tech">job c04d… · attempt 2 of 3</div></div>
+  <div class="acard stuck"><div class="who"><div class="avatar" style="width:38px;height:38px;font-size:20px">🛠️</div>Fixer<span style="flex:1"></span><span class="pill bad">Stuck</span></div>
+<p class="line">Can't save changes: another program has the log file open.</p><button class="btn primary small" data-toast="Closed the other program. Fixer is back to work.">Fix it</button><div class="tech">job 5e12… · log locked by a second copy</div></div>
+ </div>
+ <div class="stage"><h3>4 · Your say</h3>
+  <div class="acard need"><div class="who"><div class="avatar" style="width:38px;height:38px;font-size:20px">✋</div>You<span style="flex:1"></span><span class="pill warn">Needs you</span></div>
+<p class="line">Publish the release notes?</p><button class="btn good small" data-toast="Approved.">Approve</button><div class="tech">approval gate · job 2a77…</div></div>
+ </div>
+ <div class="stage"><h3>5 · Publish</h3>
+  <div class="acard idle"><div class="who"><div class="avatar" style="width:38px;height:38px;font-size:20px">📣</div>Publisher<span style="flex:1"></span><span class="pill idle">Waiting</span></div>
+<p class="line">Waiting for your approval.</p><div class="tech">job d9e0…</div></div>
+ </div>
+</div>
+<div class="flowarrow" aria-hidden="true" style="margin-top:6px"></div>
+<p class="hint">Moving dashes show work flowing forward. The spinning arrows show a step repeating until it passes. Stalls are flagged by themselves, in red, with a Fix it button.</p>
+<div class="card" style="margin-top:14px"><b>Auto-flagged:</b> Fixer stopped making progress 10 minutes ago, so BitCadence marked it Stuck and told you here and on your Home page. You didn't have to notice.</div>
+
+</main><nav class="tabbar" aria-label="Main"><a href="03-home.html"><b>🏠</b>Home</a><a href="05-ask.html"><b>✨</b>Ask</a><a href="06-helpers.html"><b>🤖</b>Helpers</a><a href="07-schedules.html"><b>⏰</b>Schedules</a><a href="08-approvals.html"><b>✋</b>Approvals</a><a href="09-settings.html"><b>⚙️</b>Settings</a></nav></body></html>

@@ -81,14 +81,14 @@ class TestRequireScopes:
     @pytest.mark.asyncio
     async def test_passes_when_scope_present(self):
         dep = require_scopes("jobs:read")
-        agent = await dep(agent={"role": "codex"})
+        agent = dep(agent={"role": "codex"})
         assert agent["role"] == "codex"
 
     @pytest.mark.asyncio
     async def test_403_names_missing_scopes(self):
         dep = require_scopes("jobs:approve", "integrations:manage")
         with pytest.raises(HTTPException) as exc:
-            await dep(agent={"role": "codex"})
+            dep(agent={"role": "codex"})
         assert exc.value.status_code == 403
         assert "jobs:approve" in exc.value.detail
         assert "integrations:manage" in exc.value.detail
@@ -182,7 +182,7 @@ class TestTrustedHeaderAuth:
     async def test_require_agent_prefers_proxy_identity(self, monkeypatch):
         self._enable(monkeypatch)
         req = FakeRequest({"X-Forwarded-User": "alice"})
-        agent = await auth_mod.require_agent(request=req, authorization="")
+        agent = auth_mod.require_agent(request=req, authorization="")
         assert agent["instance_id"] == "sso:alice"
 
 

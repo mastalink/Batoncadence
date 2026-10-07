@@ -280,7 +280,7 @@ def trusted_header_agent(request: Optional[Request]) -> Optional[dict]:
 
 # ── FastAPI dependencies ─────────────────────────────────────────────────────
 
-async def require_agent(
+def require_agent(
     request: Request = None,
     authorization: str = Header(default=""),
 ) -> dict:
@@ -294,9 +294,11 @@ async def require_agent(
     Returns the agent's {instance_id, role, status, org_id, scopes?, ...}.
     """
     from mco.orchestrator.routes import get_db_client
+    from mco.request_timing import identify_caller
 
     sso = trusted_header_agent(request)
     if sso:
+        identify_caller(sso.get("instance_id"))
         return sso
 
     db_client = get_db_client()
@@ -317,6 +319,7 @@ async def require_agent(
                 detail="No agent token. Add MCO_LOCAL_TOKEN to .env or run 'mco setup'.",
             )
         # Token is either correct or MCO_LOCAL_TOKEN is absent and any token is accepted.
+        identify_caller("local")
         return {
             "instance_id": "local",
             "role": "admin",
@@ -330,11 +333,13 @@ async def require_agent(
     )
     if session:
         enforce_session_csrf(request)
+        identify_caller(session.get("instance_id"))
         return session
 
     agent = verify_token(db_client, extract_bearer(authorization))
     if not agent:
         raise HTTPException(status_code=401, detail="Invalid or missing agent token")
+    identify_caller(agent.get("instance_id"))
     return agent
 
 
@@ -351,7 +356,7 @@ def require_scopes(*scopes: str):
     """
     needed: Iterable[str] = scopes
 
-    async def _dep(agent: dict = Depends(require_agent)) -> dict:
+    def _dep(agent: dict = Depends(require_agent)) -> dict:
         missing = [s for s in needed if not has_scope(agent, s)]
         if missing:
             raise HTTPException(

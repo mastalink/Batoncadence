@@ -3,7 +3,7 @@ import hashlib
 import json
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -534,7 +534,7 @@ def test_repo_write_full_e2e_real_worktree_commit(tmp_path):
     wt_dir, target_branch, initial_sha = _make_test_git_worktree(tmp_path)
 
     key = b"s05-test-key-material-is-long-enough-0001"
-    now_dt = datetime(2026, 9, 16, tzinfo=timezone.utc)
+    now_dt = datetime.now(timezone.utc)
     db_store = LocalStore(tmp_path / "live_score.db")
     grant_svc = GrantService(db_store, verification_key=key)
     executor = LiveScoreAdapterExecutor(
@@ -566,8 +566,8 @@ def test_repo_write_full_e2e_real_worktree_commit(tmp_path):
         "actions": ["repository:write"],
         "resources": [str(wt_dir)],
         "env": "test",
-        "not_before": "2026-09-15T00:00:00Z",
-        "expires_at": "2026-10-01T00:00:00Z",
+        "not_before": (now_dt - timedelta(days=1)).isoformat(),
+        "expires_at": (now_dt + timedelta(days=1)).isoformat(),
         "budget_cents": 0,
         "human_principal": "conductor",
     })
@@ -633,7 +633,7 @@ def test_repo_write_adapter_raising_head_mismatch_fails_and_blocks_run(tmp_path)
     wt_dir, target_branch, initial_sha = _make_test_git_worktree(tmp_path)
 
     key = b"s05-test-key-material-is-long-enough-0001"
-    now_dt = datetime(2026, 9, 16, tzinfo=timezone.utc)
+    now_dt = datetime.now(timezone.utc)
     db_store = LocalStore(tmp_path / "live_score.db")
     grant_svc = GrantService(db_store, verification_key=key)
     executor = LiveScoreAdapterExecutor(
@@ -665,8 +665,8 @@ def test_repo_write_adapter_raising_head_mismatch_fails_and_blocks_run(tmp_path)
         "actions": ["repository:write"],
         "resources": [str(wt_dir)],
         "env": "test",
-        "not_before": "2026-09-15T00:00:00Z",
-        "expires_at": "2026-10-01T00:00:00Z",
+        "not_before": (now_dt - timedelta(days=1)).isoformat(),
+        "expires_at": (now_dt + timedelta(days=1)).isoformat(),
         "budget_cents": 0,
         "human_principal": "conductor",
     })
@@ -704,3 +704,67 @@ def test_repo_write_adapter_raising_head_mismatch_fails_and_blocks_run(tmp_path)
     assert work_disp["status"] == "failed"
 
 
+
+
+class LaggingEventsBoard(Board):
+    """The job row reads completed before its completion event is visible (seen live 2026-10-06)."""
+    def __init__(self):
+        super().__init__()
+        self.hidden = set()
+        self.wrong_actor = set()
+    def events(self, job_id):
+        if job_id in self.hidden:
+            return [dict(job_id=job_id, event="leased", actor_id=self.jobs[job_id]["target_agent_id"])]
+        if job_id in self.wrong_actor:
+            return [dict(job_id=job_id, event="status:completed", actor_id="impostor", actor_role="claude")]
+        return super().events(job_id)
+
+
+def test_completion_event_lag_waits_instead_of_blocking(tmp_path):
+    bridge = ScoreBridge(tmp_path/"state.db", tmp_path/"artifacts")
+    board = LaggingEventsBoard()
+    bridge.initialize("run", score(), principal="conductor", org="default",
+                      targets={"auditor": "worker", "reviewer": "independent"}, credential_hash=board.identity)
+    path = bridge.root/"report.json"; path.write_text('{"audit":"test"}', encoding="utf-8")
+    e = {"report": {"path": "report.json", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}
+    work = bridge.plan("run")[0]; bridge.dispatch("run", board)
+    board.complete(work, {"artifacts": e})
+    board.jobs[work]["completed_at"] = datetime.now(timezone.utc).isoformat()
+    board.hidden.add(work)
+    bridge.poll("run", board)                       # completed row, event not visible yet
+    assert bridge.status("run")["status"] == "running"
+    board.hidden.discard(work)
+    bridge.poll("run", board)                       # event now visible: proceeds normally
+    assert bridge.status("run")["status"] == "running"
+    assert bridge.plan("run")                       # the review step is now planned
+
+
+def test_completion_by_wrong_actor_still_blocks(tmp_path):
+    bridge = ScoreBridge(tmp_path/"state.db", tmp_path/"artifacts")
+    board = LaggingEventsBoard()
+    bridge.initialize("run", score(), principal="conductor", org="default",
+                      targets={"auditor": "worker", "reviewer": "independent"}, credential_hash=board.identity)
+    path = bridge.root/"report.json"; path.write_text('{"audit":"test"}', encoding="utf-8")
+    e = {"report": {"path": "report.json", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}
+    work = bridge.plan("run")[0]; bridge.dispatch("run", board)
+    board.complete(work, {"artifacts": e})
+    board.wrong_actor.add(work)
+    with pytest.raises(ScoreError):
+        bridge.poll("run", board)
+    assert bridge.status("run")["status"] == "blocked"
+
+
+def test_missing_completion_event_blocks_after_grace(tmp_path):
+    bridge = ScoreBridge(tmp_path/"state.db", tmp_path/"artifacts")
+    board = LaggingEventsBoard()
+    bridge.initialize("run", score(), principal="conductor", org="default",
+                      targets={"auditor": "worker", "reviewer": "independent"}, credential_hash=board.identity)
+    path = bridge.root/"report.json"; path.write_text('{"audit":"test"}', encoding="utf-8")
+    e = {"report": {"path": "report.json", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}
+    work = bridge.plan("run")[0]; bridge.dispatch("run", board)
+    board.complete(work, {"artifacts": e})
+    board.jobs[work]["completed_at"] = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    board.hidden.add(work)
+    with pytest.raises(ScoreError):
+        bridge.poll("run", board)
+    assert bridge.status("run")["status"] == "blocked"

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Ask for something - BitCadence mockup</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><nav class="nav" aria-label="Main"><a href="03-home.html">Home</a><a href="05-ask.html" class=on>Ask</a><a href="06-helpers.html">Helpers</a><a href="07-schedules.html">Schedules</a><a href="08-approvals.html">Approvals</a><a href="09-settings.html">Settings</a></nav><span class="sp"></span><a class="btn small" href="index.html">All mockups</a><button class="btn small" onclick="bcTheme()" aria-label="Switch light or dark">🌓</button></div>
+<main class="wrap narrow">
+<div class="mock-note">Design mockup. Nothing here is connected to a real backend.</div>
+
+<h1>Ask for something</h1><p class="sub">Say it the way you'd tell a person. We'll draw the plan and you check it.</p>
+<div id="a1" class="card">
+ <label for="q">What should happen?</label>
+ <textarea id="q">Research open PRs, run tests, if green draft release notes and ask me to publish.</textarea>
+ <div class="chips" style="margin:10px 0"><button class="chip" data-toast="Example filled in.">Summarize my week</button><button class="chip" data-toast="Example filled in.">Check my website daily</button></div>
+ <button class="btn primary big" data-hide="a1" data-show="a2">Draft a plan</button>
+</div>
+<div id="a2" class="hide">
+ <div class="card"><h2 style="margin-top:0">Here's the plan</h2>
+ <div class="flow">
+  <div class="fnode">🔎 Look at open pull requests</div><div class="fedge"></div>
+  <div class="fnode">🧪 Run the tests</div><div class="fedge"><small>If everything passes</small></div>
+  <div class="fnode">📝 Write draft release notes</div><div class="fedge"></div>
+  <div class="fnode gate">✋ Ask you before publishing</div>
+ </div>
+ <p class="hint">Light tweaks only. To change the plan itself, edit your request and draft again.</p>
+ <div class="row"><button class="btn small" data-toast="Removed. Plan updated.">Remove a step</button>
+ <button class="btn small" data-toast="Asking you first: on.">Always ask me at the end</button>
+ <button class="btn small" data-toast="Set to every Friday at 9 AM.">Make it repeat</button></div></div>
+ <div class="row" style="margin-top:16px"><button class="btn good big" data-toast="Approved. Starting now.">Approve and start</button>
+ <button class="btn" data-hide="a2" data-show="a1">Change my request</button></div>
+</div>
+
+</main><nav class="tabbar" aria-label="Main"><a href="03-home.html"><b>🏠</b>Home</a><a href="05-ask.html" class=on><b>✨</b>Ask</a><a href="06-helpers.html"><b>🤖</b>Helpers</a><a href="07-schedules.html"><b>⏰</b>Schedules</a><a href="08-approvals.html"><b>✋</b>Approvals</a><a href="09-settings.html"><b>⚙️</b>Settings</a></nav></body></html>

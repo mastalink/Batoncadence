@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>BitCadence redesign v1 - mockups</title>
+<link rel="stylesheet" href="assets/style.css"><script src="assets/app.js"></script>
+<style>
+.layout{display:grid;grid-template-columns:300px 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
+.list a{display:block;padding:12px 14px;border-radius:12px;text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--card);margin-bottom:8px;font-weight:700}
+.list a small{display:block;font-weight:400;color:var(--mute)}
+.list a.on{border-color:var(--brand);background:var(--runbg)}
+.stage-frame{background:var(--idlebg);border-radius:var(--r);padding:14px;display:flex;justify-content:center}
+iframe{border:1px solid var(--line);border-radius:12px;background:var(--bg);height:760px;width:100%;max-width:1000px}
+iframe.phone{max-width:390px}
+</style></head><body>
+<div class="topbar"><span class="logo">BitCadence</span><span class="hint">Redesign v1, Phase 1 mockups</span><span class="sp"></span>
+<button class="btn small" onclick="bcTheme();sync()" aria-label="Switch light or dark">🌓 Light/dark</button></div>
+<main class="wrap">
+<h1>Clickable mockups</h1>
+<p class="sub">Static pages, no backend. Pick a flow, switch between phone and desktop, and try the buttons. Written for two people: someone who didn't grow up with computers, and a teen who only uses an iPhone.</p>
+<div class="layout"><div class="list" id="list" role="navigation" aria-label="Flows">
+<a href="01-first-run.html" class="on">1. First run<small>Install, "You're all set"</small></a>
+<a href="02-connect-ai.html">2. Connect an AI<small>One tap per app</small></a>
+<a href="03-home.html">3. Home<small>What needs you, what's running</small></a>
+<a href="04-score-live.html">4. Live view<small>Watch the work happen</small></a>
+<a href="05-ask.html">5. Ask for something<small>Plain words to plan</small></a>
+<a href="06-helpers.html">6. Helpers<small>Names, add, health light</small></a>
+<a href="07-schedules.html">7. Schedules<small>Pick a time like an alarm</small></a>
+<a href="08-approvals.html">8. Approvals<small>No dead ends</small></a>
+<a href="09-settings.html">9. Settings<small>Advanced, behind plain labels</small></a>
+<h2>Specs</h2>
+<a href="CLI.md">CLI redesign<small>Plain verbs, 15 before/after</small></a>
+<a href="STEP-COUNT.md">Step-count table<small>Every task, now vs. redesigned</small></a>
+<a href="README.md">Decisions and open questions</a>
+</div>
+<div><div class="row" style="margin-bottom:10px"><button class="btn small primary" id="bd" onclick="setW('desk')">🖥️ Desktop</button><button class="btn small" id="bp" onclick="setW('phone')">📱 Phone</button>
+<a class="btn small" id="open" href="01-first-run.html" target="_blank" rel="noopener">Open on its own</a></div>
+<div class="stage-frame"><iframe id="f" src="01-first-run.html" title="Mockup preview"></iframe></div></div></div>
+</main>
+<script>
+var f=document.getElementById('f');
+function sync(){var t=document.documentElement.getAttribute('data-theme');try{f.contentDocument.documentElement.setAttribute('data-theme',t)}catch(e){}}
+function setW(m){f.className=m==='phone'?'phone':'';document.getElementById('bp').classList.toggle('primary',m==='phone');document.getElementById('bd').classList.toggle('primary',m!=='phone');}
+f.addEventListener('load',sync);
+document.getElementById('list').addEventListener('click',function(e){var a=e.target.closest('a');if(!a)return;
+ if(/\.md$/.test(a.getAttribute('href')))return;
+ e.preventDefault();document.querySelectorAll('#list a').forEach(function(x){x.classList.remove('on')});a.classList.add('on');
+ f.src=a.getAttribute('href');document.getElementById('open').href=a.getAttribute('href');});
+</script></body></html>

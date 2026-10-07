@@ -1,0 +1,26 @@
+C:\Users\masta\AppData\Local\Temp\cap.py:13: SyntaxWarning: "\S" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\S"? A raw string is also an option.
+  autostart.install = lambda **k: "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run\BitCadence"
+$ bitcadence start        (first run)
+You're all set.
+  BitCadence now runs quietly in the background.
+  Look for the small icon near your clock. It starts by itself when you sign in.
+  [x] Running quietly   [x] No window to keep open
+Next: connect your AI with `bitcadence connect`.
+[the CLI prints nothing here; the capture script notes the link opened was: /local-login?code=<one-time, 60s, single-use>]
+[open link once] HTTP 200   [open it again] HTTP 410 (expired)
+$ bitcadence start        (any later start)
+BitCadence is already running.
+Login entry written to: HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run\BitCadence
+=== Tray: status light = colour + word ===
+  gateway answering  -> green 'Running'   tooltip: BitCadence: Running
+  paused             -> amber 'Paused'   tooltip: BitCadence: Paused
+  a job failed       -> amber 'Needs attention'   tooltip: BitCadence: Needs attention
+  not answering      -> red   'Stopped'   tooltip: BitCadence: Stopped
+Menu while Running / Paused:
+  BitCadence: Running (disabled) | Open BitCadence | Pause | Fix problems | Quit
+  BitCadence: Paused (disabled) | Open BitCadence | Resume | Fix problems | Quit
+->  Stopping 'python.exe' (PID 54008) on port 53019...
+[OK] PID 54008 killed.
+
+Images: slice2/welcome.png (first-run screen), slice2/tray-*.png (icon per state).
+The capture ran a real gateway on a throwaway port and home folder; the tray library (pystray) is not installed on the build machine, so the tray is shown as its state mapping, menu and rendered icons.
