@@ -99,6 +99,23 @@ def test_score_job_is_not_reroutable(setup):
     assert payload["input_payload"]["no_reroute"] is True
 
 
+def test_score_job_outranks_normal_board_traffic(setup, monkeypatch):
+    # Workers lease highest priority first and the task deadline runs from
+    # submission, so a priority-0 Score job starved behind busy queues.
+    b, g, _ = setup
+    job_id = b.plan("run")[0]
+    b.dispatch("run", g)
+    assert g.jobs[job_id]["priority"] == 50
+
+
+def test_score_job_priority_is_configurable(monkeypatch):
+    from mco.orchestrator import score_bridge
+    monkeypatch.setenv("MCO_SCORE_JOB_PRIORITY", "7")
+    assert score_bridge._score_job_priority() == 7
+    monkeypatch.setenv("MCO_SCORE_JOB_PRIORITY", "not-a-number")
+    assert score_bridge._score_job_priority() == 50
+
+
 def test_malformed_artifact_digest_is_rejected_before_file_hashing(setup):
     b, g, e = setup
     job = b.plan("run")[0]
