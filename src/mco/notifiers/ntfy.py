@@ -55,20 +55,43 @@ def _vault_topic(config, db=None, org_id: str = "default") -> str:
         return ""
 
 
+AWS_TOPIC_TTL_SECONDS = 3600
+AWS_TOPIC_RETRY_SECONDS = 300
+# (secret_id, profile) -> (topic, monotonic expiry). Every push resolves the
+# topic, so without this each alert paid a Secrets Manager round trip.
+_aws_topic_cache: dict[tuple[str, Optional[str]], tuple[str, float]] = {}
+
+
 def _aws_vault_topic(config) -> str:
-    """Read the optional AWS vault key without ever logging its value."""
+    """Read the optional AWS vault key without ever logging its value.
+
+    Bounded: on 2026-10-08 an unbounded call hung ~100 s and held up gateway
+    startup. A failure is cached briefly so a dead endpoint costs one timeout
+    per retry window, not one per push.
+    """
     secret_id = str(config.get("NTFY_TOPIC_SECRET_ID") or "").strip()
     if not secret_id:
         return ""
+    profile = str(config.get("NTFY_AWS_PROFILE") or "").strip() or None
+    key = (secret_id, profile)
+    cached = _aws_topic_cache.get(key)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+    topic, ttl = "", AWS_TOPIC_RETRY_SECONDS
     try:
         import boto3
-        profile = str(config.get("NTFY_AWS_PROFILE") or "").strip() or None
+        from botocore.config import Config
         session = boto3.Session(profile_name=profile)
-        value = session.client("secretsmanager").get_secret_value(SecretId=secret_id)
-        return str(value.get("SecretString") or "").strip()
+        client = session.client(
+            "secretsmanager",
+            config=Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 2, "mode": "standard"}),
+        )
+        value = client.get_secret_value(SecretId=secret_id)
+        topic, ttl = str(value.get("SecretString") or "").strip(), AWS_TOPIC_TTL_SECONDS
     except Exception as exc:
         logger.warning("ntfy vault topic unavailable ({})", type(exc).__name__)
-        return ""
+    _aws_topic_cache[key] = (topic, time.monotonic() + ttl)
+    return topic
 
 
 def topic_is_private(topic: str) -> bool:
