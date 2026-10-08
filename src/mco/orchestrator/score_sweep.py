@@ -177,6 +177,10 @@ def alert_new_failures(failing: dict[str, str], config: Optional[dict] = None, n
         logger.warning("Unable to read score failure alert state (%s)", type(exc).__name__)
         seen, first = set(), True
     current = {run_id for run_id in failing if not str(run_id).startswith("_")}
+    if first and not current:
+        # Nothing to seed from. Writing [] here would make the next pass treat
+        # every old stuck run as new (the 20-alert replay of 2026-10-08).
+        return []
     fresh = [] if first else sorted(current - seen)
     if notify is None:
         from mco.notifiers.ntfy import notify_event

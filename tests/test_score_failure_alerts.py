@@ -53,6 +53,46 @@ def test_a_broken_notifier_never_raises(tmp_path):
     assert alert_new_failures({"run-a": "blocked"}, _config(tmp_path), boom) == []
 
 
+def test_an_empty_first_pass_does_not_seed_an_empty_list(tmp_path):
+    sent, notify = _recorder()
+    alert_new_failures({}, _config(tmp_path), notify)
+    assert not (tmp_path / FAILING_ALERTS_FILENAME).exists()
+    alert_new_failures({"old-run": "blocked"}, _config(tmp_path), notify)   # real first seed
+    assert sent == []
+
+
+def _loop_once(monkeypatch, result):
+    calls = []
+    stop = asyncio.Event()
+
+    async def _once(_conductor):
+        stop.set()
+        return result
+
+    monkeypatch.setattr(score_sweep, "open_conductor", lambda *a, **k: object())
+    monkeypatch.setattr(health, "score_sweep_once", _once)
+    monkeypatch.setattr(score_sweep, "alert_new_failures", lambda failing: calls.append(dict(failing)))
+    app = SimpleNamespace(state=SimpleNamespace(
+        score_sweep_seconds=1, score_sweep_started=0.0, score_sweep_last_ok=None,
+        score_sweep_error=None, score_sweep_failing_runs=[]))
+    asyncio.run(asyncio.wait_for(health.score_sweep_loop(app, 0.01, stop), timeout=5))
+    return calls
+
+
+def test_a_paused_sweep_does_not_touch_the_alert_state(monkeypatch):
+    """Paused sweeps return before reading the runs table; an empty result must not wipe the alerted set."""
+    assert _loop_once(monkeypatch, SweepResult(skipped={"_all": "sweep_paused"})) == []
+
+
+def test_pause_then_resume_pushes_once(tmp_path):
+    _seed(tmp_path, [])
+    sent, notify = _recorder()
+    alert_new_failures({"run-a": "blocked"}, _config(tmp_path), notify)
+    # (paused passes are skipped by the loop, so no call here)
+    alert_new_failures({"run-a": "blocked"}, _config(tmp_path), notify)
+    assert len(sent) == 1
+
+
 def test_the_gateway_sweep_loop_calls_the_alert(monkeypatch):
     """Wiring: the production sweep loop hands durable failures to the alert, not tick errors."""
     calls = []
