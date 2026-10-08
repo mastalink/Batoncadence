@@ -183,6 +183,9 @@ async def score_sweep_loop(app, interval, stop=None):
             app.state.score_sweep_last_ok = time.monotonic()
             app.state.score_sweep_error = None
             app.state.score_sweep_failing_runs = sorted(result.failing)
+            # Durable blocks only: a transient tick error is retried next pass.
+            stuck = {k: v for k, v in result.failing.items() if k not in result.errors}
+            await asyncio.to_thread(score_sweep.alert_new_failures, stuck)
             if not result.quiet:
                 logger.info("Conductor sweep: %s", result.describe())
         except Exception as exc:
