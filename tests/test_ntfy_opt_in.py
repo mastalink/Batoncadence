@@ -50,7 +50,18 @@ def _fake_boto3(monkeypatch, calls, fail=False, seen_config=None):
                 seen_config.append(config)
             return _FakeSM(calls, fail)
 
+    class _Config:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    # CI has no AWS SDK installed; fake both modules the lookup imports.
+    botocore = types.ModuleType("botocore")
+    botocore_config = types.ModuleType("botocore.config")
+    botocore_config.Config = _Config
+    botocore.config = botocore_config
     monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(Session=_Session))
+    monkeypatch.setitem(sys.modules, "botocore", botocore)
+    monkeypatch.setitem(sys.modules, "botocore.config", botocore_config)
 
 
 def test_aws_topic_call_is_bounded_and_cached(monkeypatch):
