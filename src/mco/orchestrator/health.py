@@ -185,7 +185,11 @@ async def score_sweep_loop(app, interval, stop=None):
             app.state.score_sweep_failing_runs = sorted(result.failing)
             # Durable blocks only: a transient tick error is retried next pass.
             stuck = {k: v for k, v in result.failing.items() if k not in result.errors}
-            await asyncio.to_thread(score_sweep.alert_new_failures, stuck)
+            # A paused sweep returns before reading the runs table, so its empty
+            # `failing` means "not looked", not "nothing stuck". Feeding it in
+            # would wipe the alerted set and replay every old block on resume.
+            if "_all" not in result.skipped:
+                await asyncio.to_thread(score_sweep.alert_new_failures, stuck)
             if not result.quiet:
                 logger.info("Conductor sweep: %s", result.describe())
         except Exception as exc:
