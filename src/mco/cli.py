@@ -285,6 +285,10 @@ def create_app() -> FastAPI:
     from mco.orchestrator.ask_routes import ask_router
     app_server.include_router(ask_router)
 
+    # Helpers page: friendly names, health light, add a helper, "Fix it" (same code as `bitcadence helpers`).
+    from mco.orchestrator.helpers_routes import helpers_router
+    app_server.include_router(helpers_router)
+
     # Admin API: agent management, settings, workflow submission (Control Panel)
     from mco.orchestrator.admin_routes import (
         agents_admin_router,
@@ -3360,56 +3364,25 @@ def helpers_add(
     role: str = typer.Option(..., "--role", prompt="What is it good at (its role, e.g. codex)?"),
 ):
     """Add a helper (same as `mco register`, asking for what it needs)."""
-    from mco import plain
-    registered = False
-    prior = None
+    from mco import helpers as helpers_mod, plain
     try:
-        from mco.waker import agent_token_path
-        path = agent_token_path(name)  # validate before changing the registry
-        prior = _registry_row(name)
-        token = register_agent_identity(name=name, role=role)
-        registered = True
-
-        # Two places can hold the credential. The helper is usable if either
-        # does; only when neither does is the registration undone, so nobody is
-        # left with a registered agent whose token nobody holds.
-        in_store, store_error = False, None
-        try:
-            get_config().set(f"MCO_SECRET_AGENT_TOKEN_{name.upper()}", token, encrypt=True)
-            in_store = True
-        except Exception as e:  # noqa: BLE001
-            store_error = e
-        in_file, file_error = False, None
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            # Set restrictive permissions on creation, before writing the credential.
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as token_file:
-                os.chmod(path, 0o600)
-                token_file.write(token)
-            in_file = True
-        except Exception as e:  # noqa: BLE001
-            file_error = e
-        if not (in_store or in_file):
-            raise RuntimeError(f"Couldn't save the helper's credential: {store_error or file_error}") from (
-                store_error or file_error)
-
-        plain.say(f"Helper '{name}' added ({role}). Credential: mco_tok_...{token[-4:]}")
-        if in_store and in_file:
-            plain.say(f"Saved to {path} and the encrypted secret store.")
-        elif in_store:
-            plain.say(f"Saved to the encrypted secret store. (Couldn't write {path}: {file_error})")
-        else:
-            plain.say(f"Saved to {path}. (Couldn't use the encrypted secret store: {store_error})")
+        added = helpers_mod.add_helper(name, role)
+        plain.say(f"Helper '{added['name']}' added ({added['role']}). Credential: {added['credential']}")
+        plain.say(added.get("saved_message") or f"Saved to {added['saved_to']} and the encrypted secret store.")
+    except helpers_mod.HelperError as e:
+        plain.say(str(e))
+        raise typer.Exit(code=1)
     except typer.Exit:
         raise
     except Exception as e:
-        if registered:
-            try:
-                _undo_registration(name, prior)
-            except Exception:  # noqa: BLE001
-                plain.say(f"I couldn't undo the registration of '{name}'. Run: bitcadence fix")
         plain.fail(e)
+
+
+@helpers_app.command("fix")
+def helpers_fix(yes: bool = typer.Option(False, "--yes", "-y", help="Repair without asking.")):
+    """Find a locked notes file or a second copy of a helper, and offer to fix it."""
+    from mco import plain
+    _run_plain(lambda: plain.do_helpers_fix(_gateway_client(), yes=yes))
 
 
 @app.command("connect")

@@ -328,6 +328,20 @@
       toast("ok", "Approved", "Starting now.");
       return res;
     },
+    // Helpers page: same code as `bitcadence helpers` / `bitcadence fix`.
+    async helpersList() {
+      return api("/api/helpers");
+    },
+    async addHelper(body) {
+      const res = await api("/api/helpers/add", { method: "POST", body: JSON.stringify(body) });
+      await poll();
+      return res;
+    },
+    async fixHelpers(confirm) {
+      const res = await api("/api/helpers/fix", { method: "POST", body: JSON.stringify({ confirm: !!confirm }) });
+      if (confirm) await poll();
+      return res;
+    },
     async seedDemoPipeline() {
       if (connState === "demo") return demo.seedDemoPipeline();
       try {

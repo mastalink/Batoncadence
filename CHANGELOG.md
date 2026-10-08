@@ -18,6 +18,13 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
   plan, one Approve, and light tweaks (remove a step, always ask me, make it
   repeat). New `/api/ask/plan` and `/api/ask/start`.
 
+- **Helpers** page and `bitcadence helpers`: friendly names, a health light with a
+  word, and what each helper is doing in plain words. Add a helper (same path as
+  `bitcadence helpers add`, the sign-in is never shown in full) and **Fix it**,
+  which finds a locked worker log or a duplicate wake process with a dry run first
+  and repairs only after a confirm (`bitcadence helpers fix`, also part of
+  `bitcadence fix`). New `/api/helpers`, `/api/helpers/add`, `/api/helpers/fix`.
+
 ### Removed
 - The Flow Control page (`/flow`) and the console's visual workflow builder.
   Workflow YAML still runs through `bitcadence ask --file` and `mco workflow`;

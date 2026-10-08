@@ -1,0 +1,14 @@
+Helpers: friendly names, a health light, and a confirm-first Fix it (redesign slice 5)
+
+src/mco/helpers.py is the one implementation: bitcadence helpers / helpers fix /
+fix (plain.py) and the console Helpers page (/api/helpers, /api/helpers/add,
+/api/helpers/fix) all call it. Each helper shows a friendly name, a light with a
+word (shape + word, never colour alone) and what it is doing in plain words.
+Add a helper shares the `helpers add` path and returns only a masked credential.
+Fix it detects a locked <instance>.log and a duplicate wake process as a dry run
+and repairs only after a confirm (Y in the terminal, "confirm": true in the API);
+non-BitCadence holders are reported, never stopped.
+
+Evidence: design/redesign-v1/evidence-s5/helpers-cli.txt (text capture)
+Results: design/redesign-v1/s5-test-results.txt (1813 passed, 15 skipped)
+Wiki: docs/wiki/Helpers.md. verify_cli_examples.py is absent on this branch.

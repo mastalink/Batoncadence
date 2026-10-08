@@ -268,6 +268,143 @@ function AgentFleet({ agents, jobs, tone, advanced }) {
   );
 }
 
+// ----- Helpers page (design/redesign-v1/06-helpers.html) -----
+// Friendly names, a health light with a word, what each helper is doing, "Add a helper"
+// (same path as `bitcadence helpers add`) and "Fix it" (dry run first, then a confirm).
+// Colour is never the only signal: every light also has a shape and its word.
+const HELPERS_STYLE = `
+ .hp-view{max-width:980px;margin:0 auto;line-height:1.6;min-width:0}.hp-view h1{margin:0 0 6px}.hp-view .sub{color:var(--text-2);margin:0 0 18px}
+ .hp-view button,.hp-view select,.hp-view input{min-height:48px;min-width:48px;padding:10px 18px;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface);color:var(--text);font:inherit;cursor:pointer}
+ .hp-view input{cursor:text;width:100%;max-width:420px}.hp-view button[disabled]{opacity:.55;cursor:default}
+ .hp-primary{background:var(--accent)!important;border-color:var(--accent-strong)!important;color:#fff!important;font-weight:600}
+ .hp-card{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px;overflow-wrap:anywhere}
+ .hp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}.hp-grid .hp-card{margin:0}
+ .hp-top{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.hp-top .hp-who{flex:1;min-width:140px}
+ .hp-avatar{width:40px;height:40px;border-radius:99px;display:flex;align-items:center;justify-content:center;font-weight:700;background:var(--surface-2);border:1px solid var(--border-strong)}
+ .hp-pill{display:inline-flex;gap:6px;align-items:center;border:2px solid var(--border-strong);border-radius:99px;padding:4px 12px;font-weight:600;min-height:32px}
+ .hp-pill[data-light="red"]{border-color:#b42318}.hp-pill[data-light="green"]{border-color:#1a7f37}
+ .hp-hint{color:var(--text-2);font-size:14px;margin:6px 0 0}.hp-label{display:block;font-weight:600;margin:12px 0 6px}
+ .hp-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+ .hp-error{border:2px solid #b42318;border-radius:10px;padding:10px 14px}
+ .hp-view :focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+ @media(prefers-reduced-motion:reduce){.hp-view *{animation:none!important;transition:none!important}}
+`;
+const HP_MARK = { green: "●", red: "▲", grey: "○" };
+
+function helperMessage(e) {
+  const text = String((e && e.message) || e || "");
+  return text.replace(/^HTTP \d+\s*—\s*/, "") || "That didn't work. Try again.";
+}
+
+function HelpersPage() {
+  const store = window.BitCadenceStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [data, setData] = useStateO(null);
+  const [error, setError] = useStateO("");
+  const [adding, setAdding] = useStateO(false);
+  const [name, setName] = useStateO("");
+  const [role, setRole] = useStateO("claude");
+  const [busy, setBusy] = useStateO(false);
+  const [note, setNote] = useStateO("");
+  const [plan, setPlan] = useStateO(null);
+
+  async function load() {
+    try { setData(await store.helpersList()); setError(""); }
+    catch (e) { setError(helperMessage(e)); }
+  }
+  useEffectO(() => {
+    if (!live) return undefined;
+    load();
+    const timer = setInterval(load, 15000);
+    return () => clearInterval(timer);
+  }, [live]);
+
+  async function add() {
+    setBusy(true); setNote(""); setError("");
+    try {
+      const res = await store.addHelper({ name: name.trim(), role });
+      setNote(res.helper.name + " is added. Its sign-in is saved on this computer.");
+      setName(""); setAdding(false);
+      await load();
+    } catch (e) { setError(helperMessage(e)); }
+    setBusy(false);
+  }
+  async function lookFirst() {
+    setBusy(true); setNote(""); setError("");
+    try {
+      const res = await store.fixHelpers(false);
+      if (!res.problems.length) setNote("Every helper looks fine.");
+      else setPlan(res);
+    } catch (e) { setError(helperMessage(e)); }
+    setBusy(false);
+  }
+  async function confirmFix() {
+    setBusy(true); setError("");
+    try {
+      const res = await store.fixHelpers(true);
+      setNote(res.results.join(" "));
+      setPlan(null);
+      await load();
+    } catch (e) { setError(helperMessage(e)); }
+    setBusy(false);
+  }
+
+  const list = (data && data.helpers) || [];
+  const roles = (data && data.roles) || [{ role: "claude", label: "Claude" }];
+  return (
+    <div className="hp-view">
+      <style>{HELPERS_STYLE}</style>
+      <h1>Your helpers</h1>
+      <p className="sub">Helpers do the work. Each has a light and a word: Working and Ready are fine, Stuck needs a fix.</p>
+      {!live ? <div className="hp-card">Connect to your BitCadence in Settings first, then your helpers show up here.</div> : null}
+      {error ? <div className="hp-error" role="alert" style={{ marginBottom: 14 }}>{error}</div> : null}
+      <div role="status" aria-live="polite">{note ? <div className="hp-card">{note}</div> : null}</div>
+      {live ? (
+        <div className="hp-row" style={{ marginBottom: 14 }}>
+          <button className="hp-primary" aria-expanded={adding} onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "+ Add a helper"}</button>
+        </div>
+      ) : null}
+      {adding ? (
+        <div className="hp-card">
+          <h2 style={{ marginTop: 0 }}>Add a helper</h2>
+          <label className="hp-label" htmlFor="hp-ai">Which AI should power it?</label>
+          <select id="hp-ai" value={role} onChange={(e) => setRole(e.target.value)}>
+            {roles.map((r) => <option key={r.role} value={r.role}>{r.label}</option>)}
+          </select>
+          <label className="hp-label" htmlFor="hp-name">Name</label>
+          <input id="hp-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="For example: Penny" />
+          <div className="hp-row"><button className="hp-primary" disabled={busy || !name.trim()} onClick={add}>{busy ? "Adding…" : "Add helper"}</button></div>
+        </div>
+      ) : null}
+      {plan ? (
+        <div className="hp-card" role="group" aria-label="Fix it">
+          <h2 style={{ marginTop: 0 }}>Here's what I found</h2>
+          {plan.problems.map((p, i) => <p key={i}><b>{p.summary}</b><br />{p.would}</p>)}
+          <p className="hp-hint">Nothing has changed yet.</p>
+          <div className="hp-row">
+            <button className="hp-primary" disabled={busy} onClick={confirmFix}>{busy ? "Fixing…" : "Yes, fix it"}</button>
+            <button disabled={busy} onClick={() => setPlan(null)}>Not now</button>
+          </div>
+        </div>
+      ) : null}
+      {live && data && !list.length ? <div className="hp-card">No helpers yet. Choose "+ Add a helper" to start.</div> : null}
+      <div className="hp-grid">
+        {list.map((h) => (
+          <div className="hp-card" key={h.id}>
+            <div className="hp-top">
+              <div className="hp-avatar" aria-hidden="true">{h.name.charAt(0)}</div>
+              <div className="hp-who"><b>{h.name}</b><div className="hp-hint" style={{ margin: 0 }}>{h.doing}</div></div>
+              <span className="hp-pill" data-light={h.light}><span aria-hidden="true">{HP_MARK[h.light] || "○"}</span>{h.word}</span>
+            </div>
+            <p className="hp-hint">Last heard from: {h.last_heard}</p>
+            {h.can_fix ? <button className="hp-primary" style={{ width: "100%" }} disabled={busy} onClick={lookFirst}>Fix it</button> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ----- Settings -----
 function SettingRow({ title, body, control }) {
   return (
@@ -659,7 +796,7 @@ function Settings({ tone, advanced, setAdvanced }) {
   );
 }
 
-Object.assign(window, { AgentFleet, Settings, Toggle, SettingRow, ConnectorsCard });
+Object.assign(window, { AgentFleet, HelpersPage, Settings, Toggle, SettingRow, ConnectorsCard });
 
 
 function LiveControlSettings() {

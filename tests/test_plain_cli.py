@@ -431,7 +431,7 @@ def test_remember_one_sentence_and_old_two_argument_form(gateway):
 
 def test_helpers_lists_with_health_words(gateway):
     out = runner.invoke(cli.app, ["helpers"]).output
-    assert "codex-1" in out and "ready" in out and "busy" in out
+    assert "Codex 1" in out and "Ready" in out and "Working" in out
 
 
 def test_helpers_json(gateway):

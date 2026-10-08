@@ -192,11 +192,13 @@ def _is_recent(job: dict, hours: int = 24) -> bool:
     return (datetime.now(timezone.utc) - when).total_seconds() <= hours * 3600
 
 
-def find_problems(snap: Snapshot, client=None) -> List[Problem]:
+def find_problems(snap: Snapshot, client=None, *, scan_helpers: bool = False) -> List[Problem]:
     """What is wrong, in plain words, with a repair when one is safe to run."""
     problems: List[Problem] = []
     if not snap.reachable:
         return problems
+    if scan_helpers:
+        problems.extend(helper_problems(snap.helpers))
     for helper in snap.helpers:
         if helper.get("state") == "broken":
             name = helper.get("instance_id") or helper.get("role") or "A helper"
@@ -228,6 +230,27 @@ def find_problems(snap: Snapshot, client=None) -> List[Problem]:
             hint="Start one with: bitcadence helpers add",
         ))
     return problems
+
+
+def helper_problems(agents: List[dict], *, findings=None) -> List[Problem]:
+    """Locked logs and duplicate wake processes. Detection is a dry run; the repair
+    only runs when the person says yes."""
+    from mco import helpers
+
+    if findings is None:
+        try:
+            findings = helpers.scan(a.get("instance_id") for a in agents)
+        except Exception:  # noqa: BLE001 - a process scan must never break `fix`
+            findings = []
+    out = []
+    for f in findings:
+        out.append(Problem(
+            f.summary + " " + f.would,
+            f.question,
+            (lambda finding=f: " ".join(helpers.repair([finding], confirmed=True))),
+            hint="Run: bitcadence helpers fix",
+        ))
+    return out
 
 
 def _retry(client, job_id: str) -> str:
@@ -401,7 +424,7 @@ def do_fix(client, *, yes: bool = False) -> int:
 
             return quiet.run_start(open_app=False, autostart=False)
         return 0
-    problems = find_problems(snap, client)
+    problems = find_problems(snap, client, scan_helpers=True)
     if not problems:
         say("Everything looks fine.")
         return 0
@@ -418,23 +441,61 @@ def do_fix(client, *, yes: bool = False) -> int:
     return 0
 
 
+_LIGHT_MARK = {"green": "(+)", "red": "(!)", "grey": "( )"}
+
+
 def do_helpers(client, *, as_json: bool = False) -> int:
+    from mco import helpers
+
     try:
-        helpers = client.agents() or []
+        agents = client.agents() or []
     except Exception as exc:  # noqa: BLE001
         say(friendly.translate(exc).render())
         return 1
     if as_json:
-        say(json.dumps(helpers, indent=2, default=str))
+        say(json.dumps(agents, indent=2, default=str))
         return 0
-    if not helpers:
+    if not agents:
         say("No helpers yet. Add one with: bitcadence helpers add")
         return 0
-    lights = {"working": "busy", "standby": "ready", "broken": "stuck", "offline": "offline", "disabled": "paused"}
-    say(f"Helpers ({len(helpers)})")
-    for h in helpers:
-        state = h.get("state") or h.get("effective_status") or "offline"
-        say(f"  {h.get('instance_id', '?'):<24} {h.get('role', ''):<12} {lights.get(state, state)}")
+    try:
+        findings = helpers.scan(a.get("instance_id") for a in agents)
+    except Exception:  # noqa: BLE001
+        findings = []
+    try:
+        active = [j for j in (client.jobs(limit=200) or []) if j.get("status") in ("leased", "in_progress")]
+    except Exception:  # noqa: BLE001 - "what it is doing" is a nicety
+        active = []
+    rows = helpers.describe(agents, active, findings)
+    say(f"Helpers ({len(rows)})")
+    for row in rows:
+        say(f"  {_LIGHT_MARK.get(row['light'], '( )')} {row['name']:<22} {row['word']:<14} {row['doing']}")
+    if findings:
+        say("Something needs fixing. Run: bitcadence helpers fix")
+    return 0
+
+
+def do_helpers_fix(client, *, yes: bool = False) -> int:
+    """Look first (changes nothing), then repair each problem only after a Y."""
+    from mco import helpers
+
+    try:
+        agents = client.agents() or []
+    except Exception as exc:  # noqa: BLE001
+        say(friendly.translate(exc).render())
+        return 1
+    findings = helpers.scan(a.get("instance_id") for a in agents)
+    if not findings:
+        say("Every helper looks fine.")
+        return 0
+    say(f"Found {len(findings)} problem{'s' if len(findings) != 1 else ''}.")
+    for finding in findings:
+        say(f"  {finding.summary}")
+        say(f"  {helpers.repair([finding])[0]}")
+        if confirm(f"  {finding.question}", yes=yes):
+            say("  " + " ".join(helpers.repair([finding], confirmed=True)))
+        else:
+            say("  Okay, left as it is.")
     return 0
 
 

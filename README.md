@@ -87,7 +87,7 @@ BitCadence sits between your agents and the work they do. It gives you:
 | **Encrypted secrets** | Credentials encrypt by default (AES-256-GCM) — never silently written to `.env` in the clear. Auto-provisioned on Windows; explicit master password elsewhere. |
 | **Embedded store** | No Supabase? An embedded SQLite store (`~/.mco/local.db`) takes over — the free edition is the full product. |
 | **Enterprise connectors** | Ingest ServiceNow incidents and Dynatrace problems as jobs; act back with auditable, gated platform actions. |
-| **Console GUI** | Zero-build web UI at `/console` — job board, approval queue, audit drawer, and "Ask for something": say what you want, check the drawn plan, approve once. |
+| **Console GUI** | Zero-build web UI at `/console` — job board, approval queue, audit drawer, and "Ask for something": say what you want, check the drawn plan, approve once; plus a plain-words **Helpers** page with a health light and a one-click, confirm-first "Fix it". |
 
 ---
 

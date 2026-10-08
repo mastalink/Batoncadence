@@ -1,0 +1,22 @@
+$ bitcadence helpers
+Helpers (3)
+  (+) Scout                  Working        Working on: Check open pull requests
+  (!) Fixer                  Stuck          Another copy of Fixer is already running
+  ( ) Tester                 Not connected  Not connected right now
+Something needs fixing. Run: bitcadence helpers fix
+
+$ bitcadence helpers fix   (answer: n)
+Found 1 problem.
+  Fixer has 2 copies running at once.
+  Would: Keep the oldest copy and stop the other 1.
+  Okay, left as it is.
+
+stopped after n: []
+
+$ bitcadence helpers fix   (answer: y)
+Found 1 problem.
+  Fixer has 2 copies running at once.
+  Would: Keep the oldest copy and stop the other 1.
+  Stopped the extra copy. Fixer is working again.
+
+stopped after y: [102]
