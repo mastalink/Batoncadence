@@ -45,7 +45,7 @@ from the shared substrate:
 - No bank or finance clients, ever.
 - Household data (MyMeals, family-linked data) stays private — never sent
   to a third party, never used as training/demo data.
-- Open-core wall holds: MIT core stays MIT, enterprise-only code stays out
+- Open-core wall holds: Core stays under Prosperity 3.0 (MIT through 0.5.0rc1), enterprise-only code stays out
   of the public repo. Don't approve a change that blurs that line.
 - No Mac Claude (`claude-mac`) and no `codex-mac` in the active worker
   fleet — those identities are not authorized to run jobs.

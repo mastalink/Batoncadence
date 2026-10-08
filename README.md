@@ -3,7 +3,7 @@
 **Every agent. One beat.**
 
 [![CI](https://github.com/mastalink/BitCadence/actions/workflows/ci.yml/badge.svg)](https://github.com/mastalink/BitCadence/actions/workflows/ci.yml)
-[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: Prosperity 3.0](https://img.shields.io/badge/license-Prosperity%203.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](docs/INSTALL.md)
 [![Preview](https://img.shields.io/badge/preview-0.5.0rc1-blue.svg)](CHANGELOG.md)
@@ -218,5 +218,7 @@ public issue.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Joe Arroyo.  
-Self-host it, fork it, ship it inside your company.
+Free for personal and noncommercial use under the [Prosperity Public License 3.0.0](LICENSE).
+Businesses get a free 30-day trial, then a commercial license: see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+Releases up to and including `0.5.0rc1` were MIT and stay MIT for anyone who received them.
+Copyright (c) 2026 Joe Arroyo.
