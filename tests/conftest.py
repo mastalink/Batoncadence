@@ -401,6 +401,15 @@ def _reset_score_sweep_pause(monkeypatch, tmp_path_factory):
         score_sweep, "get_config",
         lambda: {"MCO_SCORE_ARTIFACT_ROOT": str(artifact_root)},
     )
+    # Tests that patch get_config with their own dict (no artifact root) fall
+    # back to these defaults. On 2026-10-08 that wrote failing-alerts.json into
+    # the real ~/.mco and replayed 20 stale owner alerts. Point the fallbacks
+    # at the sandbox too.
+    monkeypatch.setattr(score_sweep, "DEFAULT_SCORE_ROOT", artifact_root)
+    monkeypatch.setattr(score_sweep, "DEFAULT_SCORE_DB", artifact_root / "score-runs.db")
+    # The CLI keeps its own copies; test_score_sweep asserts the two stay equal.
+    monkeypatch.setattr("mco.cli.DEFAULT_SCORE_ROOT", artifact_root)
+    monkeypatch.setattr("mco.cli.DEFAULT_SCORE_DB", artifact_root / "score-runs.db")
     score_sweep.set_sweep_paused(False)
     yield
     # Test monkeypatches are still active during fixture teardown.  Several
