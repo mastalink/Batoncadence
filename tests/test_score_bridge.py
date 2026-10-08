@@ -756,6 +756,22 @@ def test_completion_event_lag_waits_instead_of_blocking(tmp_path):
     assert bridge.plan("run")                       # the review step is now planned
 
 
+def test_completion_event_lag_of_134s_still_waits(tmp_path):
+    """Redesign run -05 (2026-10-08) blocked when the outbox landed the event 134 s late."""
+    bridge = ScoreBridge(tmp_path/"state.db", tmp_path/"artifacts")
+    board = LaggingEventsBoard()
+    bridge.initialize("run", score(), principal="conductor", org="default",
+                      targets={"auditor": "worker", "reviewer": "independent"}, credential_hash=board.identity)
+    path = bridge.root/"report.json"; path.write_text('{"audit":"test"}', encoding="utf-8")
+    e = {"report": {"path": "report.json", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}
+    work = bridge.plan("run")[0]; bridge.dispatch("run", board)
+    board.complete(work, {"artifacts": e})
+    board.jobs[work]["completed_at"] = (datetime.now(timezone.utc) - timedelta(seconds=134)).isoformat()
+    board.hidden.add(work)
+    bridge.poll("run", board)
+    assert bridge.status("run")["status"] == "running"
+
+
 def test_completion_by_wrong_actor_still_blocks(tmp_path):
     bridge = ScoreBridge(tmp_path/"state.db", tmp_path/"artifacts")
     board = LaggingEventsBoard()
@@ -780,7 +796,7 @@ def test_missing_completion_event_blocks_after_grace(tmp_path):
     e = {"report": {"path": "report.json", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}
     work = bridge.plan("run")[0]; bridge.dispatch("run", board)
     board.complete(work, {"artifacts": e})
-    board.jobs[work]["completed_at"] = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    board.jobs[work]["completed_at"] = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
     board.hidden.add(work)
     with pytest.raises(ScoreError):
         bridge.poll("run", board)

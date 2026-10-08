@@ -820,7 +820,10 @@ class ScoreBridge:
             )
 
 
-COMPLETION_EVENT_GRACE_SECONDS = 120
+# The completion event goes through the outbox and can land well after the job
+# row's completed_at: 134 s on 2026-10-08 blocked redesign run -05 at 120 s.
+# Waiting longer only delays a real block; a wrong-actor event still blocks at once.
+COMPLETION_EVENT_GRACE_SECONDS = 900
 
 
 def _recently_completed(job) -> bool:
