@@ -497,11 +497,11 @@ def test_advanced_runs_an_original_command(monkeypatch):
 
 def test_schedule_alone_lists_and_old_subcommands_stay(monkeypatch):
     listed = []
-    monkeypatch.setattr(cli, "list_schedules", lambda: listed.append(1))
+    monkeypatch.setattr(plain, "do_schedules", lambda **kw: listed.append(1) or 0)
     assert runner.invoke(cli.app, ["schedule"]).exit_code == 0 and listed
     import typer
     sub = typer.main.get_command(cli.app).commands["schedule"].commands
-    assert {"init", "list", "enable", "disable", "reset", "tick", "run"} <= set(sub)
+    assert {"init", "list", "enable", "disable", "reset", "tick", "run", "add", "on", "off"} <= set(sub)
 
 
 def test_entry_points_share_one_main():

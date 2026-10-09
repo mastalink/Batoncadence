@@ -163,6 +163,15 @@ def bad_schedule(phrase: str) -> FriendlyError:
     )
 
 
+def not_approver() -> FriendlyError:
+    """The 403 for a missing approver right, in words. `bitcadence fix` repairs it."""
+    return FriendlyError(
+        "You can't approve yet because your account isn't an approver.",
+        "Run: bitcadence fix",
+        "not_approver",
+    )
+
+
 def no_helper_free() -> FriendlyError:
     """Approved, but nothing is online to pick the job up."""
     return FriendlyError("Approved, but no helper is free.", "Start one with: bitcadence helpers add", "no_helper")

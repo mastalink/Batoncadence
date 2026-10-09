@@ -1,0 +1,9 @@
+Slice 6 (S6-schedules) validation, PYTHONPATH=C:/AI/bc-redesign/src
+python -m pytest tests --ignore=tests/test_install_sh_tty.py -o addopts= -q
+  1857 passed, 15 skipped (external services unavailable), 0 failed
+python scripts/capture_s6.py
+  text captures: design/redesign-v1/evidence-s6/{schedules-cli,approve-fix-cli,settings-cli}.txt
+python scripts/build_console.py verify: 9 sources round-trip, 0 differ
+Console sources parsed as JSX with bun (no syntax errors).
+No browser screenshots this slice (Playwright not run); the console pages are covered by bundle-source tests.
+docs/wiki/_review/verify_cli_examples.py is absent on this branch.

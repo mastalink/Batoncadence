@@ -1,0 +1,22 @@
+Schedules in plain words, no raw 403s, settings without jargon (redesign slice 6)
+
+Schedules: src/mco/schedules_plain.py is the one implementation. `bitcadence
+schedule` / `schedule add|on|off` and the console Schedules page (/api/schedules,
+/preview, /{id}/enabled) call it. "Every weekday at 2 AM" in, "Every weekday at
+2:00 AM" out; bad words get the CLI.md sentence and nothing is saved. New entries
+are appended to ~/.mco/schedules.yaml as text (comments survive), the time zone is
+detected, and the file is read back before it is written. Old `mco schedule`
+commands are unchanged.
+
+Approvals: a missing approver right is one sentence plus the one-key "Fix it?
+[Y/n]" in `bitcadence approve` and `bitcadence fix` (src/mco/approver.py). The
+repair is terminal-only, local-database-only and edits only this computer's own
+account; no API route can grant it. The console turns an HTTP 403 into words and an
+Approvals card. tests/conftest.py now keeps every test off the real registry.
+
+Settings: `bitcadence settings` and the console show plain labels; addresses and
+the (masked) sign-in appear only under --show-advanced / "Show advanced".
+
+Evidence: design/redesign-v1/evidence-s6/{schedules-cli,approve-fix-cli,settings-cli}.txt
+Results: design/redesign-v1/s6-test-results.txt (1857 passed, 15 skipped)
+Wiki: docs/wiki/{Schedules,Approvals,Settings}.md. verify_cli_examples.py is absent on this branch.

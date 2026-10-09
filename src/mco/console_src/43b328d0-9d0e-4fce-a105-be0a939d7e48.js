@@ -675,6 +675,12 @@ function Approvals({ jobs, tone, advanced, onOpen }) {
   const [reason, setReason] = useStateH("");
   const [selectedIds, setSelectedIds] = useStateH(new Set());
   const [batchBusy, setBatchBusy] = useStateH(false);
+  const [blocked, setBlocked] = useStateH(false);
+  useEffectH(() => {
+    const on = () => setBlocked(true);
+    window.addEventListener("bc-approver-blocked", on);
+    return () => window.removeEventListener("bc-approver-blocked", on);
+  }, []);
   const selected = queue.find((j) => j.id === sel) || queue[0];
 
   const allSelected = queue.length > 0 && queue.every((j) => selectedIds.has(j.id));
@@ -740,6 +746,14 @@ function Approvals({ jobs, tone, advanced, onOpen }) {
           </div>
         ) : null}
       </div>
+
+      {blocked ? (
+        <div role="alert" style={{ border: "2px solid var(--st-failed-fg)", borderRadius: 12, padding: "14px 16px", marginBottom: 16, background: "var(--surface)" }}>
+          <div style={{ fontWeight: 700 }}><span aria-hidden="true">▲ </span>You can't approve this yet.</div>
+          <p style={{ margin: "6px 0 10px", color: "var(--text-2)", fontSize: 13.5 }}>Your account isn't set up as an approver. It's a one-key fix: run <b>bitcadence fix</b> in a terminal and answer Y.</p>
+          <Btn small onClick={() => setBlocked(false)}>Got it</Btn>
+        </div>
+      ) : null}
 
       {queue.length === 0 ? (
         <Card><EmptyState icon="✓" title={tone === "plain" ? "Nothing needs your OK" : "Approval queue is empty"} body="New approval requests will appear here and notify you." /></Card>

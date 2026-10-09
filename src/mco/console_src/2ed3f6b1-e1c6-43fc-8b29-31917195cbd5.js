@@ -405,6 +405,114 @@ function HelpersPage() {
   );
 }
 
+
+// ----- Schedules page (design/redesign-v1/07-schedules.html) -----
+// "Every weekday at 2:00 AM" pickers. The file behind it (~/.mco/schedules.yaml) is written by
+// the gateway, the same code as `bitcadence schedule add`; no YAML or cron is ever shown.
+function SchedulesPage() {
+  const store = window.BitCadenceStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [data, setData] = useStateO(null);
+  const [error, setError] = useStateO("");
+  const [note, setNote] = useStateO("");
+  const [what, setWhat] = useStateO("");
+  const [freq, setFreq] = useStateO("weekday");
+  const [days, setDays] = useStateO([1, 3, 5]);
+  const [time, setTime] = useStateO("02:00");
+  const [words, setWords] = useStateO("");
+  const [busy, setBusy] = useStateO(false);
+
+  async function load() {
+    try {
+      const res = await store.schedulesList();
+      setData(res); setError(res.problem || "");
+      setWhat((w) => w || (res.can_schedule[0] ? res.can_schedule[0].id : ""));
+    } catch (e) { setError(helperMessage(e)); }
+  }
+  useEffectO(() => { if (live) load(); }, [live]);
+  useEffectO(() => {
+    if (!live) return undefined;
+    let current = true;
+    store.schedulePreview({ frequency: freq, time, days })
+      .then((r) => { if (current) setWords(r.words); })
+      .catch((e) => { if (current) setWords(helperMessage(e)); });
+    return () => { current = false; };
+  }, [live, freq, time, days]);
+
+  async function save() {
+    setBusy(true); setNote(""); setError("");
+    try {
+      const res = await store.addSchedule({ what, frequency: freq, time, days });
+      setNote("Saved. " + res.words + ".");
+      await load();
+    } catch (e) { setError(helperMessage(e)); }
+    setBusy(false);
+  }
+  async function flip(item) {
+    setError(""); setNote("");
+    try { await store.setScheduleOn(item.id, !item.on); await load(); }
+    catch (e) { setError(helperMessage(e)); }
+  }
+  const toggleDay = (d) => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort()));
+
+  const list = (data && data.schedules) || [];
+  const options = (data && data.can_schedule) || [];
+  const freqs = (data && data.frequencies) || [];
+  const dayList = (data && data.days) || [];
+  return (
+    <div className="hp-view">
+      <style>{HELPERS_STYLE}</style>
+      <h1>Schedules</h1>
+      <p className="sub">Pick a time like you would for an alarm.</p>
+      {!live ? <div className="hp-card">Connect to your BitCadence in Settings first, then your schedules show up here.</div> : null}
+      {error ? <div className="hp-error" role="alert" style={{ marginBottom: 14 }}>{error}</div> : null}
+      <div role="status" aria-live="polite">{note ? <div className="hp-card">{note}</div> : null}</div>
+      {live && data && !list.length ? <div className="hp-card">Nothing is scheduled yet.</div> : null}
+      <div className="hp-grid" style={{ marginBottom: 14 }}>
+        {list.map((item) => (
+          <div className="hp-card" key={item.id}>
+            <b>{item.name}</b>
+            <p className="hp-hint">{item.when}</p>
+            <p className="hp-hint">Next run: {item.next}</p>
+            <button aria-pressed={item.on} onClick={() => flip(item)}>{item.on ? "On" : "Off"}</button>
+          </div>
+        ))}
+      </div>
+      {live && data ? (
+        <div className="hp-card">
+          <h2 style={{ marginTop: 0 }}>New schedule</h2>
+          {!options.length ? <p className="hp-hint">There's nothing to schedule yet. Ask for something first, then come back.</p> : (
+            <div>
+              <label className="hp-label" htmlFor="sc-what">What should run?</label>
+              <select id="sc-what" value={what} onChange={(e) => setWhat(e.target.value)}>
+                {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              <div className="hp-label" id="sc-how">How often?</div>
+              <div className="hp-row" role="group" aria-labelledby="sc-how" style={{ marginTop: 0 }}>
+                {freqs.map((f) => <button key={f.id} aria-pressed={freq === f.id} className={freq === f.id ? "hp-primary" : ""} onClick={() => setFreq(f.id)}>{f.label}</button>)}
+              </div>
+              {freq === "days" ? (
+                <div className="hp-row" role="group" aria-label="Which days">
+                  {dayList.map((d) => <button key={d.id} aria-pressed={days.includes(d.id)} className={days.includes(d.id) ? "hp-primary" : ""} onClick={() => toggleDay(d.id)}>{d.label.slice(0, 3)}</button>)}
+                </div>
+              ) : null}
+              {freq !== "hour" ? (
+                <div>
+                  <label className="hp-label" htmlFor="sc-time">At what time?</label>
+                  <input id="sc-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+                </div>
+              ) : null}
+              <p className="hp-hint">Your time zone is detected from your computer.</p>
+              <div className="hp-card" style={{ marginTop: 14 }} aria-live="polite"><b>{words}</b></div>
+              <div className="hp-row"><button className="hp-primary" disabled={busy || !what || (freq === "days" && !days.length)} onClick={save}>{busy ? "Saving…" : "Save"}</button></div>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ----- Settings -----
 function SettingRow({ title, body, control }) {
   return (
@@ -736,7 +844,7 @@ function Settings({ tone, advanced, setAdvanced }) {
   const err = store.lastError ? store.lastError() : null;
   const inputStyle = { border: "1px solid var(--border-strong)", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", width: 260, background: "var(--surface)", color: "var(--text)" };
 
-  return (
+  const body = (
     <div style={{ maxWidth: 720 }}>
       <Card style={{ marginBottom: 18 }}>
         <SectionTitle>Connection</SectionTitle>
@@ -794,9 +902,69 @@ function Settings({ tone, advanced, setAdvanced }) {
 
     </div>
   );
+  return tone === "plain" ? <PlainSettings>{body}</PlainSettings> : body;
 }
 
-Object.assign(window, { AgentFleet, HelpersPage, Settings, Toggle, SettingRow, ConnectorsCard });
+// Settings for people (design/redesign-v1/09-settings.html): plain labels up front; addresses,
+// sign-in tokens and raw gateway fields only inside "Show advanced".
+function PlainSettings({ children }) {
+  const store = window.BitCadenceStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [paused, setPaused] = useStateO(null);
+  const [phone, setPhone] = useStateO(null);
+  const [note, setNote] = useStateO("");
+  const [error, setError] = useStateO("");
+  const [busy, setBusy] = useStateO(false);
+  async function load() {
+    try {
+      const rows = Object.values((await store.getSettings()).groups || {}).flat();
+      const find = (k) => rows.find((r) => r.key === k);
+      setPaused(!!(find("MCO_KILL_SWITCH") && find("MCO_KILL_SWITCH").value));
+      setPhone(!!(find("NTFY_TOPIC") && find("NTFY_TOPIC").value));
+    } catch (e) { setError(helperMessage(e)); }
+  }
+  useEffectO(() => { if (live) load(); }, [live]);
+  async function flipPause() {
+    setBusy(true); setError(""); setNote("");
+    try {
+      await store.saveSettings({ MCO_KILL_SWITCH: !paused });
+      setNote(paused ? "Resumed. Work will pick up again." : "Paused. Jobs in progress finish.");
+      await load();
+    } catch (e) { setError(helperMessage(e)); }
+    setBusy(false);
+  }
+  return (
+    <div className="hp-view">
+      <style>{HELPERS_STYLE}</style>
+      <h1>Settings</h1>
+      <p className="sub">The everyday things are on the other pages. This is the rest.</p>
+      {!live ? <div className="hp-card">Connect to your BitCadence first. Open "Show advanced" below to do that.</div> : null}
+      {error ? <div className="hp-error" role="alert" style={{ marginBottom: 14 }}>{error}</div> : null}
+      <div role="status" aria-live="polite">{note ? <div className="hp-card">{note}</div> : null}</div>
+      {live ? (
+        <div className="hp-grid" style={{ marginBottom: 18 }}>
+          <div className="hp-card"><b>Pause everything</b>
+            <p className="hp-hint">Stops helpers from taking new work. Jobs in progress finish.</p>
+            <p className="hp-hint">{paused === null ? "Checking…" : paused ? "Paused right now." : "Running normally."}</p>
+            <button disabled={busy || paused === null} onClick={flipPause}>{paused ? "Resume" : "Pause"}</button></div>
+          <div className="hp-card"><b>Tell me on my phone</b>
+            <p className="hp-hint">A message when something needs you.</p>
+            <p className="hp-hint">{phone === null ? "Checking…" : phone ? "On" : "Off. Turn it on from the terminal: bitcadence settings."}</p></div>
+          <div className="hp-card"><b>Memory</b>
+            <p className="hp-hint">Things BitCadence remembers for you are under Drumline in the menu.</p></div>
+        </div>
+      ) : null}
+      <h2>Advanced</h2>
+      <details className="hp-card">
+        <summary style={{ minHeight: 48, cursor: "pointer", fontWeight: 600 }}>Show advanced</summary>
+        <p className="hp-hint">For people who like details: where BitCadence listens, the sign-in for this computer, and every raw setting.</p>
+        {children}
+      </details>
+    </div>
+  );
+}
+
+Object.assign(window, { AgentFleet, HelpersPage, SchedulesPage, Settings, PlainSettings, Toggle, SettingRow, ConnectorsCard });
 
 
 function LiveControlSettings() {

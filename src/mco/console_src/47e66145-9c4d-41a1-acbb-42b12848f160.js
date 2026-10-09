@@ -67,6 +67,18 @@
     return res.json();
   }
 
+  // A missing approver right is never shown as "HTTP 403": say it in words, point at the
+  // one-key fix, and tell the Approvals page so it can show its own card.
+  const APPROVER_WORDS = "Your account isn't an approver yet. Run `bitcadence fix` in a terminal and answer Y.";
+  function plainFailure(e, fallback) {
+    const text = String((e && e.message) || e || "");
+    if (/^HTTP 403/.test(text)) {
+      try { window.dispatchEvent(new CustomEvent("bc-approver-blocked")); } catch (err) { /* old browser */ }
+      return APPROVER_WORDS;
+    }
+    return fallback ? fallback(text) : text;
+  }
+
   const exchangeFns = new Set();
 
   const TOAST_FOR = {
@@ -249,17 +261,17 @@
     async approve(jobId, actor) {
       if (connState === "demo") return demo.approve(jobId, actor);
       try { await api("/api/jobs/" + jobId + "/approve", { method: "POST" }); await poll(); }
-      catch (e) { toast("err", "Approve failed", e.message); }
+      catch (e) { toast("err", "Approve failed", plainFailure(e)); }
     },
     async reject(jobId, actor, reason) {
       if (connState === "demo") return demo.reject(jobId, actor, reason);
       try { await api("/api/jobs/" + jobId + "/reject", { method: "POST", body: JSON.stringify({ reason: reason || "" }) }); await poll(); }
-      catch (e) { toast("err", "Reject failed", e.message); }
+      catch (e) { toast("err", "Reject failed", plainFailure(e)); }
     },
     async retryNow(jobId) {
       if (connState === "demo") return demo.retryNow(jobId);
       try { await api("/api/jobs/" + jobId + "/retry", { method: "POST" }); await poll(); toast("ok", "Re-queued", "Job sent back to the board."); }
-      catch (e) { toast("err", "Retry failed", e.message + " (retry needs an approver-role token)"); }
+      catch (e) { toast("err", "Retry failed", plainFailure(e, (t) => t + " (retry needs an approver-role token)")); }
     },
     async cancelJob(jobId, reason) {
       if (connState === "demo") return demo.cancelJob ? demo.cancelJob(jobId, reason) : null;
@@ -302,7 +314,7 @@
         toast(res.failure_count > 0 ? "info" : "ok", "Batch " + action, `Completed: ${res.success_count} succeeded, ${res.failure_count} failed.`);
         return res;
       } catch (e) {
-        toast("err", "Batch " + action + " failed", e.message);
+        toast("err", "Batch " + action + " failed", plainFailure(e));
         throw e;
       }
     },
@@ -327,6 +339,19 @@
       await poll();
       toast("ok", "Approved", "Starting now.");
       return res;
+    },
+    // Schedules page: same code as `bitcadence schedule`.
+    async schedulesList() {
+      return api("/api/schedules");
+    },
+    async schedulePreview(body) {
+      return api("/api/schedules/preview", { method: "POST", body: JSON.stringify(body) });
+    },
+    async addSchedule(body) {
+      return api("/api/schedules", { method: "POST", body: JSON.stringify(body) });
+    },
+    async setScheduleOn(id, on) {
+      return api("/api/schedules/" + encodeURIComponent(id) + "/enabled", { method: "POST", body: JSON.stringify({ on }) });
     },
     // Helpers page: same code as `bitcadence helpers` / `bitcadence fix`.
     async helpersList() {

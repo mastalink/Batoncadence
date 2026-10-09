@@ -9,6 +9,7 @@ const NAV = [
   { id: "governance", label: "Governance", icon: "M12 3l8 4v5c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V7l8-4zM9 12l2 2 4-5" },
   { id: "ask", label: "Ask for something", icon: "M5 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM5 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM7 5h10M7 19h10M19 12H7" },
   { id: "agents", label: "Helpers", icon: "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM5 22a7 7 0 0 1 14 0M19 8a2.5 2.5 0 1 0-4 0M9 8a2.5 2.5 0 1 1-4 0" },
+  { id: "schedules", label: "Schedules", icon: "M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 7v5l3 2" },
   { id: "memory", label: "Drumline", icon: "M21 5c0 1.66-4.03 3-9 3S3 6.66 3 5s4.03-3 9-3 9 1.34 9 3zM3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" },
   { id: "activity", label: "Activity", icon: "M22 12h-4l-3 9L9 3l-3 9H2" },
   { id: "settings", label: "Settings", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2z" },
@@ -67,8 +68,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const PAGE_TITLES = {
-  expert: { overview: "Home", projects: "Projects", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", ask: "Ask for something", agents: "Agent Fleet", memory: "Drumline", activity: "Audit Trail", settings: "Settings", scoreLive: "Live view" },
-  plain: { overview: "Home", projects: "Projects", jobs: "All work", approvals: "Needs your OK", governance: "Governance", ask: "Ask for something", agents: "Your helpers", memory: "Drumline", activity: "What happened", settings: "Settings", scoreLive: "Live view" },
+  expert: { overview: "Home", projects: "Projects", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", ask: "Ask for something", agents: "Agent Fleet", schedules: "Schedules", memory: "Drumline", activity: "Audit Trail", settings: "Settings", scoreLive: "Live view" },
+  plain: { overview: "Home", projects: "Projects", jobs: "All work", approvals: "Needs your OK", governance: "Governance", ask: "Ask for something", agents: "Your helpers", schedules: "Schedules", memory: "Drumline", activity: "What happened", settings: "Settings", scoreLive: "Live view" },
 };
 
 function App() {
@@ -123,6 +124,7 @@ function App() {
     governance: <Governance jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     ask: <AskPage onNav={setPage} />,
     agents: tone === "plain" ? <HelpersPage /> : <AgentFleet agents={agents} jobs={jobs} tone={tone} advanced={advanced} />,
+    schedules: <SchedulesPage />,
     memory: <DrumlineMemory tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     activity: <ActivityFeedScreen jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     settings: <Settings tone={tone} advanced={advanced} setAdvanced={setAdvanced} />,

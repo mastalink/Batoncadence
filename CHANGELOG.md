@@ -25,6 +25,15 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
   and repairs only after a confirm (`bitcadence helpers fix`, also part of
   `bitcadence fix`). New `/api/helpers`, `/api/helpers/add`, `/api/helpers/fix`.
 
+- **Schedules** page and `bitcadence schedule add|on|off`: pick what, how often and
+  what time, and see "Every weekday at 2:00 AM" instead of a cron line. Written to
+  `~/.mco/schedules.yaml` as text so comments survive. New `/api/schedules`.
+- **Approvals** show no raw 403. A missing approver right gives one sentence and a
+  one-key "Fix it? [Y/n]" in `bitcadence approve` and `bitcadence fix`; the console
+  explains it in words. The repair is terminal-only and local-database-only.
+- **Settings** use plain labels; the address and masked sign-in appear only under
+  `bitcadence settings --show-advanced` or **Show advanced** in the console.
+
 ### Removed
 - The Flow Control page (`/flow`) and the console's visual workflow builder.
   Workflow YAML still runs through `bitcadence ask --file` and `mco workflow`;

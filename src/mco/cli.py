@@ -289,6 +289,10 @@ def create_app() -> FastAPI:
     from mco.orchestrator.helpers_routes import helpers_router
     app_server.include_router(helpers_router)
 
+    # Schedules page: "Every weekday at 2 AM" pickers (same code as `bitcadence schedule`).
+    from mco.orchestrator.schedules_routes import schedules_router
+    app_server.include_router(schedules_router)
+
     # Admin API: agent management, settings, workflow submission (Control Panel)
     from mco.orchestrator.admin_routes import (
         agents_admin_router,
@@ -828,6 +832,31 @@ def _load_schedules_or_exit(path=None):
     except scheduler.ScheduleConfigError as exc:
         from mco import plain
         plain.fail(exc)
+
+
+@schedule_app.command("add")
+def schedule_add(
+    what: str = typer.Option("", "--what", help="What should run (its name). Leave out for a pick list."),
+    when: str = typer.Option("", "--when", help='In plain words, e.g. "every weekday at 2 AM".'),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Save without asking."),
+):
+    """Add a schedule by asking what, how often and what time."""
+    from mco import plain
+    raise typer.Exit(code=plain.do_schedule_add(what, when, yes=yes))
+
+
+@schedule_app.command("on")
+def schedule_on(name: str = typer.Argument(..., help="Which schedule (its name).")):
+    """Turn a schedule on."""
+    from mco import plain
+    raise typer.Exit(code=plain.do_schedule_toggle(name, True))
+
+
+@schedule_app.command("off")
+def schedule_off(name: str = typer.Argument(..., help="Which schedule (its name).")):
+    """Turn a schedule off."""
+    from mco import plain
+    raise typer.Exit(code=plain.do_schedule_toggle(name, False))
 
 
 @schedule_app.command("init")
@@ -2867,8 +2896,13 @@ def settings_cmd(
     key: str = typer.Argument(None, help="Setting key to read or write (blank = list all)."),
     value: str = typer.Argument(None, help="New value for the key (omit with --unset to clear)."),
     unset: bool = typer.Option(False, "--unset", help="Clear the key back to its default."),
+    show_advanced: bool = typer.Option(False, "--show-advanced", "--all",
+                                       help="Show every setting, the address and the masked sign-in."),
 ):
-    """View or change gateway settings (the Control Panel, from the terminal)."""
+    """View or change gateway settings. With nothing else, a plain summary."""
+    if key is None and not unset and value is None:
+        from mco import plain
+        raise typer.Exit(code=plain.do_settings(_gateway_client(), show_advanced=show_advanced))
     return manage_settings(key, value, unset)
 
 
