@@ -9,13 +9,13 @@ first day anyone there uses it for work. After 30 days, keep using it with a com
 
 ## Getting a commercial license
 
-Email **joe@bitcadence.ai** with:
+Open an issue titled **'Commercial license'** on [github.com/mastalink/BitCadence](https://github.com/mastalink/BitCadence), or contact Batoncadence LLC through the repository. Include:
 - your company name
 - roughly how many people or agents will use it
 - whether you self-host it or want help running it
 
 You'll get a short written license that lets your company keep using, modifying and running BitCadence
-for business. Pricing is per company. Pilot customers get hands-on setup help.
+for business, issued by Batoncadence LLC.
 
 ## What changed, and what didn't
 

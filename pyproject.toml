@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "LicenseRef-Prosperity-3.0.0" }
 authors = [
-    { name = "Joe Arroyo", email = "joe.arroyo@gmail.com" }
+    { name = "Batoncadence LLC" }
 ]
 keywords = ["ai-agents", "orchestration", "mcp", "governance", "self-hosted", "audit", "human-in-the-loop"]
 classifiers = [

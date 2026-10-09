@@ -63,7 +63,7 @@ The reviewer's finding that LocalStore "cannot be the fleet-scale heart" becomes
 | Identity | local token files | machine enrollment, short-lived creds | mTLS, SSO/OIDC, SCIM, rotation, revocation |
 | Telemetry | local logs, ntfy | OTel emitter | OTel emitter + tested vendor packs |
 | Audit | hash chain, optional HMAC | hash chain, HMAC required | HMAC required, evidence store, retention/legal hold |
-| Price | free, MIT | pilot: $1.5–3k/mo | license / per-seat / corp-dev |
+| Price | free for noncommercial (Prosperity; MIT through 0.5.0rc1) | pilot: $1.5–3k/mo | license / per-seat / corp-dev |
 | Drumline | **first-class** | **first-class** | **first-class** |
 
 Drumline is in every edition. Collective memory is the product, not an upsell — that is already policy, and this plan does not touch it.
@@ -195,7 +195,7 @@ Grounded in decisions already on record, not invented here.
 
 **Operating partner.** The Swedish co-founder candidate runs Europe first — where the AI Act makes the pitch loudest — with real vesting equity. The product's simplicity is what makes that handoff possible.
 
-**Open source.** MIT core stays. The trademark and the Enterprise edition are what is sold. Drumline stays in every edition.
+**Source-available.** Core is under the Prosperity Public License 3.0.0 (MIT through 0.5.0rc1). The trademark and the Enterprise edition are what is sold. Drumline stays in every edition.
 
 **Credits.** NVIDIA Inception reopens January 2027. Google for Startups is re-applyable now with the LLC and EIN in place. SAM.gov finishes when the business bank account does. NSF STTR, not SBIR, if the PI conflict resolves that way.
 
@@ -851,7 +851,7 @@ conflating them would weaken both.
 
 Defer a month with no cost: **#1 RPO/RTO** (WS3 is not this month), **#3 SSD/UPS** (Pi cutover is not this month), **#5 approver scope** (the CLI already works). **#2 grok/opencode off:** leave grok human-driven; do not flip waker to drain a paper queue. **#6 bless the order:** bless the reviewer's engineering sequence (fence before feed). That is not this week's constraint.
 
-**Cut or push past 180 days** (Parts III–VIII): WS5 routing-with-receipts, WS7 OTel/Dynatrace "timeline" pack, Datadog/Grafana packs, PWA, Jetson, Enterprise RLS/mTLS/SCIM/legal hold, the $5,100 hosted Team city, three-edition support as a build program, corp-dev as a scheduled workstream, the Swedish operating partner as an engineering dependency. Keep Drumline in every edition. Keep MIT core. Cap spend manually today (Part IX) — that is a one-line ops rule, not WS4.
+**Cut or push past 180 days** (Parts III–VIII): WS5 routing-with-receipts, WS7 OTel/Dynatrace "timeline" pack, Datadog/Grafana packs, PWA, Jetson, Enterprise RLS/mTLS/SCIM/legal hold, the $5,100 hosted Team city, three-edition support as a build program, corp-dev as a scheduled workstream, the Swedish operating partner as an engineering dependency. Keep Drumline in every edition. Keep the source-available core. Cap spend manually today (Part IX) — that is a one-line ops rule, not WS4.
 
 **Month-eater:** the EPCOT AWS demo and the hosted-city spend it justifies. It is already spawning PRs (#52, #53), PostgREST seams, and conductor pavilions. It produces a self-testing city, not a conversation. Freeze it until a human is on a calendar.
 

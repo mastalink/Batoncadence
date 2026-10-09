@@ -6,7 +6,7 @@ on this for a paid agreement. It is a starting point that establishes the
 open-core boundary, not a substitute for counsel.
 ============================================================================
 
-Copyright (c) 2026 Joe Arroyo. All rights reserved.
+Copyright (c) 2026 Batoncadence LLC. All rights reserved.
 
 1. RELATIONSHIP TO THE CORE
    The BitCadence "Core" — every file NOT marked as Enterprise — is licensed
@@ -27,7 +27,8 @@ Copyright (c) 2026 Joe Arroyo. All rights reserved.
 3. PRODUCTION USE REQUIRES A COMMERCIAL AGREEMENT
    Any use of the Enterprise Components in production, or to provide a service
    to third parties, requires a separate written commercial agreement with the
-   Project Owner. Contact: joeyr.arroyo@gmail.com.
+   Project Owner. Contact: open an issue titled
+   'Commercial license' on github.com/mastalink/BitCadence.
 
 4. RESTRICTIONS
    You may not, except as the Core's license independently permits for Core
@@ -53,4 +54,5 @@ Copyright (c) 2026 Joe Arroyo. All rights reserved.
    LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES, OR
    FOR ANY AMOUNT EXCEEDING THE FEES YOU PAID IN THE PRIOR TWELVE MONTHS.
 
-To obtain a commercial production license, contact: joeyr.arroyo@gmail.com
+To obtain a commercial production license, open an issue titled 'Commercial license' on
+github.com/mastalink/BitCadence, or contact Batoncadence LLC through the repository.

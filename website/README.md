@@ -37,8 +37,7 @@ First run creates the project and prints the live URL
 (`https://bitcadence.pages.dev`). Subsequent runs deploy in seconds.
 
 **Custom domain:** Cloudflare dashboard → Pages → bitcadence →
-Custom domains → add `bitcadence.ai` (already owned, catch-all email
-configured — `pilots@bitcadence.ai` just works).
+Custom domains → add `bitcadence.ai` (already owned).
 
 **Zero-config alternative:** the Cloudflare dashboard also accepts a
 drag-and-drop of the `website/` folder, or can auto-deploy from this

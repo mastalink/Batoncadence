@@ -1,6 +1,6 @@
 # Trademark & Brand Policy
 
-**BitCadence™** and **Drumline™** are trademarks of Joe Arroyo (the
+**BitCadence™** and **Drumline™** are trademarks of Batoncadence LLC (the
 "Project Owner"). This policy explains how the marks may be used. It is
 separate from, and not limited by, the software license.
 
@@ -8,7 +8,7 @@ separate from, and not limited by, the software license.
 > [Prosperity Public License 3.0.0](LICENSE). That license grants rights to the **code** — it
 > does **not** grant any rights to the **name, logo, or brand**. Trademark
 > rights are held separately by the Project Owner. This is the same model used
-> by most commercial open-source projects, and it is what preserves the
+> by most commercial source-available projects, and it is what preserves the
 > Project Owner's ability to offer a commercial edition and to license or
 > transfer the brand.
 
@@ -54,4 +54,4 @@ noncommercial use; business use, the enterprise edition and the brand are commer
 > for conflicts before filing — a rename is cheap now and expensive after a
 > pilot contract names the mark.
 
-Questions about brand or commercial use: **joeyr.arroyo@gmail.com**.
+Questions about brand or commercial use: an issue titled "Brand" on [github.com/mastalink/BitCadence](https://github.com/mastalink/BitCadence).

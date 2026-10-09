@@ -155,7 +155,7 @@ Full spec: [docs/DRUMLINE.md](docs/DRUMLINE.md)
 | Docker + any-cloud deploy | — | ✓ | ✓ |
 | ServiceNow & Dynatrace connectors | — | — | ✓ |
 | SSO via your reverse proxy (trusted headers) | — | — | ✓ |
-| Pilot program | — | — | [email us](mailto:pilots@bitcadence.ai) |
+| Pilot program | — | — | [open an issue](https://github.com/mastalink/BitCadence/issues) |
 
 One codebase, no separate builds: `mco edition` shows the active edition
 (inferred from your config, or pinned with `MCO_EDITION`). Details, scope
@@ -221,4 +221,4 @@ public issue.
 Free for personal and noncommercial use under the [Prosperity Public License 3.0.0](LICENSE).
 Businesses get a free 30-day trial, then a commercial license: see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
 Releases up to and including `0.5.0rc1` were MIT and stay MIT for anyone who received them.
-Copyright (c) 2026 Joe Arroyo.
+Copyright (c) 2026 Batoncadence LLC.
