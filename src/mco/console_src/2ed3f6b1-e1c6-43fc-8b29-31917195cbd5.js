@@ -406,6 +406,94 @@ function HelpersPage() {
 }
 
 
+// ----- Connect an AI page (design/redesign-v1/02-connect-ai.html) -----
+// One tap per app. The gateway finds the app and writes its connection settings after keeping a backup
+// (same code as `bitcadence connect`). No file, path or code is shown, except under "Another app".
+function ConnectPage() {
+  const store = window.BitCadenceStore;
+  const live = (store.mode ? store.mode() : "demo") === "live";
+  const [apps, setApps] = useStateO(null);
+  const [error, setError] = useStateO("");
+  const [note, setNote] = useStateO("");
+  const [busy, setBusy] = useStateO("");
+  const [snippet, setSnippet] = useStateO("");
+  const [copied, setCopied] = useStateO(false);
+
+  async function load() {
+    try { setApps((await store.connectList()).apps); setError(""); }
+    catch (e) { setError(helperMessage(e)); }
+  }
+  useEffectO(() => { if (live) load(); }, [live]);
+
+  async function act(app, verb) {
+    setBusy(app + verb); setNote(""); setError("");
+    try {
+      const res = await store.connectAction(app, verb);
+      setNote(res.message);
+      await load();
+    } catch (e) { setError(helperMessage(e)); }
+    setBusy("");
+  }
+  async function showOther() {
+    setError("");
+    try { setSnippet((await store.connectOther()).snippet); }
+    catch (e) { setError(helperMessage(e)); }
+  }
+  async function copy() {
+    try { await navigator.clipboard.writeText(snippet); setCopied(true); } catch (e) { setCopied(false); }
+  }
+
+  const list = apps || [];
+  return (
+    <div className="hp-view">
+      <style>{HELPERS_STYLE}</style>
+      <h1>Connect an AI</h1>
+      <p className="sub">Pick the apps you already use. One tap each. We do the setup for you.</p>
+      {!live ? <div className="hp-card">Connect to your BitCadence in Settings first, then you can connect your AI apps here.</div> : null}
+      {error ? <div className="hp-error" role="alert" style={{ marginBottom: 14 }}>{error}</div> : null}
+      <div role="status" aria-live="polite">{note ? <div className="hp-card">{note}</div> : null}</div>
+      <div className="hp-grid">
+        {list.map((a) => (
+          <div className="hp-card" key={a.app}>
+            <div className="hp-top">
+              <div className="hp-avatar" aria-hidden="true">{a.name.charAt(0)}</div>
+              <div className="hp-who"><b>{a.name}</b><div className="hp-hint" style={{ margin: 0 }}>{a.hint}</div></div>
+              <span className="hp-pill" data-light={a.connected ? "green" : "grey"}>
+                <span aria-hidden="true">{a.connected ? "●" : "○"}</span>{a.connected ? "Connected" : (a.found ? "Not connected" : "Not found")}
+              </span>
+            </div>
+            {!a.found ? <p className="hp-hint">We couldn't find {a.name} on this computer. Install it first, then come back.</p> : null}
+            <div className="hp-row">
+              {a.connected ? (
+                <>
+                  <button disabled={!!busy} onClick={() => act(a.app, "test")}>{busy === a.app + "test" ? "Checking…" : "Send a test"}</button>
+                  <button disabled={!!busy} onClick={() => act(a.app, "disconnect")}>{busy === a.app + "disconnect" ? "Disconnecting…" : "Disconnect"}</button>
+                </>
+              ) : (
+                <button className="hp-primary" disabled={!!busy || !a.found} onClick={() => act(a.app, "connect")}>{busy === a.app + "connect" ? "Connecting…" : "Connect"}</button>
+              )}
+            </div>
+          </div>
+        ))}
+        <div className="hp-card">
+          <div className="hp-top">
+            <div className="hp-avatar" aria-hidden="true">+</div>
+            <div className="hp-who"><b>Another app</b><div className="hp-hint" style={{ margin: 0 }}>Anything that supports connections</div></div>
+          </div>
+          <div className="hp-row"><button disabled={!live} onClick={showOther}>Show me a code</button></div>
+          {snippet ? (
+            <div>
+              <pre className="hp-hint" style={{ whiteSpace: "pre-wrap" }}>{snippet}</pre>
+              <button onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ----- Schedules page (design/redesign-v1/07-schedules.html) -----
 // "Every weekday at 2:00 AM" pickers. The file behind it (~/.mco/schedules.yaml) is written by
 // the gateway, the same code as `bitcadence schedule add`; no YAML or cron is ever shown.
@@ -964,7 +1052,7 @@ function PlainSettings({ children }) {
   );
 }
 
-Object.assign(window, { AgentFleet, HelpersPage, SchedulesPage, Settings, PlainSettings, Toggle, SettingRow, ConnectorsCard });
+Object.assign(window, { AgentFleet, HelpersPage, ConnectPage, SchedulesPage, Settings, PlainSettings, Toggle, SettingRow, ConnectorsCard });
 
 
 function LiveControlSettings() {

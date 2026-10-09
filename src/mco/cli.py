@@ -289,6 +289,10 @@ def create_app() -> FastAPI:
     from mco.orchestrator.helpers_routes import helpers_router
     app_server.include_router(helpers_router)
 
+    # Connect an AI page: one tap per app (same code as `bitcadence connect`).
+    from mco.orchestrator.connect_routes import connect_router
+    app_server.include_router(connect_router)
+
     # Schedules page: "Every weekday at 2 AM" pickers (same code as `bitcadence schedule`).
     from mco.orchestrator.schedules_routes import schedules_router
     app_server.include_router(schedules_router)
@@ -3421,12 +3425,14 @@ def helpers_fix(yes: bool = typer.Option(False, "--yes", "-y", help="Repair with
 
 @app.command("connect")
 def connect(
-    target: str = typer.Argument("", help="Which AI: claude, gemini or cursor. Leave out for a pick list."),
+    target: str = typer.Argument("", help="Which AI: claude, codex, gemini, antigravity, cursor or other. Leave out for a pick list."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before changing its settings."),
+    disconnect: bool = typer.Option(False, "--disconnect", help="Take BitCadence back out of that app."),
+    test: bool = typer.Option(False, "--test", help="Check that the app is set up."),
 ):
     """Connect an AI app to BitCadence."""
     from mco import plain
-    _run_plain(lambda: plain.do_connect(target, yes=yes), app_hint=target)
+    _run_plain(lambda: plain.do_connect(target, yes=yes, disconnect=disconnect, check=test), app_hint=target)
 
 
 @app.command("pause")

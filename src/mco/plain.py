@@ -22,19 +22,10 @@ WAITING = "needs_approval"
 RUNNING = {"leased", "in_progress"}
 KILL_SWITCH = "MCO_KILL_SWITCH"
 
-# Apps `bitcadence connect` knows how to find: name -> candidate config files.
+# Apps `bitcadence connect` knows how to find: see mco.connect_ai.
 def _connect_targets() -> dict[str, list[Path]]:
-    home = Path.home()
-    appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
-    return {
-        "claude": [
-            appdata / "Claude" / "claude_desktop_config.json",
-            home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
-            home / ".config" / "Claude" / "claude_desktop_config.json",
-        ],
-        "gemini": [home / ".gemini" / "settings.json"],
-        "cursor": [home / ".cursor" / "mcp.json"],
-    }
+    from mco import connect_ai
+    return connect_ai.targets()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -668,43 +659,61 @@ def do_schedule_toggle(name: str, on: bool) -> int:
     return 0
 
 
-def do_connect(app: str = "", *, yes: bool = False) -> int:
+def do_connect(app: str = "", *, yes: bool = False, disconnect: bool = False, check: bool = False) -> int:
+    from mco import connect_ai
     targets = _connect_targets()
     app = (app or "").strip().lower()
+    if app == "other":
+        say("Add this to the other app's connection settings:")
+        say(connect_ai.other_snippet())
+        return 0
     if not app:
         names = sorted(targets)
         say("Which AI do you want to connect?")
         for i, name in enumerate(names, 1):
-            say(f"  {i}. {name.capitalize()}")
+            say(f"  {i}. {connect_ai.label(name)}")
+        say(f"  {len(names) + 1}. Another app")
         choice = ask_text("Type a number or a name:")
         if not choice:
             return 1
+        if choice.isdigit() and int(choice) == len(names) + 1:
+            return do_connect("other")
         app = names[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(names) else choice.lower()
-    if app not in targets:
-        say(f"I don't know {app!r} yet. I can connect: {', '.join(sorted(targets))}.")
-        return 1
-    path = next((p for p in targets[app] if p.exists()), None)
-    if path is None:
-        err = friendly.app_not_found(app)
-        say(err.render())
-        return 1
+    name = connect_ai.label(app)
     try:
-        data = json.loads(path.read_text(encoding="utf-8") or "{}")
-    except ValueError:
-        say(f"{app.capitalize()}'s settings file isn't readable, so I left it alone.")
+        if app not in targets:
+            raise connect_ai.ConnectError(
+                f"I don't know {app!r} yet. I can connect: {', '.join(sorted(targets))}, other.", "unknown")
+        if check:
+            res = connect_ai.check(app, targets)
+            say(res["message"])
+            return 0 if res["ok"] else 1
+        if disconnect:
+            if not confirm(f"Take BitCadence out of {name}'s settings? (a backup is kept)", yes=yes):
+                say("Okay, nothing changed.")
+                return 0
+            res = connect_ai.disconnect(app, targets)
+            say(f"{name} is disconnected." if res["changed"] else f"{name} wasn't connected.")
+            return 0
+        path = next((p for p in targets[app] if p.exists()), None)
+        if path is None:
+            raise connect_ai.ConnectError("", "not_found")
+        already = next((r for r in connect_ai.status({app: targets[app]}) if r["connected"]), None)
+        if already:
+            say(f"{name} is already connected.")
+            return 0
+        say(f"I'll add BitCadence to {name}'s settings (a backup is kept).")
+        if not confirm("Go ahead?", yes=yes):
+            say("Okay, nothing changed.")
+            return 0
+        connect_ai.connect(app, targets)
+    except connect_ai.ConnectError as exc:
+        if exc.kind == "not_found":
+            say(friendly.app_not_found(app).render())
+        else:
+            say(str(exc))
         return 1
-    servers = data.setdefault("mcpServers", {})
-    if "bitcadence" in servers:
-        say(f"{app.capitalize()} is already connected.")
-        return 0
-    say(f"I'll add BitCadence to {app.capitalize()}'s settings (a backup is kept).")
-    if not confirm("Go ahead?", yes=yes):
-        say("Okay, nothing changed.")
-        return 0
-    path.with_suffix(path.suffix + ".bak").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    servers["bitcadence"] = {"command": sys.executable, "args": ["-m", "mco.cli", "mcp"]}
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    say(f"Connected. Restart {app.capitalize()} to see it.")
+    say(f"Connected. Restart {name} to see it.")
     return 0
 
 

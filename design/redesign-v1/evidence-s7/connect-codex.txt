@@ -1,0 +1,3 @@
+$ bitcadence connect codex --yes
+I'll add BitCadence to ChatGPT / Codex's settings (a backup is kept).
+Connected. Restart ChatGPT / Codex to see it.

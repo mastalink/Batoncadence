@@ -367,6 +367,16 @@
       if (confirm) await poll();
       return res;
     },
+    // Connect an AI page: same code as `bitcadence connect`.
+    async connectList() {
+      return api("/api/connect-ai");
+    },
+    async connectAction(app, verb) {
+      return api("/api/connect-ai/" + encodeURIComponent(app) + "/" + verb, { method: "POST", body: JSON.stringify({}) });
+    },
+    async connectOther() {
+      return api("/api/connect-ai/other");
+    },
     async seedDemoPipeline() {
       if (connState === "demo") return demo.seedDemoPipeline();
       try {

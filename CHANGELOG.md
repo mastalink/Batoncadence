@@ -13,6 +13,11 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
   type, not by message text.
 
 ### Changed
+- **Connect an AI** page and `bitcadence connect [claude|codex|gemini|antigravity|cursor|other]`:
+  one tap per app finds it and adds BitCadence to its connection settings, keeping a
+  `.bak` of the original first. Adds Codex (`config.toml`), Antigravity, `--disconnect`,
+  `--test` and a copyable code for "another app". New `/api/connect-ai` routes.
+
 - **Ask for something** replaces the drag-and-drop workflow builders. The console
   page and `bitcadence ask` share one planner: a plain-language request, a drawn
   plan, one Approve, and light tweaks (remove a step, always ask me, make it
