@@ -1,0 +1,2 @@
+$ bitcadence connect claude --test
+Claude is set up. If it was open, close and reopen it once.

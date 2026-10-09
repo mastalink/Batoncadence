@@ -1,0 +1,5 @@
+$ bitcadence approve Publish   (answer: Y)
+You can't approve yet because your account isn't an approver.
+Fix it? [Y/n] y
+Done. You can approve now.
+Approved: Publish release notes.

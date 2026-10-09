@@ -1,0 +1,6 @@
+$ bitcadence settings
+Settings
+  Pause everything: Off
+  Tell me on my phone: On
+Pause or resume with `bitcadence pause` / `bitcadence resume`.
+For people who like details: bitcadence settings --show-advanced

@@ -1,0 +1,2 @@
+$ bitcadence connect gemini --yes
+I couldn't find Gemini on this computer. Install it, then run: bitcadence connect gemini

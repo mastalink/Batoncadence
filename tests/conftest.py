@@ -422,3 +422,14 @@ def _reset_score_sweep_pause(monkeypatch, tmp_path_factory):
         pause_path.unlink()
     except FileNotFoundError:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_registry(monkeypatch):
+    """`bitcadence approve` / `fix` look up THIS computer's account in the local
+    registry and can grant it the approver right. A test must never read or change
+    the developer's real registry; tests that cover the repair stub `own_account`
+    and `_db` themselves."""
+    from mco import approver
+
+    monkeypatch.setattr(approver, "own_account", lambda: None)

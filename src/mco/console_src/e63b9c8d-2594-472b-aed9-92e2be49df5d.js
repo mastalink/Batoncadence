@@ -205,27 +205,6 @@
       notify();
       return j;
     },
-    submitWorkflow(name, steps) {
-      // steps: [{tmpId, role, title, instructions, depends_on:[tmpIds], requires_approval, max_retries, escalate_to_role}]
-      const idMap = {};
-      steps.forEach((s) => {
-        const deps = (s.depends_on || []).map((d) => idMap[d]).filter(Boolean);
-        const blocked = deps.length > 0;
-        const status = blocked ? "waiting" : (s.requires_approval ? "needs_approval" : "pending");
-        const j = mkJob({
-          title: s.title, description: s.instructions || "", target_agent_role: s.role,
-          depends_on: deps, requires_approval: !!s.requires_approval,
-          max_retries: s.max_retries || 0, escalate_to_role: s.escalate_to_role || null,
-          status, workflow: name,
-        });
-        jobs.unshift(j);
-        record(j.id, "created", "joe-laptop", "human", { status, workflow: name });
-        idMap[s.tmpId] = j.id;
-      });
-      toast("ok", "Workflow submitted", name + " — " + steps.length + " steps queued.");
-      notify();
-      return idMap;
-    },
     seedDemoPipeline() {
       const name = "jde-demo-live-pipeline";
       const run = uuid().slice(0, 12);

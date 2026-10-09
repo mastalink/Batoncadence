@@ -15,6 +15,7 @@ Every guide in this wiki is written from real, hands-on execution. Whether you p
 3. [**Connecting the Console & Demo Mode**](connecting-console.md) — Setting up the browser Control Panel, token authorization, and exploring with simulated data.
 
 ### Day-to-Day Operations
+3a. [**Console Home (what needs you, what is running)**](Console-home.md), [**Live Score**](Score-live.md) and [**Helpers**](Helpers.md): the first page of the console, the read-only live drawing of a Score run, and each helper's light with the Fix it button. Also [**Schedules**](Schedules.md), [**Approvals**](Approvals.md) and [**Settings**](Settings.md), the rest of the console menu. [**Ask**](Ask.md) covers asking for something in plain words, and [**Connect an AI**](Connect-an-AI.md) links Claude, Codex, Gemini, Antigravity or Cursor in one tap.
 4. [**Overview Dashboard**](overview-dashboard.md) — Mission-control metrics, active pipelines, recent events, and interface tone options.
 5. [**Projects Dashboard**](projects-dashboard.md) — Grouping jobs into initiative streams, health monitoring, and coverage analysis.
 6. [**Job Board & Creating Work**](job-board-and-tasks.md) — Submitting tasks, filtering queues, inspecting job drawers, and managing job lifecycles (retries, cancellations, reassignments).

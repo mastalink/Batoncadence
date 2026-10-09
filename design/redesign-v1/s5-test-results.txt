@@ -1,0 +1,9 @@
+Slice 5 (S5-helpers) validation, PYTHONPATH=C:/AI/bc-redesign/src
+python -m pytest --ignore=tests/test_install_sh_tty.py -o addopts= -q
+  1813 passed, 15 skipped (external services unavailable), 0 failed
+python scripts/capture_helpers.py
+  text capture of `bitcadence helpers` and `bitcadence helpers fix` (n, then y): design/redesign-v1/evidence-s5/helpers-cli.txt
+python scripts/build_console.py verify: 9 sources round-trip, 0 differ
+git diff --check: clean
+No browser screenshots this slice (Playwright not run); the console page is covered by bundle-source tests.
+docs/wiki/_review/verify_cli_examples.py is absent on this branch.
