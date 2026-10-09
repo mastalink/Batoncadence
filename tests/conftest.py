@@ -401,6 +401,15 @@ def _reset_score_sweep_pause(monkeypatch, tmp_path_factory):
         score_sweep, "get_config",
         lambda: {"MCO_SCORE_ARTIFACT_ROOT": str(artifact_root)},
     )
+    # Tests that patch get_config with their own dict (no artifact root) fall
+    # back to these defaults. On 2026-10-08 that wrote failing-alerts.json into
+    # the real ~/.mco and replayed 20 stale owner alerts. Point the fallbacks
+    # at the sandbox too.
+    monkeypatch.setattr(score_sweep, "DEFAULT_SCORE_ROOT", artifact_root)
+    monkeypatch.setattr(score_sweep, "DEFAULT_SCORE_DB", artifact_root / "score-runs.db")
+    # The CLI keeps its own copies; test_score_sweep asserts the two stay equal.
+    monkeypatch.setattr("mco.cli.DEFAULT_SCORE_ROOT", artifact_root)
+    monkeypatch.setattr("mco.cli.DEFAULT_SCORE_DB", artifact_root / "score-runs.db")
     score_sweep.set_sweep_paused(False)
     yield
     # Test monkeypatches are still active during fixture teardown.  Several
@@ -413,3 +422,14 @@ def _reset_score_sweep_pause(monkeypatch, tmp_path_factory):
         pause_path.unlink()
     except FileNotFoundError:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_registry(monkeypatch):
+    """`bitcadence approve` / `fix` look up THIS computer's account in the local
+    registry and can grant it the approver right. A test must never read or change
+    the developer's real registry; tests that cover the repair stub `own_account`
+    and `_db` themselves."""
+    from mco import approver
+
+    monkeypatch.setattr(approver, "own_account", lambda: None)

@@ -1,0 +1,67 @@
+........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+................s....................................................... [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+...................s.................................................... [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 56%]
+.........sss.s.s.s.s.s.s..s.s........................................... [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 69%]
+........................................................................ [ 73%]
+........................................................................ [ 77%]
+........................................................................ [ 81%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 93%]
+........................................................................ [ 97%]
+.............................................                            [100%]
+============================== warnings summary ===============================
+..\..\Users\masta\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: 76 warnings
+tests/test_admin_routes.py: 2240 warnings
+tests/test_agent_auth.py: 328 warnings
+tests/test_agent_exchange.py: 186 warnings
+tests/test_agentd_control.py: 40 warnings
+tests/test_attempt_transports.py: 164 warnings
+tests/test_console.py: 246 warnings
+tests/test_dashboard.py: 164 warnings
+tests/test_drumline.py: 100 warnings
+tests/test_evidence_binding_integrity.py: 25 warnings
+tests/test_gateway_responsiveness.py: 246 warnings
+tests/test_governance.py: 960 warnings
+tests/test_home_live.py: 6 warnings
+tests/test_integration_routes.py: 351 warnings
+tests/test_jev.py: 10 warnings
+tests/test_jev_shadow.py: 57 warnings
+tests/test_job_board_improvements.py: 290 warnings
+tests/test_job_creation_idempotency.py: 391 warnings
+tests/test_lease_ttl.py: 207 warnings
+tests/test_localstore.py: 82 warnings
+tests/test_metrics.py: 5 warnings
+tests/test_project_dashboard.py: 69 warnings
+tests/test_ratelimit.py: 96 warnings
+tests/test_rbac.py: 4 warnings
+tests/test_release_acceptance.py: 105 warnings
+tests/test_request_timing.py: 2 warnings
+tests/test_routes.py: 754 warnings
+tests/test_score_policy.py: 40 warnings
+tests/test_score_sweep.py: 492 warnings
+tests/test_security_hardening.py: 251 warnings
+tests/test_tamper_evident_audit.py: 48 warnings
+tests/test_tenancy.py: 472 warnings
+  C:\Users\masta\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+..\..\Users\masta\AppData\Roaming\Python\Python314\site-packages\authlib\integrations\httpx_client\assertion_client.py:5
+  C:\Users\masta\AppData\Roaming\Python\Python314\site-packages\authlib\integrations\httpx_client\assertion_client.py:5: AuthlibDeprecationWarning: The httpx module is deprecated; please use httpx2 instead.
+    from ._compat import httpx2
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1760 passed, 13 skipped, 8508 warnings in 244.15s (0:04:04)

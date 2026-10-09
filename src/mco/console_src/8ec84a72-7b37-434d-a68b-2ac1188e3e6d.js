@@ -2,13 +2,15 @@
 const { useState: useStateA, useEffect: useEffectA } = React;
 
 const NAV = [
-  { id: "overview", label: "Overview", icon: "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" },
+  { id: "overview", label: "Home", icon: "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" },
   { id: "projects", label: "Projects", icon: "M3 7h7l2 2h9v10H3zM3 7V5h7l2 2" },
   { id: "jobs", label: "Job Board", icon: "M4 6h16M4 12h16M4 18h10" },
   { id: "approvals", label: "Approvals", icon: "M9 12l2 2 4-5M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18z" },
   { id: "governance", label: "Governance", icon: "M12 3l8 4v5c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V7l8-4zM9 12l2 2 4-5" },
-  { id: "workflows", label: "Workflows", icon: "M5 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM5 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM7 5h10M7 19h10M19 12H7" },
-  { id: "agents", label: "Agent Fleet", icon: "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM5 22a7 7 0 0 1 14 0M19 8a2.5 2.5 0 1 0-4 0M9 8a2.5 2.5 0 1 1-4 0" },
+  { id: "ask", label: "Ask for something", icon: "M5 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM5 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM7 5h10M7 19h10M19 12H7" },
+  { id: "agents", label: "Helpers", icon: "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM5 22a7 7 0 0 1 14 0M19 8a2.5 2.5 0 1 0-4 0M9 8a2.5 2.5 0 1 1-4 0" },
+  { id: "connect", label: "Connect an AI", icon: "M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0V8zM12 17v4" },
+  { id: "schedules", label: "Schedules", icon: "M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 7v5l3 2" },
   { id: "memory", label: "Drumline", icon: "M21 5c0 1.66-4.03 3-9 3S3 6.66 3 5s4.03-3 9-3 9 1.34 9 3zM3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" },
   { id: "activity", label: "Activity", icon: "M22 12h-4l-3 9L9 3l-3 9H2" },
   { id: "settings", label: "Settings", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2z" },
@@ -67,20 +69,21 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const PAGE_TITLES = {
-  expert: { overview: "Overview", projects: "Projects", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", workflows: "Workflows", agents: "Agent Fleet", memory: "Drumline", activity: "Audit Trail", settings: "Settings" },
-  plain: { overview: "Overview", projects: "Projects", jobs: "All work", approvals: "Needs your OK", governance: "Governance", workflows: "Flows", agents: "Your agents", memory: "Drumline", activity: "What happened", settings: "Settings" },
+  expert: { overview: "Home", projects: "Projects", jobs: "Job Board", approvals: "Approval Queue", governance: "Governance", ask: "Ask for something", agents: "Agent Fleet", connect: "Connect an AI", schedules: "Schedules", memory: "Drumline", activity: "Audit Trail", settings: "Settings", scoreLive: "Live view" },
+  plain: { overview: "Home", projects: "Projects", jobs: "All work", approvals: "Needs your OK", governance: "Governance", ask: "Ask for something", agents: "Your helpers", connect: "Connect an AI", schedules: "Schedules", memory: "Drumline", activity: "What happened", settings: "Settings", scoreLive: "Live view" },
 };
 
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const [page, setPage] = useStateA(localStorage.getItem("bitcadence_page") || localStorage.getItem("baton_page") || "overview");
+  const [page, setPage] = useStateA(((p) => p === "workflows" ? "ask" : p)(localStorage.getItem("bitcadence_page") || localStorage.getItem("baton_page") || "overview"));
   const [advanced, setAdvanced] = useStateA((localStorage.getItem("bitcadence_adv") ?? localStorage.getItem("baton_adv")) === "1");
   const [openJob, setOpenJob] = useStateA(null);
+  const [watchRun, setWatchRun] = useStateA(null);
   const [composing, setComposing] = useStateA(false);
   const [, force] = useStateA(0);
 
   useEffectA(() => window.BitCadenceStore.subscribe(() => force((x) => x + 1)), []);
-  useEffectA(() => { localStorage.setItem("bitcadence_page", page); }, [page]);
+  useEffectA(() => { localStorage.setItem("bitcadence_page", page === "scoreLive" ? "overview" : page); }, [page]);
   useEffectA(() => { localStorage.setItem("bitcadence_adv", advanced ? "1" : "0"); }, [advanced]);
   useEffectA(() => {
     if (t.simulate) window.BitCadenceStore.startSim(); else window.BitCadenceStore.stopSim();
@@ -114,13 +117,16 @@ function App() {
   }, [page, storeMode]);
 
   const screen = {
-    overview: <Overview jobs={jobs} agents={agents} tone={tone} advanced={advanced} onNav={setPage} onOpen={setOpenJob} />,
+    overview: <Home jobs={jobs} agents={agents} onNav={setPage} onOpen={setOpenJob} onWatch={(id) => {setWatchRun(id);setPage("scoreLive");}} />,
+    scoreLive: <ScoreLive runId={watchRun} jobs={jobs} agents={agents} onBack={() => setPage("overview")} />,
     projects: <ProjectDashboard jobs={projectJobs} coverage={projectCoverage} tone={tone} onOpen={setOpenJob} onShowJobs={() => setPage("jobs")} />,
     jobs: <JobBoard jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} onCompose={() => setComposing(true)} />,
     approvals: <Approvals jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     governance: <Governance jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
-    workflows: <WorkflowBuilder jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
-    agents: <AgentFleet agents={agents} jobs={jobs} tone={tone} advanced={advanced} />,
+    ask: <AskPage onNav={setPage} />,
+    agents: tone === "plain" ? <HelpersPage /> : <AgentFleet agents={agents} jobs={jobs} tone={tone} advanced={advanced} />,
+    connect: <ConnectPage />,
+    schedules: <SchedulesPage />,
     memory: <DrumlineMemory tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     activity: <ActivityFeedScreen jobs={jobs} tone={tone} advanced={advanced} onOpen={setOpenJob} />,
     settings: <Settings tone={tone} advanced={advanced} setAdvanced={setAdvanced} />,
@@ -144,8 +150,8 @@ function App() {
           {NAV.map((n) => {
             const active = page === n.id;
             return (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{
-                display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8,
+              <button key={n.id} aria-label={n.label} onClick={() => setPage(n.id)} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", minHeight: 48, borderRadius: 8,
                 border: "none", cursor: "pointer", fontSize: 13.5, fontWeight: active ? 600 : 500, textAlign: "left",
                 background: active ? "var(--accent-soft)" : "transparent",
                 color: active ? "var(--accent-text)" : "var(--text-2)",
@@ -170,7 +176,7 @@ function App() {
               <React.Fragment>
                 <span style={{ width: 7, height: 7, borderRadius: 99, flex: "none", background: mode === "live" ? "var(--st-done-dot)" : "var(--st-approval-dot)", animation: "cadence-pulse 2.2s infinite" }}></span>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {mode === "live" ? "Live \u00B7 " + host : mode === "connecting" ? "Connecting\u2026" : mode === "offline" ? "Offline \u00B7 connection failed" : "Demo \u00B7 simulated data"}
+                  {mode === "live" ? "Live" : mode === "connecting" ? "Connecting\u2026" : mode === "offline" ? "Offline \u00B7 connection failed" : "Demo \u00B7 simulated data"}
                 </span>
               </React.Fragment>
             );

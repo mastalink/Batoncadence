@@ -7,6 +7,7 @@ without one, checkpointed tasks wait rather than self-authorize.
 import hashlib
 import json
 import logging
+import os
 import re
 import sqlite3
 import subprocess
@@ -22,6 +23,17 @@ from mco.orchestrator.score_policy import TASK_CHECKPOINT
 from mco.orchestrator.scores import ScoreError, ScoreIdentityError, digest, load_score
 
 logger = logging.getLogger("mco.orchestrator.score_bridge")
+
+# Workers lease their highest-priority job first (routes.lease_next_job), and a
+# Score task's deadline runs from submission. At priority 0 a Score job waits
+# behind every ordinary job a busy worker has queued and times out before it
+# is picked up (bitcadence-redesign -02 died this way). Score work outranks
+# normal board traffic by default; MCO_SCORE_JOB_PRIORITY overrides it.
+def _score_job_priority() -> int:
+    try:
+        return int(os.environ.get("MCO_SCORE_JOB_PRIORITY", "50"))
+    except ValueError:
+        return 50
 
 
 class ScoreAuthorityError(ScoreError, AuthorityError):
@@ -239,7 +251,7 @@ class ScoreBridge:
                             job_id = score_job_id(run["org"], run_id, run["digest"], key, "work")
                             contract = dict(protocol="score-v1", score_id=score["id"], run_id=run_id, digest=run["digest"], task=key, attempt=1, phase="work", artifact_root=str(self.root), required_evidence=t["evidence"], review_of=None, constraints=score["constraints"])
                             prompt = t["instructions"] + " Return strict JSON {artifacts: {required_name: {path: relative_path, sha256: lowercase_digest}}}. Save evidence only beneath artifact_root; no secrets."
-                            payload = dict(id=job_id, title=f"Score {run_id} {key} work", description=prompt, target_agent_role=t["role"], target_agent_id=targets[t["role"]], depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=0)
+                            payload = dict(id=job_id, title=f"Score {run_id} {key} work", description=prompt, target_agent_role=t["role"], target_agent_id=targets[t["role"]], depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=_score_job_priority())
                             db.execute("INSERT INTO dispatch VALUES(?,?,?,?,?,'waiting_on_gate',NULL,?)", (run_id, key, "work", job_id, encoded(payload), int(self.clock()) + t["timeout_seconds"]))
                             self.event(db, run_id, "waiting_on_gate", {"task": key, "reason": "no gate service configured"})
                             rows[(key, "work")] = {"task": key, "phase": "work", "job_id": job_id, "status": "waiting_on_gate"}
@@ -274,7 +286,7 @@ class ScoreBridge:
                         if work is None:
                             contract = dict(protocol="score-v1", score_id=score["id"], run_id=run_id, digest=run["digest"], task=key, attempt=1, phase="work", artifact_root=str(self.root), required_evidence=t["evidence"], review_of=None, constraints=score["constraints"])
                             prompt = t["instructions"]
-                            payload = dict(id=job_id, title=f"Score {run_id} {key} work", description=prompt, target_agent_role=t["role"], target_agent_id=targets[t["role"]], depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=0)
+                            payload = dict(id=job_id, title=f"Score {run_id} {key} work", description=prompt, target_agent_role=t["role"], target_agent_id=targets[t["role"]], depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=_score_job_priority())
                             db.execute("INSERT INTO dispatch VALUES(?,?,?,?,?,'rejected',NULL,?)", (run_id, key, "work", job_id, encoded(payload), int(self.clock()) + t["timeout_seconds"]))
                         else:
                             db.execute("UPDATE dispatch SET status='rejected' WHERE run=? AND task=? AND phase='work'", (run_id, key))
@@ -289,7 +301,7 @@ class ScoreBridge:
                             job_id = score_job_id(run["org"], run_id, run["digest"], key, "work")
                             contract = dict(protocol="score-v1", score_id=score["id"], run_id=run_id, digest=run["digest"], task=key, attempt=1, phase="work", artifact_root=str(self.root), required_evidence=t["evidence"], review_of=None, constraints=score["constraints"])
                             prompt = t["instructions"] + " Return strict JSON {artifacts: {required_name: {path: relative_path, sha256: lowercase_digest}}}. Save evidence only beneath artifact_root; no secrets."
-                            payload = dict(id=job_id, title=f"Score {run_id} {key} work", description=prompt, target_agent_role=t["role"], target_agent_id=targets[t["role"]], depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=0)
+                            payload = dict(id=job_id, title=f"Score {run_id} {key} work", description=prompt, target_agent_role=t["role"], target_agent_id=targets[t["role"]], depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=_score_job_priority())
                             db.execute("INSERT INTO dispatch VALUES(?,?,?,?,?,'waiting_on_gate',NULL,?)", (run_id, key, "work", job_id, encoded(payload), int(self.clock()) + t["timeout_seconds"]))
                             self.event(db, run_id, "waiting_on_gate", {"task": key, "gate_id": gate["id"]})
                             rows[(key, "work")] = {"task": key, "phase": "work", "job_id": job_id, "status": "waiting_on_gate"}
@@ -405,7 +417,7 @@ class ScoreBridge:
                                 input_payload={"prompt": prompt, "score": contract, "no_reroute": True},
                                 max_retries=0,
                                 requires_approval=False,
-                                priority=0,
+                                priority=_score_job_priority(),
                             )
                             db.execute(
                                 "INSERT INTO dispatch VALUES(?,?,?,?,?,'waiting_on_gate',NULL,?)",
@@ -433,7 +445,7 @@ class ScoreBridge:
                             input_payload={"prompt": prompt, "score": contract, "no_reroute": True},
                             max_retries=0,
                             requires_approval=False,
-                            priority=0,
+                            priority=_score_job_priority(),
                         )
                         new_deadline = int(self.clock()) + t["timeout_seconds"]
                         db.execute(
@@ -447,7 +459,7 @@ class ScoreBridge:
                 else:
                     target_agent_id = targets[role][0] if isinstance(targets[role], (list, tuple)) else targets[role]
 
-                payload = dict(id=job_id, title=f"Score {run_id} {key} {phase}", description=prompt, target_agent_role=role, target_agent_id=target_agent_id, depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=0)
+                payload = dict(id=job_id, title=f"Score {run_id} {key} {phase}", description=prompt, target_agent_role=role, target_agent_id=target_agent_id, depends_on=[], input_payload={"prompt": prompt, "score": contract, "no_reroute": True}, max_retries=0, requires_approval=False, priority=_score_job_priority())
                 db.execute("INSERT INTO dispatch VALUES(?,?,?,?,?,'planned',NULL,?)", (run_id, key, phase, job_id, encoded(payload), int(self.clock()) + t["timeout_seconds"]))
                 self.event(db, run_id, "planned", {"job_id": job_id, "task": key, "phase": phase})
                 created.append(job_id)
@@ -808,7 +820,10 @@ class ScoreBridge:
             )
 
 
-COMPLETION_EVENT_GRACE_SECONDS = 120
+# The completion event goes through the outbox and can land well after the job
+# row's completed_at: 134 s on 2026-10-08 blocked redesign run -05 at 120 s.
+# Waiting longer only delays a real block; a wrong-actor event still blocks at once.
+COMPLETION_EVENT_GRACE_SECONDS = 900
 
 
 def _recently_completed(job) -> bool:

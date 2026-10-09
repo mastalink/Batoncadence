@@ -1,0 +1,5 @@
+claude_desktop_config.json
+claude_desktop_config.json.20261008-221733.bak
+claude_desktop_config.json.bak
+config.toml
+config.toml.bak

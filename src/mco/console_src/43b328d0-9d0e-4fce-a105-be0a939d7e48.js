@@ -1,6 +1,61 @@
 // BitCadence — Overview (mission control) + Approvals inbox.
 const { useState: useStateH, useMemo: useMemoH, useEffect: useEffectH } = React;
 
+// Named display setting: this flags silence, it never changes a job's state.
+const HOME_STALL_MINUTES = 10;
+const homeWords = value => String(value || "").replace(/[_-]+/g, " ");
+function homeState(job, agents, now = Date.now()) {
+  if (job.status === "needs_approval" || job.status === "waiting_on_gate") return "Needs you";
+  if (["failed", "halted", "rejected"].includes(job.status)) return "Stuck";
+  if (["completed", "accepted"].includes(job.status)) return "Done";
+  if (job.status === "cancelled") return "Stopped";
+  if (!["leased", "in_progress"].includes(job.status)) return "Waiting";
+  const worker = agents.find(a => a.instance_id === job.leased_by_instance_id);
+  const progress = job.output_payload?.progress;
+  const stamps = [job.started_at, job.updated_at, job.progress_at, progress?.at, worker?.last_seen_at]
+    .map(v => Date.parse(v)).filter(Number.isFinite);
+  return stamps.length && now - Math.max(...stamps) >= HOME_STALL_MINUTES * 60000 ? "Stuck" : "Working";
+}
+function homeLine(job, agents) {
+  const progress = job.output_payload?.progress || job.progress;
+  const text = typeof progress === "string" ? progress : progress?.message;
+  // Progress is a sentence, never a serialization or a credential dump.
+  if (typeof text === "string" && !/[{}\[\]\n]|mco_tok_|Bearer |(?:token|password|secret)\s*[:=]/i.test(text)) return text.slice(0, 180);
+  const worker = agents.find(a => a.instance_id === job.leased_by_instance_id);
+  const who = worker?.name || homeWords(job.target_agent_role) || "Helper";
+  return ({needs_approval:"Waiting for your approval.", completed:"Finished.", failed:"This work needs attention.",
+    halted:"Work has stopped and needs attention.", waiting:"Waiting for the earlier steps.", pending:"Waiting for a free helper.",
+    rejected:"Changes are needed before continuing.", cancelled:"This work was stopped."})[job.status] || `${who} is working on this step.`;
+}
+function homeGroups(jobs, agents, now = Date.now()) {
+  const attention = jobs.filter(j => ["Needs you", "Stuck"].includes(homeState(j, agents, now)))
+    .sort((a,b) => Number(homeState(b,agents,now) === "Needs you") - Number(homeState(a,agents,now) === "Needs you"));
+  const groups = new Map();
+  jobs.filter(j => !["completed", "cancelled", "rejected", "halted", "failed"].includes(j.status)).forEach(j => {
+    const score = j.input_payload?.score;
+    if (j.status === "needs_approval" && !score?.run_id) return;
+    const runId = score?.run_id;
+    const key = runId || j.workflow_run || j.id;
+    if (!groups.has(key)) groups.set(key, {key,runId,title: runId ? homeWords(score.score_id || j.title) : j.workflow || j.title, jobs:[]});
+    groups.get(key).jobs.push(j);
+  });
+  return {attention, running:Array.from(groups.values())};
+}
+function liveStages(run, jobs) {
+  return (run.tasks || []).map(task => {
+    const cards = (run.dispatch || []).filter(d => d.task === task.id).map(d => {
+      const job = (run.jobs || []).find(j => j.id === d.job_id) || jobs.find(j => j.id === d.job_id) || {id:d.job_id,title:task.title || homeWords(task.id),
+        status:({accepted:"completed", rejected:"rejected", dispatched:"pending"})[d.status] || d.status,
+        target_agent_role:d.phase === "review" ? task.review_role : task.role};
+      const verdict = {accepted:"completed",rejected:"rejected",failed:"failed",waiting_on_gate:"needs_approval"}[d.status];
+      return {job:verdict ? {...job,status:verdict} : job, phase:d.phase, round:job.input_payload?.score?.attempt || 1};
+    });
+    const next = (run.tasks || []).find(t => t.id === task.on_reject);
+    return {...task, title:task.title || homeWords(task.id), cards,
+      loop: next ? `Repeats with ${next.title || homeWords(next.id)} if changes are needed` : null};
+  });
+}
+
 // ----- Overview -----
 function StatCard({ label, value, sub, kind, onClick }) {
   return (
@@ -467,7 +522,7 @@ function Overview({ jobs, agents, tone, advanced, onNav, onOpen }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.7fr) minmax(0, 1fr)", gap: 22, alignItems: "start" }}>
         <div>
-          <SectionTitle action={<Btn small kind="ghost" onClick={() => onNav("workflows")}>Open builder →</Btn>}>{tone === "plain" ? "Running flows" : "Workflows in flight"}</SectionTitle>
+          <SectionTitle action={<Btn small kind="ghost" onClick={() => onNav("ask")}>Ask for something →</Btn>}>{tone === "plain" ? "Running flows" : "Workflows in flight"}</SectionTitle>
           <WorkflowStrip jobs={jobs} tone={tone} onOpen={onOpen} />
           {gates > 0 ? (
             <div style={{ marginTop: 8 }}>
@@ -509,6 +564,109 @@ function Overview({ jobs, agents, tone, advanced, onNav, onOpen }) {
   );
 }
 
+// Home and live drawing share the actual state/progress projection.
+function HomeCard({job, agents, onOpen, action}) {
+  const state = homeState(job, agents);
+  return <article className="home-card" data-state={state}>
+    <h3>{job.title}</h3><span className="home-state">{state}</span>
+    <p>{state === "Stuck" && ["leased", "in_progress"].includes(job.status)
+      ? `No sign of life for ${HOME_STALL_MINUTES} minutes. Check on the helper.` : homeLine(job, agents)}</p>
+    <div className="home-actions">{action}<button onClick={() => onOpen(job.id)}>Look first</button></div>
+  </article>;
+}
+function Home({jobs, agents, onNav, onOpen, onWatch}) {
+  const {attention, running} = homeGroups(jobs, agents);
+  const [plans, setPlans] = useStateH({});
+  // Read at most twenty distinct visible plans; totals come from the plan,
+  // never from the limited board snapshot. Job progress still refreshes live.
+  const runKey = running.filter(g => g.runId).slice(0,20).map(g => g.runId).join("\n");
+  useEffectH(() => {
+    let stopped = false;
+    const refresh = async () => {
+      const entries = await Promise.all(runKey.split("\n").filter(Boolean).map(async id => {
+        try {return [id, await window.BitCadenceStore.getScoreRun(id)];} catch (_) {return [id,null];}
+      }));
+      if (!stopped) setPlans(Object.fromEntries(entries));
+    };
+    refresh(); const timer = setInterval(refresh,30000);
+    return () => {stopped = true;clearInterval(timer);};
+  },[runKey]);
+  return <div className="home-view" aria-live="polite">
+    <style>{HOME_STYLE}</style>
+    <p>Here is what needs you, then what's running.</p>
+    <h2>What needs you <span className="home-count">{attention.length}</span></h2>
+    <div className="home-grid">{attention.map(job => <HomeCard key={job.id} job={job} agents={agents} onOpen={onOpen}
+      action={job.status === "needs_approval" ? <button onClick={() => window.BitCadenceStore.approve(job.id)}>Approve</button> : null} />)}</div>
+    {!attention.length && <p>Nothing needs your attention.</p>}
+    <h2>What's running</h2>
+    <div className="home-grid">{running.map(group => {
+      const current = group.jobs.find(j => ["leased","in_progress"].includes(j.status)) || group.jobs[0];
+      const state = homeState(current,agents);
+      const plan = plans[group.runId];
+      const step = (plan?.tasks || []).findIndex(task => task.id === current.input_payload?.score?.task);
+      return <button className="home-card" data-state={state} key={group.key}
+        onClick={() => group.runId ? onWatch(group.runId) : onOpen(current.id)}>
+        <h3>{homeWords(plan?.title || group.title)}</h3><span className="home-state">{state}</span>
+        {step >= 0 && <span className="home-state">Step {step+1} of {plan.tasks.length}</span>}
+        <p>{homeLine(current,agents)}{current.input_payload?.score?.attempt > 1 ? ` (round ${current.input_payload.score.attempt})` : ""}</p>
+        <span>{group.runId ? "Tap to watch live" : "Tap to see more"}</span>
+      </button>;
+    })}</div>
+    {!running.length && <p>No work is running right now.</p>}
+    {jobs.length >= 200 && <p>Showing the most recent 200 jobs. Older work may be outside this view.</p>}
+    <button onClick={() => onNav("jobs")}>See all work</button>
+  </div>;
+}
+const HOME_STYLE = `
+ .home-view{line-height:1.6}.home-view h2{margin:24px 0 14px}.home-view h3{margin:0;font-size:17px}
+ .home-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px}
+ .home-view button,.home-view summary{min-height:48px;min-width:48px;padding:12px 18px;cursor:pointer;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text)}
+ .home-card{background:var(--surface);color:var(--text);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:14px;padding:20px;text-align:left;overflow-wrap:anywhere}
+ .home-card p{margin:12px 0;color:var(--text-2)}.home-actions{display:flex;gap:10px;flex-wrap:wrap}
+ .home-state,.home-count{display:inline-block;border:1px solid currentColor;border-radius:20px;padding:2px 10px;font-size:13px}
+ .home-card[data-state="Stuck"]{border-left-color:#b42318}.home-card[data-state="Needs you"]{border-left-color:#986000}
+ .home-view :focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+ .score-stages{display:flex;gap:18px;overflow-x:auto;scroll-snap-type:x proximity;padding:6px 3px 20px}
+ .score-stage{flex:1 0 240px;scroll-snap-align:start}.score-stage>.home-card{margin-top:12px}
+ @media(max-width:700px){nav[data-screen-label="Sidebar"]{width:68px!important}nav[data-screen-label="Sidebar"] button span,nav[data-screen-label="Sidebar"]>div:first-child>div{display:none}main>div[data-screen-label]{padding:18px 14px!important}.score-stage{flex-basis:85vw}}
+ @media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#161a21;--surface:#20242c;--surface-2:#2b303c;--text:#f0f2f6;--text-2:#ced3df;--text-3:#b8c0d0;--border:#596171}body{background:var(--bg);color:var(--text)}}
+ @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+`;
+function ScoreLive({runId, jobs, agents, onBack}) {
+  const [run, setRun] = useStateH(null);
+  const [error, setError] = useStateH(false);
+  useEffectH(() => {
+    let stopped = false;
+    setRun(null); setError(false);
+    const refresh = async () => {
+      try { const data = await window.BitCadenceStore.getScoreRun(runId); if (!stopped) {setRun(data);setError(!data);} }
+      catch (_) {if (!stopped) setError(true);}
+    };
+    refresh(); const timer = setInterval(refresh, 10000);
+    return () => {stopped = true; clearInterval(timer);};
+  }, [runId]);
+  return <div className="home-view" aria-live="polite">
+    <style>{HOME_STYLE}</style><button onClick={onBack}>Back to Home</button>
+    <h2>{run ? homeWords(run.title) : "Live view"}</h2>
+    <p>Drawn automatically from the plan. This view is read-only. Tap a card to see more.</p>
+    {error && <p role="alert">The live plan is unavailable. Check your connection and try again.</p>}
+    {!run && !error && <p>Loading the plan…</p>}
+    {run && <><p>Waiting · Working · Needs you · Stuck · Done · Stopped</p>
+      {run.partial && <p>Some job details are outside this view. The plan still shows every stage.</p>}
+      <div className="score-stages">{liveStages(run,jobs).map((stage,index) => <section className="score-stage" key={stage.id}>
+        <h3>{index+1} · {stage.title}</h3>
+        {stage.loop && <p>↻ {stage.loop}</p>}
+        {!stage.cards.length && <article className="home-card"><span className="home-state">Waiting</span><p>Waiting for the earlier steps.</p></article>}
+        {stage.cards.map(({job,phase,round}) => <article className="home-card" data-state={homeState(job,agents)} key={job.id}>
+          <h3>{homeWords(job.target_agent_role) || "Helper"}</h3><span className="home-state">{homeState(job,agents)}</span>
+          <p>{homeState(job,agents) === "Stuck" && ["leased","in_progress"].includes(job.status)
+            ? `No sign of life for ${HOME_STALL_MINUTES} minutes. Check on the helper.` : homeLine(job,agents)}</p><p>{phase === "review" ? "Review" : "Work"}, round {round}</p>
+          <details><summary>See more</summary><p>Job {job.id}</p></details>
+        </article>)}
+      </section>)}</div></>}
+  </div>;
+}
+
 // ----- Approvals inbox -----
 function Approvals({ jobs, tone, advanced, onOpen }) {
   const queue = jobs.filter((j) => j.status === "needs_approval");
@@ -517,6 +675,12 @@ function Approvals({ jobs, tone, advanced, onOpen }) {
   const [reason, setReason] = useStateH("");
   const [selectedIds, setSelectedIds] = useStateH(new Set());
   const [batchBusy, setBatchBusy] = useStateH(false);
+  const [blocked, setBlocked] = useStateH(false);
+  useEffectH(() => {
+    const on = () => setBlocked(true);
+    window.addEventListener("bc-approver-blocked", on);
+    return () => window.removeEventListener("bc-approver-blocked", on);
+  }, []);
   const selected = queue.find((j) => j.id === sel) || queue[0];
 
   const allSelected = queue.length > 0 && queue.every((j) => selectedIds.has(j.id));
@@ -582,6 +746,14 @@ function Approvals({ jobs, tone, advanced, onOpen }) {
           </div>
         ) : null}
       </div>
+
+      {blocked ? (
+        <div role="alert" style={{ border: "2px solid var(--st-failed-fg)", borderRadius: 12, padding: "14px 16px", marginBottom: 16, background: "var(--surface)" }}>
+          <div style={{ fontWeight: 700 }}><span aria-hidden="true">▲ </span>You can't approve this yet.</div>
+          <p style={{ margin: "6px 0 10px", color: "var(--text-2)", fontSize: 13.5 }}>Your account isn't set up as an approver. It's a one-key fix: run <b>bitcadence fix</b> in a terminal and answer Y.</p>
+          <Btn small onClick={() => setBlocked(false)}>Got it</Btn>
+        </div>
+      ) : null}
 
       {queue.length === 0 ? (
         <Card><EmptyState icon="✓" title={tone === "plain" ? "Nothing needs your OK" : "Approval queue is empty"} body="New approval requests will appear here and notify you." /></Card>

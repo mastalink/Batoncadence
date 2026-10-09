@@ -1,0 +1,3 @@
+$ bitcadence connect claude --yes
+I'll add BitCadence to Claude's settings (a backup is kept).
+Connected. Restart Claude to see it.

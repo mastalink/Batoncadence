@@ -67,6 +67,18 @@
     return res.json();
   }
 
+  // A missing approver right is never shown as "HTTP 403": say it in words, point at the
+  // one-key fix, and tell the Approvals page so it can show its own card.
+  const APPROVER_WORDS = "Your account isn't an approver yet. Run `bitcadence fix` in a terminal and answer Y.";
+  function plainFailure(e, fallback) {
+    const text = String((e && e.message) || e || "");
+    if (/^HTTP 403/.test(text)) {
+      try { window.dispatchEvent(new CustomEvent("bc-approver-blocked")); } catch (err) { /* old browser */ }
+      return APPROVER_WORDS;
+    }
+    return fallback ? fallback(text) : text;
+  }
+
   const exchangeFns = new Set();
 
   const TOAST_FOR = {
@@ -79,7 +91,7 @@
 
   async function poll() {
     try {
-      const [j, a] = await Promise.all([api("/api/jobs"), api("/api/agents")]);
+      const [j, a] = await Promise.all([api("/api/jobs?limit=200"), api("/api/agents")]);
       const normalized = (j || []).map(withWorkflow);
       const seenBefore = Object.keys(prevStatus).length > 0;
       normalized.forEach((job) => {
@@ -199,7 +211,7 @@
         await poll();
         startPolling();
         startWs();
-        toast("ok", "Live", "Connected to " + cfg.url);
+        toast("ok", "Live", "Connected. Your helpers are ready.");
         emit();
         return true;
       } catch (e) {
@@ -229,6 +241,10 @@
       : projectFetchedAt ? { ...projectCoverage } : { count: jobs.length, truncated: false, ceiling: 5000 },
     refreshProjectView,
     getAgents: () => connState === "demo" ? demo.getAgents() : agents.slice(),
+    async getScoreRun(runId) {
+      if (connState === "demo") return null;
+      return api("/api/score/autonomy/runs/" + encodeURIComponent(runId));
+    },
     getEvents(jobId) {
       if (connState === "demo") return demo.getEvents(jobId);
       if (!eventsCache[jobId]) {
@@ -245,17 +261,17 @@
     async approve(jobId, actor) {
       if (connState === "demo") return demo.approve(jobId, actor);
       try { await api("/api/jobs/" + jobId + "/approve", { method: "POST" }); await poll(); }
-      catch (e) { toast("err", "Approve failed", e.message); }
+      catch (e) { toast("err", "Approve failed", plainFailure(e)); }
     },
     async reject(jobId, actor, reason) {
       if (connState === "demo") return demo.reject(jobId, actor, reason);
       try { await api("/api/jobs/" + jobId + "/reject", { method: "POST", body: JSON.stringify({ reason: reason || "" }) }); await poll(); }
-      catch (e) { toast("err", "Reject failed", e.message); }
+      catch (e) { toast("err", "Reject failed", plainFailure(e)); }
     },
     async retryNow(jobId) {
       if (connState === "demo") return demo.retryNow(jobId);
       try { await api("/api/jobs/" + jobId + "/retry", { method: "POST" }); await poll(); toast("ok", "Re-queued", "Job sent back to the board."); }
-      catch (e) { toast("err", "Retry failed", e.message + " (retry needs an approver-role token)"); }
+      catch (e) { toast("err", "Retry failed", plainFailure(e, (t) => t + " (retry needs an approver-role token)")); }
     },
     async cancelJob(jobId, reason) {
       if (connState === "demo") return demo.cancelJob ? demo.cancelJob(jobId, reason) : null;
@@ -298,7 +314,7 @@
         toast(res.failure_count > 0 ? "info" : "ok", "Batch " + action, `Completed: ${res.success_count} succeeded, ${res.failure_count} failed.`);
         return res;
       } catch (e) {
-        toast("err", "Batch " + action + " failed", e.message);
+        toast("err", "Batch " + action + " failed", plainFailure(e));
         throw e;
       }
     },
@@ -311,39 +327,55 @@
         return res.job;
       } catch (e) { toast("err", "Create failed", e.message); }
     },
-    async submitWorkflow(name, steps) {
-      if (connState === "demo") return demo.submitWorkflow(name, steps);
-      // topo order: place steps whose deps are all already submitted
-      const remaining = steps.slice();
-      const idMap = {};
-      const run = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-      try {
-        let guard = 0;
-        while (remaining.length && guard++ < steps.length + 2) {
-          for (let i = remaining.length - 1; i >= 0; i--) {
-            const s = remaining[i];
-            const deps = (s.depends_on || []);
-            if (deps.every((d) => idMap[d])) {
-              const res = await api("/api/jobs", {
-                method: "POST",
-                body: JSON.stringify({
-                  title: s.title, description: s.instructions || "", target_agent_role: s.role,
-                  depends_on: deps.map((d) => idMap[d]),
-                  requires_approval: !!s.requires_approval,
-                  max_retries: s.max_retries || 0,
-                  escalate_to_role: s.escalate_to_role || null,
-                  input_payload: { workflow: { name, run, step: s.tmpId } },
-                }),
-              });
-              idMap[s.tmpId] = res.job.id;
-              remaining.splice(i, 1);
-            }
-          }
-        }
-        await poll();
-        toast("ok", "Workflow submitted", name + " — " + steps.length + " steps queued.");
-        return idMap;
-      } catch (e) { toast("err", "Workflow failed", e.message); return idMap; }
+    // "Ask for something": the gateway draws the plan (same planner as `bitcadence ask`).
+    async draftAsk(body) {
+      if (connState === "demo") throw new Error("Connect to your BitCadence in Settings first, then you can ask for something.");
+      const res = await api("/api/ask/plan", { method: "POST", body: JSON.stringify(body) });
+      return res.plan;
+    },
+    async startAsk(body) {
+      if (connState === "demo") throw new Error("Connect to your BitCadence in Settings first, then you can ask for something.");
+      const res = await api("/api/ask/start", { method: "POST", body: JSON.stringify(body) });
+      await poll();
+      toast("ok", "Approved", "Starting now.");
+      return res;
+    },
+    // Schedules page: same code as `bitcadence schedule`.
+    async schedulesList() {
+      return api("/api/schedules");
+    },
+    async schedulePreview(body) {
+      return api("/api/schedules/preview", { method: "POST", body: JSON.stringify(body) });
+    },
+    async addSchedule(body) {
+      return api("/api/schedules", { method: "POST", body: JSON.stringify(body) });
+    },
+    async setScheduleOn(id, on) {
+      return api("/api/schedules/" + encodeURIComponent(id) + "/enabled", { method: "POST", body: JSON.stringify({ on }) });
+    },
+    // Helpers page: same code as `bitcadence helpers` / `bitcadence fix`.
+    async helpersList() {
+      return api("/api/helpers");
+    },
+    async addHelper(body) {
+      const res = await api("/api/helpers/add", { method: "POST", body: JSON.stringify(body) });
+      await poll();
+      return res;
+    },
+    async fixHelpers(confirm) {
+      const res = await api("/api/helpers/fix", { method: "POST", body: JSON.stringify({ confirm: !!confirm }) });
+      if (confirm) await poll();
+      return res;
+    },
+    // Connect an AI page: same code as `bitcadence connect`.
+    async connectList() {
+      return api("/api/connect-ai");
+    },
+    async connectAction(app, verb) {
+      return api("/api/connect-ai/" + encodeURIComponent(app) + "/" + verb, { method: "POST", body: JSON.stringify({}) });
+    },
+    async connectOther() {
+      return api("/api/connect-ai/other");
     },
     async seedDemoPipeline() {
       if (connState === "demo") return demo.seedDemoPipeline();

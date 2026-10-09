@@ -1,0 +1,20 @@
+Say it the way you'd tell a person. We'll draw the plan and you check it.
+
+Here's the plan
+🔎 Look at open pull requests
+Remove
+If everything passes
+📝 Draft release notes
+Remove
+✋ Ask you before publishing (you decide)
+Remove
+
+Repeats: Every Friday at 9:00 AM
+
+Light tweaks only. To change the plan itself, edit your request and draft again.
+
+Remove a step
+Asking you at the end: on
+Repeats: Every Friday at 9:00 AM
+Approve and start
+Change my request
