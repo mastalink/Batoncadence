@@ -25,12 +25,27 @@ from typing import Any, Callable, Dict, List, Optional
 
 MAX_STEPS = 8
 
+MAX_REQUEST_CHARS = 2000
+
+# No \s* around the separators: a leading \s* is retried at every position of a
+# long run of spaces (polynomial time). Clauses are .strip()ped after the split.
 _SPLIT = re.compile(
-    r"\s*(?:,|;|\bthen\b|\band\b(?=\s+(?:ask me|check with me|confirm with me|get my ok|wait for me)\b))\s*", re.I)
+    r"(?:,|;|\bthen\b|\band\b(?=\s+(?:ask me|check with me|confirm with me|get my ok|wait for me)\b))", re.I)
 _LEAD_AND = re.compile(r"^(?:and|also|finally)\s+", re.I)
 _PASS_WORDS = r"(?:green|passing|passes|pass|ok|clean|good|successful)"
 _CONDITION = re.compile(rf"^if\s+(?:everything\s+|it\s+|they\s+|all\s+)?(?:is\s+|are\s+)?{_PASS_WORDS}\b[\s,]*", re.I)
-_ASK_ME = re.compile(r"^(?:ask me|check with me|confirm with me|get my ok|wait for me)\b\s*(?:to\s+|before\s+|if\s+)?(.*)$", re.I)
+# Only the fixed lead phrase is matched by regex; _gate_rest() trims the rest in
+# plain Python, so no \s* sits next to a (.*) that could backtrack against it.
+_ASK_ME = re.compile(r"^(?:ask me|check with me|confirm with me|get my ok|wait for me)\b", re.I)
+_GATE_JOINERS = ("to ", "before ", "if ")
+
+
+def _gate_rest(clause: str, lead_end: int) -> str:
+    rest = clause[lead_end:].lstrip()
+    for joiner in _GATE_JOINERS:
+        if rest.lower().startswith(joiner):
+            return rest[len(joiner):].lstrip()
+    return rest
 
 _ICONS = (
     (("research", "look", "find", "check", "review", "read", "search", "scan", "list"), "🔎"),
@@ -84,6 +99,8 @@ def draft_plan(request: str, role: str = "claude") -> Dict[str, Any]:
     request = " ".join((request or "").split())
     if not request:
         raise PlanError("Tell me what you want done.")
+    if len(request) > MAX_REQUEST_CHARS:
+        raise PlanError(f"That's too long. Keep it under {MAX_REQUEST_CHARS} characters.")
     clauses = [_LEAD_AND.sub("", c).strip() for c in _SPLIT.split(request)]
     clauses = [c for c in clauses if c][:MAX_STEPS]
     steps: List[dict] = []
@@ -96,7 +113,7 @@ def draft_plan(request: str, role: str = "claude") -> Dict[str, Any]:
         gate_match = _ASK_ME.match(clause)
         step_id = f"step-{len(steps) + 1}"
         if gate_match:
-            rest = gate_match.group(1)
+            rest = _gate_rest(clause, gate_match.end())
             steps.append({"id": step_id, "label": _gate_label(rest), "icon": "✋", "role": role,
                           "instructions": "Wait for the owner's OK" + (f" to {rest.strip().rstrip('.')}." if rest.strip() else "."), "depends_on": [],
                           "gate": True, "note": note})

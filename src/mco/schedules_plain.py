@@ -45,7 +45,10 @@ def _path() -> Path:
 # ── time and zone ───────────────────────────────────────────────────────────
 def parse_time(text: str) -> tuple[int, int]:
     """'2 AM', '2:30pm', '14:00' or '02:00' -> (hour, minute) on a 24-hour clock."""
-    m = re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\.?\s*", str(text or "").lower())
+    # Strip in Python instead of wrapping the pattern in \s* (CodeQL: polynomial
+    # backtracking on long runs of spaces); a real time is never 16+ characters.
+    cleaned = str(text or "").strip().lower()
+    m = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\.?", cleaned) if len(cleaned) <= 16 else None
     if not m:
         raise ScheduleWordsError(f"I didn't understand the time {text!r}.")
     hour, minute, meridiem = int(m.group(1)), int(m.group(2) or 0), m.group(3)

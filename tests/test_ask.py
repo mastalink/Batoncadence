@@ -268,3 +268,20 @@ def test_shipped_bundle_ask_page_end_to_end():
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "production Ask -> plan -> approve" in result.stdout
+
+
+def test_long_runs_of_spaces_plan_fast_and_gate_words_still_parse():
+    import time
+    from mco import ask_plan
+    started = time.perf_counter()
+    plan = ask_plan.draft_plan("fix the login bug" + " " * 1900 + "then ask me to deploy it")
+    assert time.perf_counter() - started < 1.0
+    assert [s["gate"] for s in plan["steps"]] == [False, True]
+    assert plan["steps"][1]["instructions"] == "Wait for the owner's OK to deploy it."
+
+
+def test_overlong_request_is_refused_plainly():
+    import pytest
+    from mco import ask_plan
+    with pytest.raises(ask_plan.PlanError):
+        ask_plan.draft_plan("x" * (ask_plan.MAX_REQUEST_CHARS + 1))

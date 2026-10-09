@@ -504,3 +504,14 @@ def test_console_settings_keep_tokens_ports_and_addresses_under_show_advanced():
     settings_fn = page.split("function Settings(")[1].split("function PlainSettings")[0]
     assert 'tone === "plain" ? <PlainSettings>{body}</PlainSettings> : body' in settings_fn
     assert "Gateway URL" in settings_fn and "Agent token" in settings_fn  # still reachable, inside {body}
+
+
+def test_parse_time_trims_spaces_and_rejects_padding_bombs():
+    import time
+    import pytest
+    from mco import schedules_plain
+    assert schedules_plain.parse_time("  2:30 pm  ") == (14, 30)
+    started = time.perf_counter()
+    with pytest.raises(schedules_plain.ScheduleWordsError):
+        schedules_plain.parse_time("2" + " " * 5000 + "x")
+    assert time.perf_counter() - started < 1.0

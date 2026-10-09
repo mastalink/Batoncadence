@@ -65,7 +65,10 @@ async def start_ask_plan(payload: dict, caller: dict = Depends(require_scopes("j
     if plan.get("repeat"):
         try:
             scheduled = await run_in_threadpool(ask_plan.save_repeat, plan)
-        except ask_plan.PlanError as exc:
-            return {"success": True, "run": run, "jobs": ids, "repeat_error": str(exc)}
+        except ask_plan.PlanError:
+            # Fixed wording: never echo exception text to the client (CodeQL).
+            return {"success": True, "run": run, "jobs": ids,
+                    "repeat_error": "The steps started, but I couldn't save the repeat. "
+                                    "Try words like 'every weekday at 2 AM'."}
     return {"success": True, "run": run, "jobs": ids, "scheduled": scheduled,
             "repeat": (plan.get("repeat") or {}).get("words")}
