@@ -3250,6 +3250,7 @@ def wake(
     gateway: Optional[str] = typer.Option(None, "--gateway", help="Gateway HTTP URL."),
     token: Optional[str] = typer.Option(None, "--token", help="Agent bearer token."),
     min_interval: float = typer.Option(10.0, "--min-interval", help="Minimum seconds between spawn starts."),
+    repoll_interval: float = typer.Option(300.0, "--repoll-interval", help="Seconds between timer re-checks of the inbox (0 disables)."),
 ):
     """Wake a local worker command when this agent's inbox has pending jobs."""
     from mco.waker import Waker, WakerAuthError, WakerTokenError, resolve_agent_token
@@ -3273,6 +3274,7 @@ def wake(
         gateway_url=resolved_gateway,
         token=resolved_token,
         min_interval=min_interval,
+        repoll_interval=repoll_interval,
     )
     console.print(f"[green]Waking {resolved_role}/{resolved_instance} from {waker.ws_url}[/green] "
                   "[dim](Ctrl-C to stop)[/dim]")
