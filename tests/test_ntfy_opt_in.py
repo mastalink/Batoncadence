@@ -23,6 +23,68 @@ def _clear_ntfy_state():
     ntfy_mod._last_sent.clear()
     ntfy_mod._push_sends.clear()
     ntfy_mod._batched.clear()
+    ntfy_mod._aws_topic_cache.clear()
+
+
+class _FakeSM:
+    def __init__(self, calls, fail=False):
+        self.calls, self.fail = calls, fail
+
+    def get_secret_value(self, SecretId):
+        self.calls.append(SecretId)
+        if self.fail:
+            raise TimeoutError("read timed out")
+        return {"SecretString": " N4vK2xP7mQ9sT8wY5cF1hL6dB3zR0aGj "}
+
+
+def _fake_boto3(monkeypatch, calls, fail=False, seen_config=None):
+    import sys
+    import types
+
+    class _Session:
+        def __init__(self, profile_name=None):
+            pass
+
+        def client(self, name, config=None):
+            if seen_config is not None:
+                seen_config.append(config)
+            return _FakeSM(calls, fail)
+
+    class _Config:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    # CI has no AWS SDK installed; fake both modules the lookup imports.
+    botocore = types.ModuleType("botocore")
+    botocore_config = types.ModuleType("botocore.config")
+    botocore_config.Config = _Config
+    botocore.config = botocore_config
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(Session=_Session))
+    monkeypatch.setitem(sys.modules, "botocore", botocore)
+    monkeypatch.setitem(sys.modules, "botocore.config", botocore_config)
+
+
+def test_aws_topic_call_is_bounded_and_cached(monkeypatch):
+    calls, configs = [], []
+    _fake_boto3(monkeypatch, calls, seen_config=configs)
+    cfg = _Cfg({"NTFY_TOPIC_SECRET_ID": "ntfy/topic"})
+    assert ntfy_mod._aws_vault_topic(cfg) == "N4vK2xP7mQ9sT8wY5cF1hL6dB3zR0aGj"
+    assert ntfy_mod._aws_vault_topic(cfg) == "N4vK2xP7mQ9sT8wY5cF1hL6dB3zR0aGj"
+    assert calls == ["ntfy/topic"]
+    assert configs[0].connect_timeout <= 5 and configs[0].read_timeout <= 10
+
+
+def test_aws_topic_failure_is_cached_briefly(monkeypatch):
+    calls = []
+    _fake_boto3(monkeypatch, calls, fail=True)
+    cfg = _Cfg({"NTFY_TOPIC_SECRET_ID": "ntfy/topic"})
+    assert ntfy_mod._aws_vault_topic(cfg) == ""
+    assert ntfy_mod._aws_vault_topic(cfg) == ""
+    assert calls == ["ntfy/topic"]
+    key = next(iter(ntfy_mod._aws_topic_cache))
+    ntfy_mod._aws_topic_cache[key] = ("", 0.0)
+    ntfy_mod._aws_vault_topic(cfg)
+    assert len(calls) == 2
 
 
 def test_topic_unset_means_off(monkeypatch):

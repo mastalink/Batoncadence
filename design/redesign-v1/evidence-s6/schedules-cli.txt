@@ -1,0 +1,15 @@
+$ bitcadence schedule
+Your schedules
+  1. Nightly dependency audit: Every day at 3:00 AM  (On; next: tomorrow at 3:00 AM)
+
+$ bitcadence schedule add --what "Nightly dependency audit" --when "every weekday at 2 AM" --yes
+Nightly dependency audit: Every weekday at 2:00 AM
+Saved. Every weekday at 2:00 AM.
+
+$ bitcadence schedule add --when "every second tuesday"
+I didn't understand "every second tuesday". Try "every weekday at 2 AM".
+
+$ bitcadence schedule
+Your schedules
+  1. Nightly dependency audit: Every day at 3:00 AM  (On; next: tomorrow at 3:00 AM)
+  2. Nightly dependency audit: Every weekday at 2:00 AM  (On; next: tomorrow at 2:00 AM)

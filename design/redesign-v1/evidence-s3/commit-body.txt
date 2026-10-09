@@ -1,0 +1,44 @@
+Implement Home and read-only live Score drawing (redesign slice 3)
+
+Home puts approvals and silent/unsuccessful work before running work. Worker
+sentences, state words, accurate plan step counts, and repeat rounds replace
+control-panel summaries. Score cards open the automatic run drawing, including
+undispatched stages and review/fix loops. Identifiers appear after a tap.
+
+Use HOME_STALL_MINUTES=10 for display-only silence flags, considering the most
+recent progress timestamp or worker heartbeat. Bound console and legacy flow
+job requests to 200. Extend the existing authenticated Score status router with
+a synchronous, org-scoped, read-only run drawing endpoint; hydrate at most 200
+matching jobs and omit prompts, credentials, and evidence from its response.
+
+Evidence captures (sanitized fixtures, real shipped console bundle):
+- design/redesign-v1/evidence-s3/home-desktop-light.png
+- design/redesign-v1/evidence-s3/home-desktop-light.txt
+- design/redesign-v1/evidence-s3/home-phone-dark.png
+- design/redesign-v1/evidence-s3/home-phone-dark.txt
+- design/redesign-v1/evidence-s3/live-desktop-light.png
+- design/redesign-v1/evidence-s3/live-desktop-light.txt
+- design/redesign-v1/evidence-s3/live-phone-dark.png
+- design/redesign-v1/evidence-s3/live-phone-dark.txt
+
+Validation commands (PowerShell):
+$env:PYTHONPATH='C:/AI/bc-redesign/src'
+$env:BC_TEST_BROWSER='1'
+python -m pytest --ignore=tests/test_install_sh_tty.py -o addopts= -q
+python -m pytest tests/test_home_live.py tests/test_console.py tests/test_project_dashboard.py -o addopts= -q
+python scripts/build_console.py verify
+git diff --check
+
+Results: full suite 1760 passed, 13 skipped (external PostgreSQL/PostgREST
+acceptance services unavailable), no failures; final Home browser/API/projection
+checks 7 passed; focused console/Projects/Home checks 33 passed. Bundle verify:
+9 sources round-trip, 0 differ. Whitespace check passed. Full suite transcript:
+design/redesign-v1/s3-test-results.txt.
+
+The separately run installer file reproduces its permitted Windows Bash timeout
+in test_pipe_no_prompt_survives. docs/wiki/_review/verify_cli_examples.py is
+absent on this branch. Wiki coverage: docs/wiki/Home.md, docs/wiki/Score-live.md.
+
+This is prepared commit text for the conductor. The worker was explicitly told
+not to commit; all changes remain on top of b5ad136d727a3b4e94bfc26741b34dd42fa53dcd
+in C:/AI/bc-redesign on score/bitcadence-redesign.

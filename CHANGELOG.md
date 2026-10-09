@@ -12,6 +12,38 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com); ver
   registration if no credential could be saved; cron errors are recognised by
   type, not by message text.
 
+### Changed
+- **Connect an AI** page and `bitcadence connect [claude|codex|gemini|antigravity|cursor|other]`:
+  one tap per app finds it and adds BitCadence to its connection settings, keeping a
+  `.bak` of the original first. Adds Codex (`config.toml`), Antigravity, `--disconnect`,
+  `--test` and a copyable code for "another app". New `/api/connect-ai` routes.
+
+- **Ask for something** replaces the drag-and-drop workflow builders. The console
+  page and `bitcadence ask` share one planner: a plain-language request, a drawn
+  plan, one Approve, and light tweaks (remove a step, always ask me, make it
+  repeat). New `/api/ask/plan` and `/api/ask/start`.
+
+- **Helpers** page and `bitcadence helpers`: friendly names, a health light with a
+  word, and what each helper is doing in plain words. Add a helper (same path as
+  `bitcadence helpers add`, the sign-in is never shown in full) and **Fix it**,
+  which finds a locked worker log or a duplicate wake process with a dry run first
+  and repairs only after a confirm (`bitcadence helpers fix`, also part of
+  `bitcadence fix`). New `/api/helpers`, `/api/helpers/add`, `/api/helpers/fix`.
+
+- **Schedules** page and `bitcadence schedule add|on|off`: pick what, how often and
+  what time, and see "Every weekday at 2:00 AM" instead of a cron line. Written to
+  `~/.mco/schedules.yaml` as text so comments survive. New `/api/schedules`.
+- **Approvals** show no raw 403. A missing approver right gives one sentence and a
+  one-key "Fix it? [Y/n]" in `bitcadence approve` and `bitcadence fix`; the console
+  explains it in words. The repair is terminal-only and local-database-only.
+- **Settings** use plain labels; the address and masked sign-in appear only under
+  `bitcadence settings --show-advanced` or **Show advanced** in the console.
+
+### Removed
+- The Flow Control page (`/flow`) and the console's visual workflow builder.
+  Workflow YAML still runs through `bitcadence ask --file` and `mco workflow`;
+  `mco gui --flow` now opens the console.
+
 ## [0.5.0rc1] - 2026-09-22
 
 Public preview of the new Jev-enabled BitCadence. This is a release candidate,

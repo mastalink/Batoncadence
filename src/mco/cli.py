@@ -281,6 +281,22 @@ def create_app() -> FastAPI:
     app_server.include_router(score_grants_router)
     app_server.include_router(score_autonomy_router)
 
+    # "Ask for something": the console's plain-language planner (same code as `bitcadence ask`).
+    from mco.orchestrator.ask_routes import ask_router
+    app_server.include_router(ask_router)
+
+    # Helpers page: friendly names, health light, add a helper, "Fix it" (same code as `bitcadence helpers`).
+    from mco.orchestrator.helpers_routes import helpers_router
+    app_server.include_router(helpers_router)
+
+    # Connect an AI page: one tap per app (same code as `bitcadence connect`).
+    from mco.orchestrator.connect_routes import connect_router
+    app_server.include_router(connect_router)
+
+    # Schedules page: "Every weekday at 2 AM" pickers (same code as `bitcadence schedule`).
+    from mco.orchestrator.schedules_routes import schedules_router
+    app_server.include_router(schedules_router)
+
     # Admin API: agent management, settings, workflow submission (Control Panel)
     from mco.orchestrator.admin_routes import (
         agents_admin_router,
@@ -332,14 +348,6 @@ def create_app() -> FastAPI:
     @app_server.get("/console", response_class=HTMLResponse, include_in_schema=False)
     async def console_ui() -> str:
         return get_console_html()
-
-    # Flow Control - the live DAG of the board: design intent, run state,
-    # approval gates, and the audit trail on one canvas.
-    from mco.console import get_flow_html
-
-    @app_server.get("/flow", response_class=HTMLResponse, include_in_schema=False)
-    async def flow_ui() -> str:
-        return get_flow_html()
 
     from mco.orchestrator.score_gate_routes import SCORE_GATE_HTML
 
@@ -830,6 +838,31 @@ def _load_schedules_or_exit(path=None):
         plain.fail(exc)
 
 
+@schedule_app.command("add")
+def schedule_add(
+    what: str = typer.Option("", "--what", help="What should run (its name). Leave out for a pick list."),
+    when: str = typer.Option("", "--when", help='In plain words, e.g. "every weekday at 2 AM".'),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Save without asking."),
+):
+    """Add a schedule by asking what, how often and what time."""
+    from mco import plain
+    raise typer.Exit(code=plain.do_schedule_add(what, when, yes=yes))
+
+
+@schedule_app.command("on")
+def schedule_on(name: str = typer.Argument(..., help="Which schedule (its name).")):
+    """Turn a schedule on."""
+    from mco import plain
+    raise typer.Exit(code=plain.do_schedule_toggle(name, True))
+
+
+@schedule_app.command("off")
+def schedule_off(name: str = typer.Argument(..., help="Which schedule (its name).")):
+    """Turn a schedule off."""
+    from mco import plain
+    raise typer.Exit(code=plain.do_schedule_toggle(name, False))
+
+
 @schedule_app.command("init")
 def schedule_init(
     force: bool = typer.Option(False, "--force", help="Overwrite an existing config."),
@@ -1066,7 +1099,7 @@ def _port_is_open(base_url: str, timeout: float = 2.0) -> bool:
 
 @app.command("gui")
 def open_gui(
-    flow: bool = typer.Option(False, "--flow", help="Open Flow Control (the live job-dependency canvas)."),
+    flow: bool = typer.Option(False, "--flow", hidden=True, help="Old option, kept so scripts keep working: opens the console."),
     dashboard: bool = typer.Option(False, "--dashboard", help="Open the minimal dashboard instead of the full console."),
     print_only: bool = typer.Option(False, "--print", help="Print the URL instead of opening a browser."),
 ):
@@ -1078,7 +1111,7 @@ def open_gui(
     import webbrowser
     config = get_config()
     base = (config.get("MCO_GATEWAY_URL") or "http://127.0.0.1:18789").rstrip("/")
-    page = "flow" if flow else ("dashboard" if dashboard else "console")
+    page = "dashboard" if dashboard and not flow else "console"
     url = f"{base}/{page}"
 
     # Say plainly when nothing is listening, rather than opening a dead tab.
@@ -2867,8 +2900,13 @@ def settings_cmd(
     key: str = typer.Argument(None, help="Setting key to read or write (blank = list all)."),
     value: str = typer.Argument(None, help="New value for the key (omit with --unset to clear)."),
     unset: bool = typer.Option(False, "--unset", help="Clear the key back to its default."),
+    show_advanced: bool = typer.Option(False, "--show-advanced", "--all",
+                                       help="Show every setting, the address and the masked sign-in."),
 ):
-    """View or change gateway settings (the Control Panel, from the terminal)."""
+    """View or change gateway settings. With nothing else, a plain summary."""
+    if key is None and not unset and value is None:
+        from mco import plain
+        raise typer.Exit(code=plain.do_settings(_gateway_client(), show_advanced=show_advanced))
     return manage_settings(key, value, unset)
 
 
@@ -3324,12 +3362,16 @@ def ask(
     request: str = typer.Argument("", help="What you'd like done, in plain words."),
     file: Optional[str] = typer.Option(None, "--file", help="Load a workflow YAML file instead."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Start without asking."),
+    remove: List[int] = typer.Option([], "--remove", help="Leave out step N of the plan (repeat for more)."),
+    ask_me: bool = typer.Option(False, "--ask-me", help="Always ask me at the end."),
+    repeat: str = typer.Option("", "--repeat", help='Make it repeat, e.g. "every Friday at 9 AM".'),
 ):
     """Say what you want done. You see the plan and OK it before anything runs."""
     from mco import plain
     if file:
         return submit_workflow_file(file, dry_run=False)
-    _run_plain(lambda: plain.do_ask(_gateway_client(), request, yes=yes))
+    _run_plain(lambda: plain.do_ask(_gateway_client(), request, yes=yes, remove=list(remove),
+                                    ask_end=ask_me, repeat=repeat))
 
 
 @app.command("fix")
@@ -3360,66 +3402,37 @@ def helpers_add(
     role: str = typer.Option(..., "--role", prompt="What is it good at (its role, e.g. codex)?"),
 ):
     """Add a helper (same as `mco register`, asking for what it needs)."""
-    from mco import plain
-    registered = False
-    prior = None
+    from mco import helpers as helpers_mod, plain
     try:
-        from mco.waker import agent_token_path
-        path = agent_token_path(name)  # validate before changing the registry
-        prior = _registry_row(name)
-        token = register_agent_identity(name=name, role=role)
-        registered = True
-
-        # Two places can hold the credential. The helper is usable if either
-        # does; only when neither does is the registration undone, so nobody is
-        # left with a registered agent whose token nobody holds.
-        in_store, store_error = False, None
-        try:
-            get_config().set(f"MCO_SECRET_AGENT_TOKEN_{name.upper()}", token, encrypt=True)
-            in_store = True
-        except Exception as e:  # noqa: BLE001
-            store_error = e
-        in_file, file_error = False, None
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            # Set restrictive permissions on creation, before writing the credential.
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as token_file:
-                os.chmod(path, 0o600)
-                token_file.write(token)
-            in_file = True
-        except Exception as e:  # noqa: BLE001
-            file_error = e
-        if not (in_store or in_file):
-            raise RuntimeError(f"Couldn't save the helper's credential: {store_error or file_error}") from (
-                store_error or file_error)
-
-        plain.say(f"Helper '{name}' added ({role}). Credential: mco_tok_...{token[-4:]}")
-        if in_store and in_file:
-            plain.say(f"Saved to {path} and the encrypted secret store.")
-        elif in_store:
-            plain.say(f"Saved to the encrypted secret store. (Couldn't write {path}: {file_error})")
-        else:
-            plain.say(f"Saved to {path}. (Couldn't use the encrypted secret store: {store_error})")
+        added = helpers_mod.add_helper(name, role)
+        plain.say(f"Helper '{added['name']}' added ({added['role']}). Credential: {added['credential']}")
+        plain.say(added.get("saved_message") or f"Saved to {added['saved_to']} and the encrypted secret store.")
+    except helpers_mod.HelperError as e:
+        plain.say(str(e))
+        raise typer.Exit(code=1)
     except typer.Exit:
         raise
     except Exception as e:
-        if registered:
-            try:
-                _undo_registration(name, prior)
-            except Exception:  # noqa: BLE001
-                plain.say(f"I couldn't undo the registration of '{name}'. Run: bitcadence fix")
         plain.fail(e)
+
+
+@helpers_app.command("fix")
+def helpers_fix(yes: bool = typer.Option(False, "--yes", "-y", help="Repair without asking.")):
+    """Find a locked notes file or a second copy of a helper, and offer to fix it."""
+    from mco import plain
+    _run_plain(lambda: plain.do_helpers_fix(_gateway_client(), yes=yes))
 
 
 @app.command("connect")
 def connect(
-    target: str = typer.Argument("", help="Which AI: claude, gemini or cursor. Leave out for a pick list."),
+    target: str = typer.Argument("", help="Which AI: claude, codex, gemini, antigravity, cursor or other. Leave out for a pick list."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before changing its settings."),
+    disconnect: bool = typer.Option(False, "--disconnect", help="Take BitCadence back out of that app."),
+    test: bool = typer.Option(False, "--test", help="Check that the app is set up."),
 ):
     """Connect an AI app to BitCadence."""
     from mco import plain
-    _run_plain(lambda: plain.do_connect(target, yes=yes), app_hint=target)
+    _run_plain(lambda: plain.do_connect(target, yes=yes, disconnect=disconnect, check=test), app_hint=target)
 
 
 @app.command("pause")

@@ -237,6 +237,54 @@ init();
 score_autonomy_router = APIRouter(prefix="/api/score/autonomy")
 
 
+@score_autonomy_router.get("/runs/{run_id}")
+def get_live_score_run(run_id: str, caller: dict = Depends(require_scopes("jobs:read"))):
+    """Read a run's drawing data without opening a writable conductor.
+
+    A synchronous handler keeps SQLite work on FastAPI's worker pool. Return
+    only display fields; prompts, credentials, resources and evidence stay out.
+    """
+    import json
+    import sqlite3
+    from contextlib import closing
+    from mco.config import get_config
+    from mco.orchestrator.score_sweep import get_database
+
+    path = get_database(get_config())
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="This plan is unavailable")
+    try:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+            db.row_factory = sqlite3.Row
+            run = db.execute("SELECT definition,status FROM runs WHERE id=? AND org=?",
+                             (run_id, caller.get("org_id") or "default")).fetchone()
+            if run is None:
+                raise HTTPException(status_code=404, detail="This plan is unavailable")
+            definition = json.loads(run["definition"])
+            dispatch = [dict(row) for row in db.execute(
+                "SELECT task,phase,job_id,status FROM dispatch WHERE run=? ORDER BY task,phase",
+                (run_id,))]
+    except (sqlite3.Error, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="The live plan cannot be read right now") from exc
+    from mco.orchestrator.routes import get_db_client
+    job_ids = list(dict.fromkeys(row["job_id"] for row in dispatch))
+    board = get_db_client()
+    rows = (board.table("agent_jobs").select("*").eq("org_id", caller.get("org_id") or "default")
+            .in_("id", job_ids[:200]).limit(200).execute().data or []) if board and job_ids else []
+    jobs = []
+    for row in rows:
+        job = {key: row[key] for key in ("id", "title", "status", "target_agent_role", "leased_by_instance_id",
+                                       "started_at", "updated_at") if key in row}
+        job["output_payload"] = {"progress": (row.get("output_payload") or {}).get("progress")}
+        job["input_payload"] = {"score": {"attempt": ((row.get("input_payload") or {}).get("score") or {}).get("attempt", 1)}}
+        jobs.append(job)
+    return {"run_id": run_id, "title": definition.get("title") or definition["id"], "jobs": jobs,
+            "partial": len(job_ids) > 200,
+            "status": run["status"], "tasks": [
+                {key: task[key] for key in ("id", "title", "depends_on", "on_reject", "role", "review_role") if key in task}
+                for task in definition["tasks"]], "dispatch": dispatch}
+
+
 @score_autonomy_router.get("")
 def get_autonomy_status(caller: dict = Depends(require_scopes("jobs:read"))):
     """Current state of autonomous execution, conductor loops, and active runs."""

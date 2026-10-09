@@ -1,0 +1,22 @@
+Ask for something replaces the workflow builders (redesign slice 4)
+
+A plain-language request, a drawn plan, one Approve, and light tweaks only
+(remove a step, always ask me, make it repeat). src/mco/ask_plan.py is the one
+planner: bitcadence ask (plain.do_ask) and the console's Ask page
+(/api/ask/plan, /api/ask/start) both call it and create identical chained jobs.
+Repeat saves a workflow file and a schedule that the real scheduler loads.
+
+Removed: the console WorkflowBuilder, the /flow page (flow.html) and
+docs/FLOW-CONTROL.md. Workflow YAML still runs via `bitcadence ask --file` and
+`mco workflow`; `mco gui --flow` still works and opens the console.
+
+Evidence captures (sanitized fixtures, real shipped bundle):
+- design/redesign-v1/evidence-s4/ask-write-desktop-light.png
+- design/redesign-v1/evidence-s4/ask-plan-desktop-light.png / .txt
+- design/redesign-v1/evidence-s4/ask-approved-desktop-light.png / .txt
+- design/redesign-v1/evidence-s4/ask-write-phone-dark.png
+- design/redesign-v1/evidence-s4/ask-plan-phone-dark.png / .txt
+- design/redesign-v1/evidence-s4/ask-approved-phone-dark.png / .txt
+
+Results: design/redesign-v1/s4-test-results.txt (1781 passed, 13 skipped).
+Wiki: docs/wiki/Ask.md. verify_cli_examples.py is absent on this branch.

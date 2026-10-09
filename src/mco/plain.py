@@ -22,19 +22,10 @@ WAITING = "needs_approval"
 RUNNING = {"leased", "in_progress"}
 KILL_SWITCH = "MCO_KILL_SWITCH"
 
-# Apps `bitcadence connect` knows how to find: name -> candidate config files.
+# Apps `bitcadence connect` knows how to find: see mco.connect_ai.
 def _connect_targets() -> dict[str, list[Path]]:
-    home = Path.home()
-    appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
-    return {
-        "claude": [
-            appdata / "Claude" / "claude_desktop_config.json",
-            home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
-            home / ".config" / "Claude" / "claude_desktop_config.json",
-        ],
-        "gemini": [home / ".gemini" / "settings.json"],
-        "cursor": [home / ".cursor" / "mcp.json"],
-    }
+    from mco import connect_ai
+    return connect_ai.targets()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,11 +183,15 @@ def _is_recent(job: dict, hours: int = 24) -> bool:
     return (datetime.now(timezone.utc) - when).total_seconds() <= hours * 3600
 
 
-def find_problems(snap: Snapshot, client=None) -> List[Problem]:
+def find_problems(snap: Snapshot, client=None, *, scan_helpers: bool = False) -> List[Problem]:
     """What is wrong, in plain words, with a repair when one is safe to run."""
     problems: List[Problem] = []
     if not snap.reachable:
         return problems
+    if scan_helpers:
+        problems.extend(approver_problems())
+    if scan_helpers:
+        problems.extend(helper_problems(snap.helpers))
     for helper in snap.helpers:
         if helper.get("state") == "broken":
             name = helper.get("instance_id") or helper.get("role") or "A helper"
@@ -228,6 +223,41 @@ def find_problems(snap: Snapshot, client=None) -> List[Problem]:
             hint="Start one with: bitcadence helpers add",
         ))
     return problems
+
+
+def approver_problems() -> List[Problem]:
+    """The account on this computer can't approve: found, and fixable in one key."""
+    from mco import approver
+
+    account = approver.own_account()
+    if not approver.is_missing(account):
+        return []
+    return [Problem(
+        friendly.not_approver().what,
+        "Fix it?",
+        lambda acct=account: approver.grant(acct),
+    )]
+
+
+def helper_problems(agents: List[dict], *, findings=None) -> List[Problem]:
+    """Locked logs and duplicate wake processes. Detection is a dry run; the repair
+    only runs when the person says yes."""
+    from mco import helpers
+
+    if findings is None:
+        try:
+            findings = helpers.scan(a.get("instance_id") for a in agents)
+        except Exception:  # noqa: BLE001 - a process scan must never break `fix`
+            findings = []
+    out = []
+    for f in findings:
+        out.append(Problem(
+            f.summary + " " + f.would,
+            f.question,
+            (lambda finding=f: " ".join(helpers.repair([finding], confirmed=True))),
+            hint="Run: bitcadence helpers fix",
+        ))
+    return out
 
 
 def _retry(client, job_id: str) -> str:
@@ -285,7 +315,9 @@ def _pick_role(snap: Snapshot) -> str:
     return roles[0] if roles else "claude"
 
 
-def do_ask(client, text: str, *, yes: bool = False) -> int:
+def do_ask(client, text: str, *, yes: bool = False, remove: Optional[List[int]] = None,
+           ask_end: bool = False, repeat: str = "") -> int:
+    from mco import ask_plan
     text = (text or "").strip()
     if not text:
         text = ask_text("What would you like done?")
@@ -296,24 +328,36 @@ def do_ask(client, text: str, *, yes: bool = False) -> int:
     if not snap.reachable:
         say((snap.error or friendly.translate(RuntimeError("unreachable"))).render())
         return 1
-    role = _pick_role(snap)
-    title = text if len(text) <= 70 else text[:67] + "..."
+    try:
+        plan = ask_plan.draft_plan(text, _pick_role(snap))
+        numbers = sorted(set(remove or []), reverse=True)  # highest first so numbers stay valid
+        ids = [plan["steps"][n - 1]["id"] for n in numbers if 1 <= n <= len(plan["steps"])]
+        if len(ids) != len(numbers):
+            raise ask_plan.PlanError(f"There is no step {max(numbers)}. The plan has {len(plan['steps'])}.")
+        plan = ask_plan.apply_tweaks(plan, remove=ids, ask_end=ask_end, repeat=repeat)
+    except ask_plan.PlanError as e:
+        say(str(e))
+        return 1
     say("Here's the plan:")
-    say(f"  Do: {title}")
-    say(f"  Who: your {role} helper")
+    for line in ask_plan.plan_lines(plan):
+        say(line)
+    say(f"  Who: your {plan['steps'][0]['role']} helper")
     say("  It waits for your OK before it runs.")
     if not confirm("Start this?", yes=yes):
         say("Okay, I didn't start anything.")
         return 0
-    res = client.send(
-        to_role=role, title=title, instructions=text,
-        requires_approval=True, max_retries=1,
-    )
-    job = (res or {}).get("job") or {}
-    if not (res or {}).get("success") or not job.get("id"):
+    try:
+        ask_plan.submit_plan(client.send, plan, first_step_waits=True)
+    except ask_plan.PlanError:
         say("That didn't go through.")
         say("Run: bitcadence fix")
         return 1
+    if plan.get("repeat"):
+        try:
+            ask_plan.save_repeat(plan)
+            say(f"Scheduled: {plan['repeat']['words']}. See it with: bitcadence schedule")
+        except ask_plan.PlanError as e:
+            say(f"Started, but I couldn't set the repeat. {e}")
     say("Started. It's waiting for your OK. Run `bitcadence approve` when you're ready.")
     return 0
 
@@ -332,13 +376,42 @@ def _match_job(waiting: List[dict], ref: str) -> Optional[dict]:
     return None
 
 
-def _approve_one(client, job: dict, snap: Snapshot) -> None:
-    client.approve(job["id"])
+def _approve_call(client, job_id: str, *, yes: bool = False):
+    """client.approve, with a missing approver right turned into the one-key fix."""
+    from mco import approver
+
+    try:
+        return client.approve(job_id)
+    except Exception as exc:  # noqa: BLE001
+        if friendly.translate(exc).kind != "not_approver":
+            raise
+    say(friendly.not_approver().what)
+    if not confirm("Fix it?", yes=yes):
+        say("Okay, nothing changed. Run: bitcadence fix")
+        raise _Declined()
+    try:
+        say(approver.grant())
+    except approver.CannotRepair as why:
+        say(str(why))
+        raise _Declined() from why
+    return client.approve(job_id)
+
+
+class _Declined(Exception):
+    """The person said no (or the fix is not possible); the message was already shown."""
+
+
+def _approve_one(client, job: dict, snap: Snapshot, *, yes: bool = False) -> bool:
+    try:
+        _approve_call(client, job["id"], yes=yes)
+    except _Declined:
+        return False
     say(f"Approved: {_title(job)}.")
     role = (job.get("target_agent_role") or "").lower()
     if role and role not in _online_roles(snap.helpers):
         err = friendly.no_helper_free()
         say(err.render())
+    return True
 
 
 def do_approve(client, job_ref: str = "", *, yes: bool = False) -> int:
@@ -353,11 +426,13 @@ def do_approve(client, job_ref: str = "", *, yes: bool = False) -> int:
         job = _match_job(snap.waiting, job_ref)
         if job is None:
             # An id we cannot see in the waiting list may still be valid.
-            res = client.approve(job_ref)
+            try:
+                res = _approve_call(client, job_ref, yes=yes)
+            except _Declined:
+                return 1
             say(f"Approved: {((res or {}).get('job') or {}).get('title') or job_ref}.")
             return 0
-        _approve_one(client, job, snap)
-        return 0
+        return 0 if _approve_one(client, job, snap, yes=yes) else 1
     if not interactive() and not yes:
         say(f"{len(snap.waiting)} waiting:")
         for i, job in enumerate(snap.waiting, 1):
@@ -367,7 +442,8 @@ def do_approve(client, job_ref: str = "", *, yes: bool = False) -> int:
     for job in snap.waiting:
         say(f"{_title(job)}")
         if confirm("Approve this?", yes=yes):
-            _approve_one(client, job, snap)
+            if not _approve_one(client, job, snap, yes=yes):
+                return 1
             continue
         reason = ask_text("What should change? (Enter to leave it waiting)")
         if reason:
@@ -387,7 +463,7 @@ def do_fix(client, *, yes: bool = False) -> int:
 
             return quiet.run_start(open_app=False, autostart=False)
         return 0
-    problems = find_problems(snap, client)
+    problems = find_problems(snap, client, scan_helpers=True)
     if not problems:
         say("Everything looks fine.")
         return 0
@@ -404,77 +480,240 @@ def do_fix(client, *, yes: bool = False) -> int:
     return 0
 
 
+_LIGHT_MARK = {"green": "(+)", "red": "(!)", "grey": "( )"}
+
+
 def do_helpers(client, *, as_json: bool = False) -> int:
+    from mco import helpers
+
     try:
-        helpers = client.agents() or []
+        agents = client.agents() or []
     except Exception as exc:  # noqa: BLE001
         say(friendly.translate(exc).render())
         return 1
     if as_json:
-        say(json.dumps(helpers, indent=2, default=str))
+        say(json.dumps(agents, indent=2, default=str))
         return 0
-    if not helpers:
+    if not agents:
         say("No helpers yet. Add one with: bitcadence helpers add")
         return 0
-    lights = {"working": "busy", "standby": "ready", "broken": "stuck", "offline": "offline", "disabled": "paused"}
-    say(f"Helpers ({len(helpers)})")
-    for h in helpers:
-        state = h.get("state") or h.get("effective_status") or "offline"
-        say(f"  {h.get('instance_id', '?'):<24} {h.get('role', ''):<12} {lights.get(state, state)}")
+    try:
+        findings = helpers.scan(a.get("instance_id") for a in agents)
+    except Exception:  # noqa: BLE001
+        findings = []
+    try:
+        active = [j for j in (client.jobs(limit=200) or []) if j.get("status") in ("leased", "in_progress")]
+    except Exception:  # noqa: BLE001 - "what it is doing" is a nicety
+        active = []
+    rows = helpers.describe(agents, active, findings)
+    say(f"Helpers ({len(rows)})")
+    for row in rows:
+        say(f"  {_LIGHT_MARK.get(row['light'], '( )')} {row['name']:<22} {row['word']:<14} {row['doing']}")
+    if findings:
+        say("Something needs fixing. Run: bitcadence helpers fix")
     return 0
 
 
-def do_schedules(*, as_json: bool = False) -> int:
-    from mco import cli
+def do_helpers_fix(client, *, yes: bool = False) -> int:
+    """Look first (changes nothing), then repair each problem only after a Y."""
+    from mco import helpers
+
+    try:
+        agents = client.agents() or []
+    except Exception as exc:  # noqa: BLE001
+        say(friendly.translate(exc).render())
+        return 1
+    findings = helpers.scan(a.get("instance_id") for a in agents)
+    if not findings:
+        say("Every helper looks fine.")
+        return 0
+    say(f"Found {len(findings)} problem{'s' if len(findings) != 1 else ''}.")
+    for finding in findings:
+        say(f"  {finding.summary}")
+        say(f"  {helpers.repair([finding])[0]}")
+        if confirm(f"  {finding.question}", yes=yes):
+            say("  " + " ".join(helpers.repair([finding], confirmed=True)))
+        else:
+            say("  Okay, left as it is.")
+    return 0
+
+
+def do_schedules(*, as_json: bool = False, add: bool = True) -> int:
+    """Schedules as sentences ("Every weekday at 2:00 AM"). In a terminal it then
+    offers to add one; scripts and pipes just get the list."""
+    from mco import schedules_plain as sp
 
     if as_json:
-        try:
-            launchers, schedules = cli._load_schedules_or_exit()
-        except SystemExit:
-            return 1
-        say(json.dumps({n: s.describe_trigger() for n, s in sorted(schedules.items())}, indent=2))
+        data = sp.list_schedules()
+        say(json.dumps({s["id"]: s["when"] for s in data["schedules"]}, indent=2))
         return 0
-    cli.list_schedules()
+    data = sp.list_schedules()
+    if data["problem"]:
+        say(data["problem"])
+        return 1
+    if not data["schedules"]:
+        say("Nothing is scheduled yet.")
+    else:
+        say("Your schedules")
+        for i, item in enumerate(data["schedules"], 1):
+            state = "On" if item["on"] else "Off"
+            say(f"  {i}. {item['name']}: {item['when']}  ({state}; next: {item['next']})")
+    if add and interactive():
+        if confirm("Add a schedule?", default=not data["schedules"]):
+            return do_schedule_add()
     return 0
 
 
-def do_connect(app: str = "", *, yes: bool = False) -> int:
+def _choose(question: str, labels: List[str]) -> int:
+    """Numbered pick; returns an index or -1 when the person backs out."""
+    say(question)
+    for i, label in enumerate(labels, 1):
+        say(f"  {i}. {label}")
+    answer = ask_text("Type a number:")
+    if answer.isdigit() and 1 <= int(answer) <= len(labels):
+        return int(answer) - 1
+    lowered = answer.lower()
+    for i, label in enumerate(labels):
+        if lowered and lowered in label.lower():
+            return i
+    return -1
+
+
+def do_schedule_add(what: str = "", when: str = "", *, yes: bool = False) -> int:
+    """Asks what, how often, what time. Prints the sentence, then saves. ``when`` is
+    plain words like "every weekday at 2 AM" and skips the questions."""
+    from mco import schedules_plain as sp
+
+    available = sp.launchers_available()
+    if not available:
+        say("There is nothing to schedule yet. Ask for something first: bitcadence ask \"...\"")
+        return 1
+    labels = [a["label"] for a in available]
+    if what:
+        match = next((a for a in available if what.lower() in (a["id"].lower(), a["label"].lower())), None)
+        match = match or next((a for a in available if what.lower() in a["label"].lower()), None)
+        if match is None:
+            say(f"I don't know {what!r}. I can schedule: {', '.join(labels)}.")
+            return 1
+    else:
+        if not interactive() and not yes:
+            say("Tell me what to run: bitcadence schedule add --what \"Nightly audit\" --when \"every weekday at 2 AM\"")
+            return 1
+        pick = 0 if len(available) == 1 else _choose("What should run?", labels)
+        if pick < 0:
+            say("Okay, nothing saved.")
+            return 1
+        match = available[pick]
+    try:
+        if when:
+            picked = sp.parse_phrase(when)
+            cron = sp.build_cron(picked["frequency"], picked["hour"], picked["minute"], picked["days"])
+        else:
+            if not interactive():
+                say('Tell me when: --when "every weekday at 2 AM"')
+                return 1
+            how = _choose("How often?", [sp.FREQUENCY_LABELS[f] for f in sp.FREQUENCIES])
+            if how < 0:
+                say("Okay, nothing saved.")
+                return 1
+            frequency, days = sp.FREQUENCIES[how], []
+            if frequency == "days":
+                names = ask_text("Which days? (for example: Monday, Wednesday, Friday)")
+                picked_days = sp.parse_phrase(f"every {names} at 12:00") if names else None
+                days = picked_days["days"] if picked_days else []
+            at = "" if frequency == "hour" else ask_text("At what time? (for example: 2 AM)")
+            cron = sp.plan(frequency, at or "02:00", days)["cron"]
+    except sp.ScheduleWordsError as exc:
+        say(str(exc))
+        return 1
+    words = sp.describe_cron(cron)
+    say(f"{match['label']}: {words}")
+    if not confirm("Save this?", yes=yes):
+        say("Okay, nothing saved.")
+        return 0
+    try:
+        sp.add_schedule(match["id"], cron)
+    except sp.ScheduleWordsError as exc:
+        say(str(exc))
+        return 1
+    say(f"Saved. {words}.")
+    return 0
+
+
+def do_schedule_toggle(name: str, on: bool) -> int:
+    from mco import schedules_plain as sp
+
+    data = sp.list_schedules()
+    ref = name.strip().lower()
+    item = next((s for s in data["schedules"] if ref in (s["id"].lower(), s["name"].lower())), None)
+    item = item or next((s for s in data["schedules"] if ref and ref in s["name"].lower()), None)
+    if item is None:
+        say(f"I couldn't find a schedule called {name!r}.")
+        return 1
+    try:
+        sp.set_enabled(item["id"], on)
+    except sp.ScheduleWordsError as exc:
+        say(str(exc))
+        return 1
+    say(f"{item['name']} is {'on' if on else 'off'}. {item['when']}.")
+    return 0
+
+
+def do_connect(app: str = "", *, yes: bool = False, disconnect: bool = False, check: bool = False) -> int:
+    from mco import connect_ai
     targets = _connect_targets()
     app = (app or "").strip().lower()
+    if app == "other":
+        say("Add this to the other app's connection settings:")
+        say(connect_ai.other_snippet())
+        return 0
     if not app:
         names = sorted(targets)
         say("Which AI do you want to connect?")
         for i, name in enumerate(names, 1):
-            say(f"  {i}. {name.capitalize()}")
+            say(f"  {i}. {connect_ai.label(name)}")
+        say(f"  {len(names) + 1}. Another app")
         choice = ask_text("Type a number or a name:")
         if not choice:
             return 1
+        if choice.isdigit() and int(choice) == len(names) + 1:
+            return do_connect("other")
         app = names[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(names) else choice.lower()
-    if app not in targets:
-        say(f"I don't know {app!r} yet. I can connect: {', '.join(sorted(targets))}.")
-        return 1
-    path = next((p for p in targets[app] if p.exists()), None)
-    if path is None:
-        err = friendly.app_not_found(app)
-        say(err.render())
-        return 1
+    name = connect_ai.label(app)
     try:
-        data = json.loads(path.read_text(encoding="utf-8") or "{}")
-    except ValueError:
-        say(f"{app.capitalize()}'s settings file isn't readable, so I left it alone.")
+        if app not in targets:
+            raise connect_ai.ConnectError(
+                f"I don't know {app!r} yet. I can connect: {', '.join(sorted(targets))}, other.", "unknown")
+        if check:
+            res = connect_ai.check(app, targets)
+            say(res["message"])
+            return 0 if res["ok"] else 1
+        if disconnect:
+            if not confirm(f"Take BitCadence out of {name}'s settings? (a backup is kept)", yes=yes):
+                say("Okay, nothing changed.")
+                return 0
+            res = connect_ai.disconnect(app, targets)
+            say(f"{name} is disconnected." if res["changed"] else f"{name} wasn't connected.")
+            return 0
+        path = next((p for p in targets[app] if p.exists()), None)
+        if path is None:
+            raise connect_ai.ConnectError("", "not_found")
+        already = next((r for r in connect_ai.status({app: targets[app]}) if r["connected"]), None)
+        if already:
+            say(f"{name} is already connected.")
+            return 0
+        say(f"I'll add BitCadence to {name}'s settings (a backup is kept).")
+        if not confirm("Go ahead?", yes=yes):
+            say("Okay, nothing changed.")
+            return 0
+        connect_ai.connect(app, targets)
+    except connect_ai.ConnectError as exc:
+        if exc.kind == "not_found":
+            say(friendly.app_not_found(app).render())
+        else:
+            say(str(exc))
         return 1
-    servers = data.setdefault("mcpServers", {})
-    if "bitcadence" in servers:
-        say(f"{app.capitalize()} is already connected.")
-        return 0
-    say(f"I'll add BitCadence to {app.capitalize()}'s settings (a backup is kept).")
-    if not confirm("Go ahead?", yes=yes):
-        say("Okay, nothing changed.")
-        return 0
-    path.with_suffix(path.suffix + ".bak").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    servers["bitcadence"] = {"command": sys.executable, "args": ["-m", "mco.cli", "mcp"]}
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    say(f"Connected. Restart {app.capitalize()} to see it.")
+    say(f"Connected. Restart {name} to see it.")
     return 0
 
 
@@ -494,9 +733,43 @@ def do_resume(client) -> int:
     return 0
 
 
-def do_settings(client) -> int:
-    from mco import cli
+def _setting_value(client, key: str):
+    for rows in ((client.settings() or {}).get("groups") or {}).values():
+        for row in rows:
+            if row.get("key") == key:
+                return row.get("value")
+    return None
 
+
+def mask_token(token: str) -> str:
+    return f"mco_tok_...{token[-4:]}" if token else "not set"
+
+
+def do_settings(client, *, show_advanced: bool = False) -> int:
+    """Everyday settings in plain labels. Tokens, ports and addresses appear only
+    with ``show_advanced`` (and then the token is masked)."""
+    from mco import cli
+    from mco.config import get_config
+
+    try:
+        paused = str(_setting_value(client, KILL_SWITCH)).lower() == "true"
+        phone = bool(_setting_value(client, "NTFY_TOPIC"))
+    except Exception as exc:  # noqa: BLE001 - translated for the person
+        say(friendly.translate(exc).render())
+        return 1
+    say("Settings")
+    say(f"  Pause everything: {'On (helpers are not taking new work)' if paused else 'Off'}")
+    say(f"  Tell me on my phone: {'On' if phone else 'Off'}")
+    if not show_advanced:
+        say("Pause or resume with `bitcadence pause` / `bitcadence resume`.")
+        say("For people who like details: bitcadence settings --show-advanced")
+        return 0
+    config = get_config()
+    say("")
+    say("Details")
+    say(f"  Where it listens: {config.get('MCO_GATEWAY_URL') or 'http://127.0.0.1:18789'}")
+    say(f"  This computer's sign-in: {mask_token((config.get('MCO_AGENT_TOKEN') or config.get('MCO_LOCAL_TOKEN') or '').strip())}")
+    say("")
     cli.manage_settings()
     return 0
 

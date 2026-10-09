@@ -1,0 +1,9 @@
+Slice 4 (S4-ask) validation, PYTHONPATH=C:/AI/bc-redesign/src BC_TEST_BROWSER=1
+python -m pytest --ignore=tests/test_install_sh_tty.py -o addopts= -q
+  1781 passed, 13 skipped (external services unavailable), 0 failed
+python scripts/capture_ask.py
+  desktop-light: production Ask -> plan -> approve; remove, ask-me, repeat, tap targets and plain words passed
+  phone-dark: production Ask -> plan -> approve; remove, ask-me, repeat, tap targets and plain words passed
+python scripts/build_console.py verify: 9 sources round-trip, 0 differ
+git diff --check: clean
+docs/wiki/_review/verify_cli_examples.py is absent on this branch.

@@ -1,0 +1,2 @@
+$ bitcadence connect claude --disconnect --yes
+Claude is disconnected.

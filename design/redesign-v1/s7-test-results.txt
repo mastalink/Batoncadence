@@ -1,0 +1,8 @@
+Slice 7 (S7-connect) validation, PYTHONPATH=C:/AI/bc-redesign/src
+python -m pytest tests --ignore=tests/test_install_sh_tty.py -o addopts= -q
+  1875 passed, 15 skipped (external services unavailable), 0 failed
+python scripts/capture_s7.py
+  text captures: design/redesign-v1/evidence-s7/{connect-claude,connect-codex,test-claude,gemini-missing,disconnect-claude,backups}.txt
+python scripts/build_console.py verify: 9 sources round-trip, 0 differ
+No browser screenshots this slice; the console page is covered by bundle-source tests.
+docs/wiki/_review/verify_cli_examples.py is absent on this branch.

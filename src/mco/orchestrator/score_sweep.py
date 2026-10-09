@@ -148,6 +148,63 @@ def failing_runs(bridge) -> dict[str, str]:
             FAILING_RUN_STATES)}
 
 
+FAILING_ALERTS_FILENAME = "failing-alerts.json"
+
+
+def _alert_id(run_id: str) -> str:
+    # ntfy bodies carry only an 8-character id; run ids share a long prefix
+    # ("bitcadence-redesign-2026...") but differ at the end.
+    clean = "".join(ch for ch in str(run_id) if ch.isalnum())
+    return clean[-8:] or "unknown"
+
+
+def alert_new_failures(failing: dict[str, str], config: Optional[dict] = None, notify=None) -> list[str]:
+    """Push once when a run becomes blocked or failed; return the runs pushed.
+
+    A blocked run is terminal and silent: redesign run -05 sat blocked for hours
+    on 2026-10-08 before anyone looked (incident #30). The runs already alerted
+    are kept next to the pause state so a gateway restart does not re-push them.
+    With no file yet, today's failures are recorded silently - turning the alert
+    on must not replay every old stuck run.
+    """
+    path = get_artifact_root(config) / FAILING_ALERTS_FILENAME
+    try:
+        seen = set(json.loads(path.read_text(encoding="utf-8")).get("alerted", []))
+        first = False
+    except FileNotFoundError:
+        seen, first = set(), True
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        logger.warning("Unable to read score failure alert state (%s)", type(exc).__name__)
+        seen, first = set(), True
+    current = {run_id for run_id in failing if not str(run_id).startswith("_")}
+    if first and not current:
+        # Nothing to seed from. Writing [] here would make the next pass treat
+        # every old stuck run as new (the 20-alert replay of 2026-10-08).
+        return []
+    fresh = [] if first else sorted(current - seen)
+    if notify is None:
+        from mco.notifiers.ntfy import notify_event
+        notify = notify_event
+    pushed = []
+    for run_id in fresh:
+        try:
+            notify("alert", _alert_id(run_id), project=str(run_id).split("-", 1)[0])
+            pushed.append(run_id)
+        except Exception as exc:  # noqa: BLE001 - an alert must never stop the sweep
+            logger.warning("Score failure alert for %s failed (%s)", run_id, type(exc).__name__)
+    # Forget runs that recovered or were cleared so a later failure alerts again.
+    keep = sorted((seen & current) | set(pushed) | (current if first else set()))
+    if first or keep != sorted(seen):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"alerted": keep}), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Unable to write score failure alert state (%s)", type(exc).__name__)
+    for run_id in pushed:
+        logger.warning("Score run %s is stuck; owner alert sent", run_id)
+    return pushed
+
+
 _sweep_paused: bool = False
 
 
