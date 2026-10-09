@@ -89,11 +89,10 @@ def test_live_read_is_org_scoped_read_only_and_includes_plan(monkeypatch, tmp_pa
     monkeypatch.setattr(score_sweep, 'get_database', lambda config: db)
     app = FastAPI()
     app.include_router(score_autonomy_router)
-    # Override the actual dependency object attached to this read route.
-    route = next(r for r in app.routes if r.path.endswith('/runs/{run_id}'))
-    dep = route.dependant.dependencies[0].call
+    # Override the shared auth dependency (newer FastAPI hides per-route dependencies).
+    from mco.orchestrator.auth import require_agent as dep
     assert TestClient(app).get('/api/score/autonomy/runs/run').status_code == 401
-    app.dependency_overrides[dep] = lambda: {'org_id':'ours'}
+    app.dependency_overrides[dep] = lambda: {'org_id':'ours','scopes':['jobs:read']}
     before = db.read_bytes()
     http = TestClient(app)
     response = http.get('/api/score/autonomy/runs/run')

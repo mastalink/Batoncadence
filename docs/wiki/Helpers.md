@@ -47,8 +47,8 @@ the extra copy. Without an answer, nothing is stopped. A program that is not
 BitCadence is never stopped; you are told to close it yourself.
 
 ```
-bitcadence helpers fix        # look, then ask for each problem
-bitcadence fix                # the same check, together with everything else
+bitcadence helpers fix
+bitcadence fix
 ```
 
 `--yes` skips the question for scripts. In the gateway API, `POST

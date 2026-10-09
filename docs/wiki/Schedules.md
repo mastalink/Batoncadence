@@ -11,8 +11,8 @@ hour) and the time. The sentence you will get is shown before you save. Your tim
 zone is detected from your computer.
 
 ```
-bitcadence schedule                  # list, then offer to add one
-bitcadence schedule add              # asks what, how often, what time
+bitcadence schedule
+bitcadence schedule add
 bitcadence schedule add --what "Nightly dependency audit" --when "every weekday at 2 AM"
 bitcadence schedule off "Nightly dependency"
 bitcadence schedule on "Nightly dependency"

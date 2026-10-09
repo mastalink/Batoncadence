@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from mco.orchestrator.auth import require_agent
 import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -177,9 +178,9 @@ def _app(monkeypatch, tmp_path):
     monkeypatch.setattr(board_routes, "get_db_client", lambda: board)
     app = FastAPI()
     app.include_router(ask_router)
-    for route in app.routes:
-        if getattr(route, "path", "").startswith("/api/ask"):
-            app.dependency_overrides[route.dependant.dependencies[0].call] = lambda: {
+    # Override the shared auth dependency; newer FastAPI wraps included routers,
+    # so per-route dependency objects are no longer listed in app.routes.
+    app.dependency_overrides[require_agent] = lambda: {
                 "org_id": "default", "instance_id": "me", "role": "human",
                 "scopes": ["jobs:read", "jobs:write"]}
     return TestClient(app), board
@@ -254,7 +255,7 @@ def test_console_ask_page_follows_the_design_rules():
 
 
 def test_flow_page_is_gone_but_gui_flag_still_works():
-    paths = {getattr(r, "path", None) for r in cli.create_app().routes}
+    paths = {getattr(r, "path", None) for r in cli.create_app().routes} | set(cli.create_app().openapi()["paths"])
     assert "/flow" not in paths and "/console" in paths and "/api/ask/plan" in paths
     assert not (ROOT / "src/mco/static/flow.html").exists()
     result = runner.invoke(cli.app, ["gui", "--flow", "--print"])

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
+from mco.orchestrator.auth import require_agent
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -107,11 +108,14 @@ def test_repair_changes_nothing_until_confirmed():
 
 def test_real_processes_duplicate_wake_and_locked_log(tmp_path):
     """Real subprocesses and real psutil: two copies of one helper, and a foreign holder of its log."""
+    # A Windows venv python.exe is a launcher that starts the real interpreter as a
+    # child, which shows every copy twice; run the base interpreter directly.
+    PY = getattr(sys, "_base_executable", sys.executable)
     log = tmp_path / "realhelper.log"
     code = "import time\ntime.sleep(60)"
-    argv = [sys.executable, "-c", code, "mco", "wake"]
+    argv = [PY, "-c", code, "mco", "wake"]
     kids = [subprocess.Popen(argv + ["--instance", "realhelper"]) for _ in range(2)]
-    holder = subprocess.Popen([sys.executable, "-c", "import sys,time\nf=open(sys.argv[1],'a')\ntime.sleep(60)",
+    holder = subprocess.Popen([PY, "-c", "import sys,time\nf=open(sys.argv[1],'a')\ntime.sleep(60)",
                                str(log), "mco"])
     try:
         deadline = time.time() + 15
@@ -247,9 +251,9 @@ def _app(monkeypatch, tmp_path, scopes=("agents:read", "agents:manage")):
     monkeypatch.setattr(board_routes, "get_agents", lambda caller: [agent("fixer"), agent("scout", "working")])
     app = FastAPI()
     app.include_router(helpers_router)
-    for route in app.routes:
-        if getattr(route, "path", "").startswith("/api/helpers"):
-            app.dependency_overrides[route.dependant.dependencies[0].call] = lambda: {
+    # Override the shared auth dependency; newer FastAPI wraps included routers,
+    # so per-route dependency objects are no longer listed in app.routes.
+    app.dependency_overrides[require_agent] = lambda: {
                 "org_id": "default", "instance_id": "me", "role": "human", "scopes": list(scopes)}
     return TestClient(app), board
 
@@ -298,7 +302,7 @@ def test_add_route_uses_the_shared_add_path_and_masks_the_credential(monkeypatch
 
 
 def test_the_gateway_serves_the_helpers_routes():
-    paths = {getattr(r, "path", None) for r in cli.create_app().routes}
+    paths = {getattr(r, "path", None) for r in cli.create_app().routes} | set(cli.create_app().openapi()["paths"])
     assert {"/api/helpers", "/api/helpers/add", "/api/helpers/fix"} <= paths
 
 

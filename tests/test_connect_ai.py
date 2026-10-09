@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from mco.orchestrator.auth import require_agent
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -142,9 +143,9 @@ def test_menu_connect_item_runs_the_same_function():
 def _http(scopes=("agents:read", "agents:manage")):
     app = FastAPI()
     app.include_router(connect_router)
-    for route in app.routes:
-        if getattr(route, "path", "").startswith("/api/connect-ai"):
-            app.dependency_overrides[route.dependant.dependencies[0].call] = lambda: {
+    # Override the shared auth dependency; newer FastAPI wraps included routers,
+    # so per-route dependency objects are no longer listed in app.routes.
+    app.dependency_overrides[require_agent] = lambda: {
                 "org_id": "default", "instance_id": "me", "role": "human", "scopes": list(scopes)}
     return TestClient(app)
 
@@ -178,7 +179,7 @@ def test_routes_map_problems_to_plain_errors(apps):
 
 
 def test_the_gateway_serves_the_connect_routes():
-    paths = {getattr(r, "path", None) for r in cli.create_app().routes}
+    paths = {getattr(r, "path", None) for r in cli.create_app().routes} | set(cli.create_app().openapi()["paths"])
     assert {"/api/connect-ai", "/api/connect-ai/{app}/connect", "/api/connect-ai/{app}/disconnect",
             "/api/connect-ai/{app}/test"} <= paths
 

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from mco.orchestrator.auth import require_agent
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -201,9 +202,9 @@ def test_the_menu_item_runs_the_plain_schedules(monkeypatch):
 def _app():
     app = FastAPI()
     app.include_router(schedules_router)
-    for route in app.routes:
-        if getattr(route, "path", "").startswith("/api/schedules"):
-            app.dependency_overrides[route.dependant.dependencies[0].call] = lambda: {
+    # Override the shared auth dependency; newer FastAPI wraps included routers,
+    # so per-route dependency objects are no longer listed in app.routes.
+    app.dependency_overrides[require_agent] = lambda: {
                 "org_id": "default", "instance_id": "me", "role": "human", "scopes": ["admin"]}
     return TestClient(app)
 
@@ -242,7 +243,7 @@ def test_routes_refuse_bad_input_in_plain_words(schedules_file):
 
 
 def test_the_gateway_serves_the_schedule_routes():
-    paths = {getattr(r, "path", None) for r in cli.create_app().routes}
+    paths = {getattr(r, "path", None) for r in cli.create_app().routes} | set(cli.create_app().openapi()["paths"])
     assert {"/api/schedules", "/api/schedules/preview", "/api/schedules/{schedule_id}/enabled"} <= paths
 
 
@@ -399,7 +400,7 @@ def test_the_repair_refuses_a_managed_database(monkeypatch):
 
 
 def test_no_gateway_route_can_grant_the_right():
-    paths = [getattr(r, "path", "") for r in cli.create_app().routes]
+    paths = [getattr(r, "path", "") for r in cli.create_app().routes] + list(cli.create_app().openapi()["paths"])
     assert not [p for p in paths if "approver" in p]
     routes = (ROOT / "src/mco/orchestrator/schedules_routes.py").read_text(encoding="utf-8")
     assert "approver" not in routes and "grant" not in routes
