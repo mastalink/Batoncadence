@@ -51,6 +51,6 @@ top (`--paper`, `--ink`, `--indigo`, `--signal`). The hero terminal
 animation script is at the bottom; edit the `SCRIPT` array to change the
 demo narrative.
 
-## Accessibility follow-up: captions
+## Captions
 
-The 20 s launch clip (`media/brag.mp4`) has an audio track but no caption file yet, and no transcript exists to caption from. Before the final cut, add `media/brag.en.vtt` and a `<track kind="captions" srclang="en" label="English" src="media/brag.en.vtt" default>` inside the demo `<video>` (WCAG 2.1 AA 1.2.2). The hero clip is muted and decorative.
+The final demo (`media/bitcadence-demo.mp4`, 2:48) has captions burned into the picture, so no `.vtt` track is needed (WCAG 1.2.2 met). It is click-to-play with sound, `preload="none"`, no autoplay. The hero clip (`media/brag.mp4`) is muted and decorative.
