@@ -8,9 +8,14 @@
 <meta property="og:type" content="website"><meta property="og:image" content="https://bitcadence.ai/media/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%234a4ac4'/%3E%3Cpath d='M28 72 L72 28' stroke='%23faf9f5' stroke-width='9' stroke-linecap='round'/%3E%3Ccircle cx='72' cy='28' r='8' fill='%23ff7a18'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;1,9..144,300&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
+@font-face{font-family:'Fraunces';font-style:italic;font-weight:300;font-display:swap;src:url(fonts/Fraunces-italic-300.woff2) format('woff2')}
+@font-face{font-family:'Fraunces';font-style:normal;font-weight:300;font-display:swap;src:url(fonts/Fraunces-normal-300.woff2) format('woff2')}
+@font-face{font-family:'Fraunces';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/Fraunces-normal-500.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/Inter-normal-400.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/Inter-normal-500.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url(fonts/Inter-normal-600.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/JetBrainsMono-normal-400.woff2) format('woff2')}
 :root{--paper:#faf9f5;--ink:#1c1b18;--mute:#6b675c;--line:#e4e0d3;--indigo:#4a4ac4;--brass:#b88a1f;--brass-ink:#8f6a12;--orange:#ff7a18;--night:#14130f;
 --serif:"Fraunces",Georgia,serif;--sans:Inter,system-ui,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
@@ -30,7 +35,7 @@ nav .links{display:flex;gap:26px;margin-left:auto;font-size:.9rem}
 nav .links a{color:var(--mute);text-decoration:none}
 .btn{display:inline-block;padding:13px 26px;border-radius:999px;font:500 .95rem var(--sans);text-decoration:none;border:1px solid var(--ink)}
 .btn.primary{background:var(--ink);color:var(--paper)}.btn.ghost{color:var(--ink)}
-.ver{font:400 .75rem var(--mono);color:var(--brass);border:1px solid var(--brass);padding:2px 9px;border-radius:99px}
+.ver{font:400 .75rem var(--mono);color:var(--brass-ink);border:1px solid var(--brass-ink);padding:2px 9px;border-radius:99px;display:inline-flex;align-items:center;min-height:24px;text-decoration:none}
 .hero{background:var(--night);color:#ece8da;position:relative;overflow:hidden;padding:0}
 .hero svg.field{position:absolute;inset:0;width:100%;height:100%}
 .hero .wrap{position:relative;min-height:760px;display:flex;flex-direction:column;justify-content:center;padding-top:90px;padding-bottom:90px}
@@ -74,16 +79,16 @@ footer .wrap{display:flex;gap:40px;justify-content:space-between;flex-wrap:wrap}
 footer a{color:#c9c4b3}
 @media(max-width:820px){
  .wrap{padding:0 20px}section{padding:72px 0}
- nav .links{display:none}nav .btn{margin-left:auto;padding:9px 18px}
+ nav .links{display:none}nav .btn{margin-left:auto;padding:9px 18px}nav .wrap{gap:10px}
  .hero .wrap{min-height:680px}
  .scale,.trio,.install,.split{grid-template-columns:1fr}.split{gap:34px}
  .chairs{grid-template-columns:1fr 1fr}.chairs div:nth-child(2){border-right:0}.chairs div:nth-child(-n+2){border-bottom:1px solid var(--line)}
 }
 
 
-a:focus-visible,.btn:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
+a:focus-visible,.btn:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--indigo);outline-offset:3px}
+.hero :focus-visible,.dark :focus-visible,footer :focus-visible,nav :focus-visible{outline-color:var(--orange)}
 .skip{position:absolute;left:-999px}.skip:focus{left:12px;top:12px;background:#fff;padding:8px 12px;z-index:50}
-.ver{color:var(--brass-ink);border-color:var(--brass-ink);text-decoration:none}
 .clip{margin-top:40px;max-width:560px;border:1px solid #2e2c25;border-radius:12px;overflow:hidden;box-shadow:0 30px 60px -30px #000}
 .clip video{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#000}
 @media(max-width:899px){.clip{display:none}}
@@ -94,7 +99,7 @@ a:focus-visible,.btn:focus-visible,button:focus-visible,summary:focus-visible{ou
 .faq{max-width:760px}
 .faq details{border-top:1px solid var(--line);padding:18px 0}.faq details:last-child{border-bottom:1px solid var(--line)}
 .faq summary{cursor:pointer;font:400 1.25rem var(--serif)}.faq p{color:var(--mute);margin:12px 0 0;max-width:680px}
-@media(prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}.reveal{opacity:1;transform:none;transition:none}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}.reveal{opacity:1;transform:none;transition:none}}
 </style></head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -177,6 +182,7 @@ a:focus-visible,.btn:focus-visible,button:focus-visible,summary:focus-visible{ou
 </div></section>
 <hr class="rule">
 
+<!-- TODO(final cut): add <track kind="captions"> for the audio; see website/README.md -->
 <section id="demo"><div class="wrap">
  <div class="eyebrow">See it march</div><h2>The launch clip, with sound.</h2>
  <div class="shot demo reveal" style="margin-top:40px;border-color:#2e2c25"><video controls playsinline preload="none" poster="media/brag-poster.jpg" src="media/brag.mp4" aria-label="BitCadence launch clip, 20 seconds"></video></div>
