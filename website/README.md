@@ -50,3 +50,7 @@ Everything lives in `index.html` — design tokens are CSS variables at the
 top (`--paper`, `--ink`, `--indigo`, `--signal`). The hero terminal
 animation script is at the bottom; edit the `SCRIPT` array to change the
 demo narrative.
+
+## Captions
+
+The final demo (`media/bitcadence-demo.mp4`, 2:48) has captions burned into the picture, so no `.vtt` track is needed (WCAG 1.2.2 met). It is click-to-play with sound, `preload="none"`, no autoplay. The hero clip (`media/brag.mp4`) is muted and decorative.
