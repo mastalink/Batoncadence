@@ -6,7 +6,7 @@ Status: design + static mockup only. `website/` is untouched. Mockup: `mockup.ht
 
 BitCadence is the **drum major**. The logo is already a baton (indigo tile, white stroke, orange tip), so the baton is the site's one recurring motif and the only thing that is ever orange. Every agent is an instrument. **Drumline** keeps the shared beat and memory. The fleet marches as one.
 
-The point of the page: BitCadence conducts **all** LLMs, not four. Claude, Codex, Gemini/Antigravity and Grok are the first chairs; the same cue reaches 4, 40 or 400 agents on any model or vendor, cloud or local (Codex runs on Beast and on the Mac). Tagline unchanged: **Every agent. One beat.**
+The point of the page: BitCadence conducts **all** LLMs, not four. Claude, Codex, Gemini/Antigravity and Grok are the first chairs; the same cue reaches 4, 40 or 400 agents on any model or vendor, cloud or local (Codex, Claude Code, OpenCode, Cursor and Grokbot run on Linux, Windows or macOS). Tagline unchanged: **Every agent. One beat.**
 
 Tone: classy, cinematic, editorial. Not cartoony, no clip-art, no SaaS gradient blobs, no band emoji. The metaphor is carried by geometry (formations of points of light) and by copy, never by illustrations of trumpets.
 
@@ -60,7 +60,7 @@ All motion is transform/opacity only, 60 fps, and fully disabled under `prefers-
 
 ## 7. Sound
 
-Optional, **off by default**, one unobtrusive "Sound" toggle in the hero. No autoplay audio. Direction: epic chorus with a marching drumline and brass, building as the band grows (choir plus snare / tenor / bass-drum cadence, thickening at the 40 and 400 stages), about 20 s, loop-safe tail. Source: generate with **ACE-Step on the Mac Studio** (or another properly licensed source); keep the prompt, seed, model version and license note in `assets/AUDIO-PROVENANCE.md`. No unlicensed tracks. The same cut is the music bed of the launch clip; narration (if any) stays separate, Higgs v2 local.
+Optional, **off by default**, one unobtrusive "Sound" toggle in the hero. No autoplay audio. Direction: epic chorus with a marching drumline and brass, building as the band grows (choir plus snare / tenor / bass-drum cadence, thickening at the 40 and 400 stages), about 20 s, loop-safe tail. Source: generate with **ACE-Step run locally** (or another properly licensed source); keep the prompt, seed, model version and license note in `assets/AUDIO-PROVENANCE.md`. No unlicensed tracks. The same cut is the music bed of the launch clip; narration (if any) stays separate, Higgs v2 local.
 
 ## 8. Asset list
 
@@ -83,7 +83,7 @@ Static, no build step, no framework (same as today). Target LCP under 2 s on mob
 
 1. Sound toggle in the hero, or music only inside the clip?
 2. Is the Windows `install.ps1` one-liner the primary CTA, or the release download page?
-3. OK to name Codex's two hosts ("Beast", "the Mac") on the public page, or keep it generic ("your own machines")? The mockup says "On Beast and on the Mac"; a generic line is safer.
+3. Naming (decided 2026-10-10): never show the owner's machine or worker names; use public model, tool and platform names, in a varied band.
 
 ## 11. Next stages
 
